@@ -93,3 +93,71 @@ They are one file. `EVERYDAY`, `GUARDED`, `BLOCKED` and `BLOCKED_RANGES` in
 `nibelokal/safety.py` are plain dictionaries — move a register between them, or
 set `allow_guarded_writes: false` in `config.yaml` to leave only the everyday
 tier. Just move things deliberately, and read the row above before you do.
+
+## Appendix: what the heating offset actually does
+
+The offset (register 40031, menu 1.1.1) is the control people reach for first
+and understand least, so this is what it does, with sources.
+
+### What NIBE documents
+
+From the S735 installer manual (IHB SV 2220-1, p. 31), repeated verbatim in the
+S1155 and S1255 manuals and in NIBE's own FAQ:
+
+> An offset of the heating curve means that the supply temperature changes by the
+> same amount for all outdoor temperatures, e.g. a curve offset of +2 steps
+> increases the supply temperature by 5 °C at all outdoor temperatures.
+
+Three things follow, all documented:
+
+- **Plus is warmer.** Menu 1.1.1: "To increase or decrease the indoor
+  temperature, increase or decrease the value in the display."
+- **It is a parallel shift**, not a change of slope. NIBE uses the word
+  *parallellförskjutning* explicitly elsewhere, describing what SG Ready does.
+- **The limits cut it off.** "Because the supply temperature cannot be calculated
+  higher than the set maximum value or lower than the set minimum value, the
+  heating curve flattens out at these temperatures" (p. 31). Min supply is menu
+  1.30.4, max is 1.30.6.
+
+On size, NIBE gives two different numbers for two different things, and both are
+approximate: about **2.5 °C of supply temperature per step** (the example above),
+and about **one degree indoors per step** — with the caveat that "the number of
+steps required to change the indoor temperature by one degree depends on your
+heating system. Usually one step is enough but in some cases several may be
+required" (p. 37).
+
+### What NIBE does not document
+
+**Whether the offset still applies when the curve is set to 0** — that is, when
+your own curve points are in force. Seven NIBE manuals were checked; the own-curve
+section (menu 1.30.7) says nothing about it in either direction.
+
+**How quickly the calculated supply temperature follows a change.** Nothing in
+any manual describes ramping or filtering of register 31018.
+
+### What we measured
+
+On an S735-family pump running an own curve (curve = 0), min supply 26 °C, no room
+sensor, 13 °C outdoors, holding each offset for six minutes and sampling every ten
+seconds:
+
+| Offset | Calculated supply |
+|---|---|
+| −6 | 26.0 °C — pinned exactly at min supply |
+| 0 | 30.4 °C |
+| +6 | 39.0 °C |
+
+So on this pump: **the offset does apply to an own curve**, plus is warmer, and
+one step is worth roughly **1.5 °C of supply temperature** — the same order as
+NIBE's example, not the same number. Their text says "e.g.", not "equals".
+
+**The ramp is the practical finding.** After setting +6 the value moved 29.5 →
+30.3 → 32.8 → 35.5 → 38.1 → 39.0 over about five minutes. An earlier measurement
+that read the register ten seconds after each write concluded 0.2 °C per step and
+was wrong by a factor of eight. If you check whether a write "worked" by reading
+the calculated supply straight afterwards, you will measure the ramp, not the
+setting.
+
+Downwards, −6 hit 26.0 °C immediately and stayed there — the minimum supply, doing
+exactly what the manual says it does. On an own curve already sitting near its
+floor in mild weather, lowering the offset does nothing at all.

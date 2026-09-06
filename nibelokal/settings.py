@@ -29,8 +29,11 @@ GROUPS: list[dict] = [
              "0 betyder egen kurva: då är det punkterna nedan som gäller och "
              "kurvnumret ignoreras."),
             (40031, "Värmeoffset",
-             "Flyttar hela kurvan upp eller ner. Ett steg ≈ en grad inomhus. "
-             "Det här är rätt reglage när huset känns fel i alla väder."),
+             "Plus ger varmare hus, minus svalare. NIBE kallar det en "
+             "parallellförskjutning: framledningen ändras lika mycket vid alla "
+             "utetemperaturer. Ungefär en grad inomhus per steg, men hur många steg "
+             "som behövs beror på ditt värmesystem. Rätt reglage när huset känns fel "
+             "i alla väder — och nedåt tar det stopp vid min framledning."),
             (40046, "Egen kurva P1 (−30 °C ute)", "Framledning när det är −30 ute."),
             (40045, "Egen kurva P2 (−20 °C ute)", "Framledning när det är −20 ute."),
             (40044, "Egen kurva P3 (−10 °C ute)",

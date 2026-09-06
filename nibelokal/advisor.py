@@ -14,7 +14,11 @@ This is not a model and not a prediction. It is two things:
 2. **The standard rule for which knob to turn**, which depends entirely on
    *when* the house feels wrong:
 
-       wrong in all weather      -> offset  (moves the whole curve up or down)
+       wrong in all weather      -> offset  (parallel shift of the whole curve;
+                                    NIBE: "the supply temperature changes by the
+                                    same amount for all outdoor temperatures",
+                                    +2 steps about +5 C -- roughly 1 C indoors
+                                    per step, depending on the emitters)
        wrong only when it's cold -> the curve's slope (or the cold points of a
                                     custom curve)
        wrong only when it's mild -> the mild end of the curve
@@ -311,9 +315,11 @@ def advise(pump, feeling: str, when: str, store=None,
             current=offset,
             proposed=offset + direction,
             why="Huset känns %s i alla väder, och då är det hela kurvan som ligger "
-                "fel — inte dess lutning. Offset flyttar hela kurvan. Tumregeln är "
-                "att ett steg motsvarar ungefär en grad inomhus, men utslaget syns "
-                "tydligare i kyla än i milt väder."
+                "fel — inte dess lutning. NIBE beskriver offset som en "
+                "parallellförskjutning: framledningen ändras lika mycket vid alla "
+                "utetemperaturer, och deras exempel är att +2 steg höjer den ungefär "
+                "5 °C, vilket brukar bli runt en grad inomhus per steg. Hur många "
+                "steg som krävs för en grad beror på ditt klimatsystem."
                 % ("för kallt" if direction > 0 else "för varmt"),
         ))
         return advice

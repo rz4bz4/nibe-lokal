@@ -727,10 +727,16 @@ async function nudgeOffset(step, button) {
   if (!heat || heat.offset === null) return;
   const to = heat.offset + step;
   const dir = step > 0 ? 'varmare' : 'svalare';
+  const golv = heat.min_supply != null ? heat.min_supply + ' °C' : 'min framledning';
   if (!confirm(`Värmeoffset ${heat.offset} → ${to}\n\n` +
-               `Plus = varmare, minus = svalare. Det här gör huset ${dir}, ungefär en grad ` +
-               `som tumregel — mindre i milt väder, mer i kyla.\n\n` +
-               `Huset svarar långsamt: utvärdera om ${heat.wait || 'ett dygn'}, inte om en timme.`))
+               `Plus = varmare, minus = svalare. Det här gör huset ${dir}.\n\n` +
+               `Offset flyttar hela värmekurvan lika mycket vid alla utetemperaturer — ` +
+               `ungefär en grad inomhus per steg, men hur många steg som behövs beror ` +
+               `på ditt värmesystem.` +
+               (step < 0 ? `\n\nNedåt tar det stopp vid ${golv}: ligger kurvan redan ` +
+                           `där gör en sänkning ingenting.` : '') +
+               `\n\nHuset svarar långsamt: utvärdera om ${heat.wait || 'ett dygn'}, ` +
+               `inte om en timme.`))
     return;
   await act(button,
     () => post('/api/write', {address: 40031, value: to, expect: heat.offset, confirm: true}),

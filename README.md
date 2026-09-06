@@ -171,12 +171,43 @@ whole game:
 
 | When it's wrong | What's actually wrong | What the app suggests |
 |---|---|---|
-| In all weather | The curve sits too low or too high | Offset, one step (≈ 1 °C indoors) |
+| In all weather | The curve sits too low or too high | Offset, one step |
 | Only when it's cold out | The curve's slope | Curve +1, or the own-curve points that bracket the current outdoor temperature |
 | Only in mild weather | The mild end of the curve | A flatter curve **and** offset the other way, applied together |
 
 Turning the offset up in November is what makes the house too warm in March. That
 is the mistake the table above exists to prevent.
+
+### What the offset actually does
+
+NIBE's own wording, from the S735 installer manual (IHB SV 2220-1, p. 31) and
+repeated in their FAQ:
+
+> An offset of the heating curve means that the supply temperature changes by the
+> same amount for all outdoor temperatures, e.g. a curve offset of +2 steps
+> increases the supply temperature by 5 °C at all outdoor temperatures.
+
+So: **plus is warmer**, it is a parallel shift rather than a change of slope, and
+NIBE's worked example is about 2.5 °C of supply temperature per step. Separately
+they put it at roughly one degree indoors per step, while noting that "the number
+of steps required to change the indoor temperature by one degree depends on your
+heating system" — underfloor heating and radiators do not answer the same way.
+
+Two things cut the effect short, both documented: the calculated supply
+temperature is never allowed below **min supply** (menu 1.30.4) or above **max
+supply** (menu 1.30.6), so a curve already sitting on either limit will not move.
+
+**One thing NIBE does not document at all:** whether the offset still applies when
+the curve is set to 0, i.e. when your own curve points are in force. Seven NIBE
+manuals say nothing about it either way. Measured on one S735-family pump running
+an own curve, it does apply, at roughly 1.5 °C of supply temperature per step —
+the same order as NIBE's example, not the same number.
+
+**And a trap worth knowing:** the calculated supply temperature *ramps* to a new
+offset over about five minutes. Reading it ten seconds after a write measures the
+ramp, not the setting — an earlier measurement here got 0.2 °C per step that way
+and was wrong by a factor of eight. [docs/registers.md](docs/registers.md) has the
+full measurement and the sources.
 
 It is not a model and makes no predictions. Alongside the rule it uses what the
 pump can say about itself, and several of those facts silently invalidate the
