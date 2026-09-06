@@ -18,10 +18,14 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import advisor, settings
+from . import advisor, autotune, settings
+from .alarms import Watcher
+from .homey import Homey
 from .pump import DASHBOARD
 from .safety import Refused, tier
+from .spot import Plan, Tibber
 from .store import Poller, Store
+from .weather import Weather
 
 log = logging.getLogger("nibelokal.server")
 
@@ -50,6 +54,51 @@ def _log_writes(store, writes) -> bool:
     except Exception as exc:                              # noqa: BLE001
         log.warning("write succeeded but could not be logged: %s", exc)
         return False
+
+
+def _not_started(feature: str, why: str | None) -> dict:
+    """The body an endpoint answers with when its provider would not build.
+
+    Still HTTP 200 and still the same shape as every other failure here: the
+    web app renders one Swedish sentence in a panel instead of showing the
+    household a stack trace, and the pump page keeps working around it.
+    """
+    return {
+        "ok": False,
+        "error": "%s kunde inte startas: %s. Kontrollera inställningarna i "
+                 "config.yaml." % (feature, why or "okänt fel"),
+    }
+
+
+def build_providers(pump, cfg: dict, store: Store) -> dict:
+    """The optional integrations, built once at startup.
+
+    Once, not per request: each of these holds a cache and a lock, and building
+    a fresh one for every GET would throw the cache away and turn a page
+    refresh into a round trip to Homey, SMHI and Tibber.
+
+    Each is built behind its own try. A constructor that trips over a bad
+    config value costs that one feature -- its endpoint then answers ok: false
+    with the reason -- rather than stopping the app that heats the house.
+    """
+    providers: dict = {"homey": None, "weather": None, "tibber": None,
+                       "plan": None, "watcher": None, "errors": {}}
+    builders = (
+        ("homey", lambda: Homey.from_config(cfg)),
+        ("weather", lambda: Weather(cfg)),
+        ("tibber", lambda: Tibber(cfg)),
+        ("plan", lambda: Plan(cfg)),
+        # The watcher writes its own tables into the same database, which is
+        # the one step here that can fail on a read-only disk.
+        ("watcher", lambda: Watcher(store, pump, cfg)),
+    )
+    for name, build in builders:
+        try:
+            providers[name] = build()
+        except Exception as exc:                          # noqa: BLE001
+            providers["errors"][name] = str(exc)
+            log.warning("optional feature %s not available: %s", name, exc)
+    return providers
 
 
 def _is_ip_literal(host: str) -> bool:
@@ -184,13 +233,19 @@ class Handler(BaseHTTPRequestHandler):
                     "value": row.get("value"),
                     "error": row.get("error"),
                 })
-            return self._json({
+            # Additive on purpose: registers, polled_at, poll_error and
+            # register_map keep their names and their meanings, because the web
+            # app reads them by name and an older cached index.html has to keep
+            # working against a newer server.
+            body = {
                 "pump": {"host": pump.host, "port": pump.port},
                 "register_map": pump.registry.source,
                 "polled_at": poller.last_ok,
                 "poll_error": poller.last_error,
                 "registers": out,
-            })
+            }
+            body.update(self._summaries())
+            return self._json(body)
 
         if path == "/api/heating":
             return self._json(advisor.diagnose(pump, store, self.ctx["emitters"]))
@@ -251,7 +306,208 @@ class Handler(BaseHTTPRequestHandler):
                 "auto_every_hours": poller.backup_hours,
             })
 
+        # -- optional integrations ---------------------------------------
+        # All five answer 200 with {"ok": false, "error": "<svensk mening>"}
+        # when the service is unconfigured, down or slow. A missing forecast is
+        # not a server error, and a 5xx here would put a red banner over a page
+        # whose actual job -- the pump -- is working fine.
+
+        if path == "/api/indoor":
+            homey = self.ctx.get("homey")
+            if homey is None:
+                return self._json(_not_started("Inomhusgivarna (Homey)",
+                                               self._provider_error("homey")))
+            return self._json(homey.snapshot())
+
+        if path == "/api/weather":
+            weather = self.ctx.get("weather")
+            if weather is None:
+                return self._json(_not_started("Väderprognosen (SMHI)",
+                                               self._provider_error("weather")))
+            return self._json(weather.snapshot())
+
+        if path == "/api/spot":
+            tibber, plan = self.ctx.get("tibber"), self.ctx.get("plan")
+            if tibber is None or plan is None:
+                return self._json(_not_started("Elpriserna (Tibber)",
+                                               self._provider_error("tibber")))
+            prices = tibber.snapshot()
+            # The plan is built from these exact prices rather than from a
+            # second fetch: two calls a second apart can straddle the moment
+            # tomorrow's prices land, and a plan that disagrees with the table
+            # printed next to it is worse than no plan.
+            result = {"ok": bool(prices.get("ok")), "prices": prices,
+                      "plan": plan.build(prices)}
+            if not result["ok"]:
+                result["error"] = prices.get("error") or "Inga elpriser att visa."
+            return self._json(result)
+
+        if path == "/api/alarms":
+            watcher = self.ctx.get("watcher")
+            if watcher is None:
+                return self._json(_not_started("Larmbevakningen",
+                                               self._provider_error("watcher")))
+            limit = max(1, min(500, int(q.get("limit", ["50"])[0])))
+            return self._json({
+                "ok": True,
+                "active": watcher.active(),
+                "history": watcher.history(limit),
+                # False means alarms are still recorded and shown here, but
+                # nothing leaves the machine. That is the default.
+                "notify": watcher.notifier is not None,
+                "last_error": watcher.last_error,
+            })
+
+        if path == "/api/autotune":
+            return self._json(self._autotune(q))
+
         return self._json({"error": "not found"}, 404)
+
+    # -- optional integrations --------------------------------------------
+
+    def _provider_error(self, name: str):
+        return (self.ctx.get("provider_errors") or {}).get(name)
+
+    def _autotune(self, q) -> dict:
+        """The curve analysis, over stored history. Never raises past here."""
+        pump = self.ctx["pump"]
+        store: Store = self.ctx["store"]
+        days = max(1, min(400, int(q.get("days", [str(self.ctx["autotune_days"])])[0])))
+
+        # The pump's current settings are what lets a proposal name a register
+        # and a from-value. A pump that does not answer is not a reason to
+        # refuse the analysis -- autotune degrades to the diagnosis without the
+        # proposal, and says so itself.
+        current, settings_error = None, None
+        try:
+            current = advisor.diagnose(pump, store, self.ctx["emitters"])
+        except Exception as exc:                          # noqa: BLE001
+            settings_error = str(exc)
+            log.warning("autotune: could not read the pump's settings: %s", exc)
+
+        target = self.ctx["autotune_target"]
+        source = "config" if target is not None else None
+        if target is None and current is not None:
+            # The pump's own room setpoint, when nobody has said otherwise. It
+            # is what the household set on the display, which is the closest
+            # thing to a stated wish that exists without a config key.
+            target = current.get("room_setpoint")
+            source = "pump" if target is not None else None
+
+        result = autotune.analyse(store.autotune_history(days), target, current,
+                                  self.ctx["emitters"])
+        # Additive keys, so a caller can say what the verdict was measured
+        # against without going and reading the config itself.
+        result["target_indoor"] = target
+        result["target_source"] = source
+        result["history_days"] = days
+        result["settings_error"] = settings_error
+        return result
+
+    def _summaries(self) -> dict:
+        """Header-line summaries for /api/status, plus what is configured.
+
+        Deliberately small: a couple of numbers each, not the whole snapshot.
+        The full data has its own endpoint, and /api/status is the one the page
+        polls on a timer.
+        """
+        homey = self.ctx.get("homey")
+        weather = self.ctx.get("weather")
+        watcher = self.ctx.get("watcher")
+        tibber = self.ctx.get("tibber")
+        configured = {
+            "indoor": bool(homey is not None and homey.configured),
+            "weather": bool(weather is not None and weather.configured),
+            "spot": bool(tibber is not None and tibber.configured),
+            # Alarm watching needs no credentials: the register is polled with
+            # everything else. Only the push off the machine is optional.
+            "alarms": watcher is not None,
+            "notify": bool(watcher is not None and watcher.notifier is not None),
+            "autotune": bool(homey is not None and homey.configured
+                             and self.ctx.get("autotune_target") is not None),
+        }
+        return {
+            "indoor": self._indoor_summary(homey),
+            "weather": self._weather_summary(weather),
+            "alarm": self._alarm_summary(watcher),
+            "features": configured,
+        }
+
+    def _indoor_summary(self, homey) -> dict:
+        # Safe to ask on every status: the answer is cached in the Homey object
+        # and the poller refreshes it in the background, so this is a dict
+        # lookup rather than a request to the LAN.
+        if homey is None or not homey.configured:
+            return {"ok": False, "configured": False, "average": None,
+                    "sensors": 0, "stale": 0, "at": None, "error": None}
+        try:
+            snap = homey.snapshot()
+            sensors = snap.get("sensors") or []
+            return {
+                "ok": bool(snap.get("ok")),
+                "configured": True,
+                "average": snap.get("average"),
+                "at": snap.get("at"),
+                "sensors": len(sensors),
+                "stale": sum(1 for s in sensors if s.get("stale")),
+                "error": snap.get("error") or snap.get("warning"),
+            }
+        except Exception as exc:                          # noqa: BLE001
+            return {"ok": False, "configured": True, "average": None,
+                    "sensors": 0, "stale": 0, "at": None, "error": str(exc)}
+
+    def _weather_summary(self, weather) -> dict:
+        empty = {"ok": False, "configured": False, "t": None, "effective": None,
+                 "symbol_sv": "", "min_24h": None, "trend": "", "at": None,
+                 "error": None}
+        if weather is None or not weather.configured:
+            return empty
+        # Unlike Homey, this one is never fetched from here. Homey is on the
+        # LAN and kept warm by the poller; SMHI is on the internet and warmed
+        # by nobody, so a cold cache would make one status call an hour wait
+        # out the timeout of the endpoint everything else polls. Only what has
+        # already been fetched by /api/weather is summarised.
+        snap = getattr(weather, "_cached", None)          # noqa: SLF001
+        if not isinstance(snap, dict):
+            return dict(empty, configured=True,
+                        error="Prognosen är inte hämtad ännu.")
+        now = snap.get("now") or {}
+        summary = snap.get("summary") or {}
+        return {
+            "ok": bool(snap.get("ok")),
+            "configured": True,
+            "t": now.get("t"),
+            "effective": now.get("effective"),
+            "symbol_sv": now.get("symbol_sv") or "",
+            "min_24h": summary.get("min_24h"),
+            "trend": summary.get("trend") or "",
+            "at": snap.get("at"),
+            "error": snap.get("note"),
+        }
+
+    def _alarm_summary(self, watcher) -> dict:
+        if watcher is None:
+            return {"ok": False, "active": 0, "code": None, "text": "",
+                    "severity": None, "notify": False,
+                    "error": self._provider_error("watcher")}
+        try:
+            active = watcher.active()
+        except Exception as exc:                          # noqa: BLE001
+            return {"ok": False, "active": 0, "code": None, "text": "",
+                    "severity": None, "notify": watcher.notifier is not None,
+                    "error": str(exc)}
+        first = active[0] if active else {}
+        return {
+            "ok": True,
+            "active": len(active),
+            # The oldest standing alarm, which is the one that started the
+            # trouble; the rest are at /api/alarms.
+            "code": first.get("code"),
+            "text": first.get("text") or "",
+            "severity": first.get("severity"),
+            "notify": watcher.notifier is not None,
+            "error": watcher.last_error,
+        }
 
     # -- POST endpoints ---------------------------------------------------
 
@@ -275,9 +531,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/write":
             if isinstance(body.get("changes"), list) and body["changes"]:
-                results = pump.write_all(body["changes"], _flag(body.get("confirm")))
-                logged = _log_writes(store, results)
-                return self._json({"changes": results, "logged": logged})
+                # write_all already answers {"changes": [...], "partial": bool}.
+                # Wrapping that whole dict in another "changes" key -- which an
+                # earlier version did -- buried the list one level down and hid
+                # "partial" entirely: the browser got an object where it expected
+                # an array, the write log was handed dict keys instead of write
+                # records and silently stored nothing, and a half-applied pair
+                # reported as a clean success. Answer the dict as it stands.
+                result = pump.write_all(body["changes"], _flag(body.get("confirm")))
+                result["logged"] = _log_writes(store, result["changes"])
+                return self._json(result)
             if "address" not in body:
                 raise ValueError("address is required")
             result = pump.write(int(body["address"]), body.get("value"),
@@ -317,15 +580,63 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+def _optional_number(value):
+    """A number out of the config, or None for "not set". Never raises."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
+                  allowed_hosts=None, backup_dir: str | None = None) -> dict:
+    """Everything a request needs, assembled once.
+
+    Its own function so that a test can build the exact dict the server runs
+    with. A handler reading a key the real context does not have is a 500 in
+    the field and a passing test everywhere else.
+    """
+    from .config import resolve
+
+    return {
+        "pump": pump,
+        "allowed_hosts": set() if allowed_hosts is None else allowed_hosts,
+        "store": store,
+        "poller": poller,
+        "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
+        "emitters": cfg.get("emitters") or "radiators",
+        "backup_dir": backup_dir or resolve(cfg, "backup_dir", base)
+                      or os.path.join(base, "backup"),
+        "web_root": os.path.join(base, "web"),
+        "homey": providers.get("homey"),
+        "weather": providers.get("weather"),
+        "tibber": providers.get("tibber"),
+        "plan": providers.get("plan"),
+        "watcher": providers.get("watcher"),
+        "provider_errors": providers.get("errors") or {},
+        # Coerced here rather than in the handler: "" is how the config says
+        # "not set", and float("") is an exception on every request otherwise.
+        "autotune_target": _optional_number(cfg.get("autotune_target_indoor")),
+        "autotune_days": int(cfg.get("autotune_days") or 30),
+    }
+
+
 def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     from .config import resolve
 
     store = Store(resolve(cfg, "database", base) or os.path.join(base, "nibe.db"),
                   cfg["history_days"])
     backup_dir = resolve(cfg, "backup_dir", base) or os.path.join(base, "backup")
+    providers = build_providers(pump, cfg, store)
+    # The watcher and the indoor feed ride along on the poll the pump is
+    # already answering: one Modbus read, and the alarm registers are in
+    # DASHBOARD, so watching costs nothing extra on the wire.
     poller = Poller(pump, store, DASHBOARD, cfg["poll_seconds"],
                     backup_dir if cfg.get("auto_backup_hours") else None,
-                    float(cfg.get("auto_backup_hours") or 24))
+                    float(cfg.get("auto_backup_hours") or 24),
+                    watcher=providers["watcher"], indoor=providers["homey"])
     poller.start()
 
     # A Host header that is not one of these means someone resolved a name of
@@ -347,16 +658,8 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         except OSError:
             pass
 
-    Handler.ctx = {
-        "pump": pump,
-        "allowed_hosts": allowed,
-        "store": store,
-        "poller": poller,
-        "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
-        "emitters": cfg.get("emitters") or "radiators",
-        "backup_dir": backup_dir,
-        "web_root": os.path.join(base, "web"),
-    }
+    Handler.ctx = build_context(pump, cfg, base, store, poller, providers,
+                                allowed, backup_dir)
 
     httpd = ThreadingHTTPServer((listen, port), Handler)
     where = "http://%s:%d/" % ("localhost" if listen in ("0.0.0.0", "") else listen, port)
@@ -369,6 +672,22 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         print("                 Set auth_token in config.yaml to require a token.")
     if poller.backup_dir:
         print("  auto backup  : every %g h into %s" % (poller.backup_hours, backup_dir))
+    # Say which of the optional features are on. An integration that is
+    # silently off looks exactly like one that is broken, and this is the line
+    # that tells them apart without opening the browser.
+    extras = []
+    if providers["homey"] is not None and providers["homey"].configured:
+        extras.append("inomhus (Homey)")
+    if providers["weather"] is not None and providers["weather"].configured:
+        extras.append("väder (SMHI)")
+    if providers["tibber"] is not None and providers["tibber"].configured:
+        extras.append("elpris (Tibber)")
+    if providers["watcher"] is not None:
+        extras.append("larmbevakning%s" % ("" if providers["watcher"].notifier
+                                           else " (utan notiser)"))
+    print("  extras       : %s" % (", ".join(extras) if extras else "inga"))
+    for name, why in sorted(providers["errors"].items()):
+        print("  %-13s: kunde inte startas - %s" % (name, why))
     if allowed:
         print("  accepts Host : any IP address, plus %s" % ", ".join(sorted(allowed)))
         print("                 add other names with allowed_hosts in config.yaml")

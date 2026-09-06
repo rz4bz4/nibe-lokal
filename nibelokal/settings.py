@@ -31,9 +31,11 @@ GROUPS: list[dict] = [
             (40031, "Värmeoffset",
              "Plus ger varmare hus, minus svalare. NIBE kallar det en "
              "parallellförskjutning: framledningen ändras lika mycket vid alla "
-             "utetemperaturer. Ungefär en grad inomhus per steg, men hur många steg "
-             "som behövs beror på ditt värmesystem. Rätt reglage när huset känns fel "
-             "i alla väder — och nedåt tar det stopp vid min framledning."),
+             "utetemperaturer. Ett steg är ungefär 2,5 grader på framledningen och "
+             "ungefär en grad inomhus — hur många steg som behövs beror på ditt "
+             "värmesystem. Rätt reglage när huset känns fel i alla väder. Nedåt tar "
+             "det stopp vid min framledning, och framledningen rampar i fem minuter "
+             "efter ändringen: mät inte direkt efteråt."),
             (40046, "Egen kurva P1 (−30 °C ute)", "Framledning när det är −30 ute."),
             (40045, "Egen kurva P2 (−20 °C ute)", "Framledning när det är −20 ute."),
             (40044, "Egen kurva P3 (−10 °C ute)",

@@ -70,3 +70,127 @@ emitters: "radiators"
 database: "nibe.db"
 backup_dir: "backup"
 timeout: 5.0
+
+# --- optional integrations ------------------------------------------------
+#
+# Everything below this line is optional and switched off until you fill it in.
+# A fresh clone with none of it set starts, polls the pump, and serves the web
+# app exactly as before -- the extra panels simply do not appear. If one of
+# these services is down, misconfigured or slow, its own endpoint says so in
+# plain Swedish and the rest of the app carries on. None of them can stop the
+# pump from being read or written.
+
+# --- indoor temperature, from Homey ---------------------------------------
+#
+# The pump only knows the room temperature if a room sensor is wired to it, and
+# most installations have none. If you run a Homey Pro it already knows what
+# every room is doing. This reads it; it never writes anything to Homey.
+#
+# The token is a *local* API key, made on the Homey itself:
+#   my.homey.app -> Settings -> System (Advanced) -> API keys -> New API key,
+#   scope homey.device.readonly (homey.zone.readonly as well if you want zone
+#   names). The key is shown once. This is not the Athom cloud login.
+# homey_host: "192.168.1.20"     # IP or hostname; http:// is added if missing
+# homey_token: ""
+
+# Which sensors to trust, by device name or id, comma separated. Empty means
+# every device that reports a temperature -- convenient for a first look, and
+# almost never right: door and window sensors sit in the draught on an outside
+# wall and read several degrees off the room they live in. Once this number is
+# allowed to influence heating, that bias becomes fuel.
+# homey_devices: "Sovrum, Vardagsrum, Kontor"
+
+# A sensor with a flat battery does not disappear; Homey keeps serving its last
+# value forever. Readings older than this are marked stale and left out of the
+# average, so a sensor frozen at 24 C in June cannot hold the heating down all
+# winter.
+# homey_max_age_minutes: 60
+# homey_timeout: 5.0
+# homey_cache_seconds: 120     # Homey is a small box; do not ask it every poll
+
+# --- alarms ---------------------------------------------------------------
+#
+# The pump knows it has a problem the moment it has one (register 31976), and
+# says nothing. A pump that has quietly dropped to the immersion heater still
+# keeps the house warm; the first sign is the electricity bill six weeks later.
+#
+# Watching is always on and costs nothing: the alarm register is polled with
+# everything else and every alarm and all-clear is written to the database and
+# shown at /api/alarms. Only the push off the machine needs credentials.
+#
+# Pushover: an application token and your user key, both from pushover.net --
+# log in, the user key is on the front page, then "Create an Application/API
+# Token" for the application token. Leave either empty and nothing is sent.
+# pushover_token: ""
+# pushover_user: ""
+
+# alarm_notify: true                # mute pushes without deleting the keys
+# alarm_min_severity: "warning"     # info | warning | alarm -- lowest worth a push
+# alarm_emergency_priority: true    # priority 2 for real alarms: repeats until
+                                    # acknowledged. Turn it off if being woken at
+                                    # 03:00 by a sensor fault is worse than
+                                    # finding out at breakfast.
+# alarm_retry_seconds: 300          # priority 2 only, Pushover minimum is 30
+# alarm_expire_seconds: 10800       # priority 2 only, Pushover maximum is 10800
+
+# Flap guard. A sensor sitting right on its limit raises and clears the same
+# alarm on alternate polls, which at a 60 s poll is two pushes a minute. At most
+# three notifications per alarm code go out inside this window; further
+# transitions are held and arrive as one message saying how many times it has
+# switched. Nothing is lost, and nobody is woken thirty times by one loose wire.
+# alarm_debounce_seconds: 900
+
+# --- weather forecast, from SMHI ------------------------------------------
+#
+# The pump's own sensor says what happened; a house with hours of thermal
+# inertia needs to know what is about to happen. SMHI's open point forecast is
+# free and needs no key -- only the coordinates of the house. Leave them empty
+# and no forecast is fetched at all.
+#
+# Decimal degrees, dot as the decimal point, and do not swap them: a longitude
+# in the latitude field is a point outside the model and answers 404.
+# weather_lat: 59.3293
+# weather_lon: 18.0686
+# weather_ttl_minutes: 60      # SMHI's model runs about hourly; asking more
+                               # often returns the same bytes
+# weather_timeout: 8.0
+
+# --- electricity prices, from Tibber --------------------------------------
+#
+# Only useful on an hourly variable contract. The plan this produces shifts
+# load, it never sheds it: every hour it heats a step extra is paid back by an
+# hour it coasts, within the same day, so the day's offsets sum to zero. It is
+# advisory -- nothing in this app writes the heating offset by itself.
+#
+# The token is a personal API token from developer.tibber.com (log in with your
+# Tibber account -> Get access token). Read-only for this purpose.
+# tibber_token: ""
+# tibber_home_id: ""           # only if your Tibber account has several homes
+
+# spot_timeout: 10.0
+# spot_cache_seconds: 900      # prices change twice a day; Tibber rate-limits
+# spot_min_spread: 0.15        # kr/kWh over the horizon. Below this the day is
+                               # too flat to be worth moving heat around for,
+                               # and the plan proposes nothing.
+# spot_cheap_rank: 0.25        # an hour is cheap in the bottom quartile
+# spot_expensive_rank: 0.75    # and expensive in the top one
+# spot_max_offset: 1           # steps of register 40031. Clamped to 1 whatever
+                               # you write here: one step is already about
+                               # 2.5 C of supply temperature.
+# spot_max_pairs: 4            # at most this many hours up and as many down
+
+# --- curve autotuning -----------------------------------------------------
+#
+# Watches weeks of history and proposes at most one small change, saying
+# whether the curve's height or its slope is wrong. It needs an indoor
+# temperature, which the pump does not have, so in practice it needs Homey
+# above. Advisory only: it never writes.
+#
+# The temperature the house is supposed to hold. Optional: left empty, the
+# analysis uses the room setpoint set on the pump's own display, which is the
+# closest thing to a stated wish that exists without this key. Set it when the
+# pump's setpoint is not what you actually want the house to hold -- on a pump
+# with no room sensor that number regulates nothing, so it is easy to have left
+# at something you never meant.
+# autotune_target_indoor: 21.0
+# autotune_days: 30            # how much history the analysis looks at

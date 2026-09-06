@@ -32,6 +32,11 @@ DASHBOARD = [
     31079,   # More hot water status
     31975,   # Fan speed
     31976,   # Alarm number
+    32196,   # Class 1 alarm flag -- alarms.py needs it to catch an alarm the
+             # pump raises without putting a number in 31976
+    31029,   # Priority: what the compressor is doing right now. autotune reads
+             # it to throw away the hours the pump was making hot water rather
+             # than heating the house.
     32134,   # Exhaust air fan speed (GQ2)
     40012,   # Degree minutes
     40057,   # Hot water mode

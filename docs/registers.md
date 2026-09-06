@@ -51,22 +51,63 @@ against the register's own min/max, and land in the write log.
 
 ## Blocked
 
-Never written by this app. Change them on the pump's display, where you can see
-the whole picture and the pump can warn you.
+Never written by this app, on any model. Change them on the pump's display,
+where you can see the whole picture and the pump can warn you.
+
+The table is the whole list, and `tests/test_safety.py` fails if it stops being:
+it compares the addresses named in the first column against `BLOCKED` and
+`BLOCKED_RANGES` in `nibelokal/safety.py` in both directions. There is no
+generator — the reasons are the point, and a generator cannot write them — so a
+test is what keeps the two in step.
 
 | Register | Setting | Why not |
 |---|---|---|
 | 40089 / 40090 | Min / max compressor frequency | Outside the compressor's designed window: wear, then alarms. |
 | 40096 | Heating medium pump operating mode | Stopping circulation while the compressor runs is a high-pressure alarm. |
-| 40696 | Manual heating medium pump speed | Same failure, by a different route. |
+| 40219 / 40696 | Circulation pump speed for heating, manual heating medium pump speed | Same failure, by a different route. |
+| 40104 / 40981 | Main fuse rating, current transformer ratio | Together these are the current limiting. Raising the fuse or misstating the transformer ratio removes the protection that keeps the house's main fuse intact. |
+| 40212–40216, 40768, 41556–41558 | AUX input function selectors (AUX1–AUX9) | The same selector as 42741. Function ids 4 and 5 block the compressor. |
 | 42741 + 42742 | AUX function via Modbus | A meta-register: write a function id to one, on/off to the other. Ids 4 and 5 block the compressor. One typo stops the heating, silently. |
 | 40121–40135 | Floor drying programme | Runs 20–70 °C for weeks. Never from a phone. |
-| 41100–41140 | Smart energy source / electricity price control | Misconfigured, this is constant additional heat. |
-| 45218–45230, 45988 | External sensor value injection | Feeds the pump a value you supply instead of a real sensor. If this app stops, the pump keeps regulating on a frozen number forever. |
-| 40943–40944, 44165–44175 | Compressor frequency blocking bands | Same category as the frequency limits. |
+| 40904 / 40905 | Initiate inverter, force initiated inverter | Service registers for commissioning the inverter, not settings. |
+| 40943–40948, 44158–44175, 45296–45297 | Compressor frequency blocking bands | Same category as the frequency limits. Three separate runs because the maps put the built-in compressor (EB101), EB102 and the S1155/S1255's start/stop pair in three different places. |
+| 41100–41105 | Reduced ventilation, high outdoor temperature, OEK, smart home room control, standby speed for the brine pump (EP14) | Not dangerous in themselves. Blocked because on the measured S735 the register map and the pump disagree here — 41100 is typed 0–1 and reads 25, and 41103 answers a Modbus exception. A map that is wrong about a register's type is not one to write through. This is the one place the gate knowingly costs a working feature: 41104, the brine pump's standby speed, is writable on an S1155/S1255 and S1156/S1256 and is blocked only because it shares a block this app does not trust. Set it on the pump's display, or move it out of the range in `safety.py`. |
+| 41106–41140, 41173–41176, 41209–41212, 41245–41248, 41281–41284, 41327–41328 | Smart energy source / electricity price control | Misconfigured, this is constant additional heat. Not contiguous: the tariff calendars sit in four separate quads, and 41327–41328 sit forty addresses past the last of them. Those two are the degree-minute differences at which the pump hands over to a lower-priority energy source — on most installations, the immersion heater. They are titled *Max difference, SES priority 1 energy source*, so a search for “smart energy source” does not find them; they are writable on every S-series map including the S735 these tiers were written against. |
+| 42743 | Start guide state | Writing 0 leaves the pump's display stuck in the start guide. |
+| 43029 / 43059 | Immersion heater power and additional heat step, emergency mode | What the pump falls back to when everything else has failed. Not a setting to get wrong from a phone. |
+| 45001, 45027–45031 | Forced control | The service menu's manual override. 45001 is the switch; on an S1155/S1255, S320/S325 and an SMO S40, 45027–45031 drive the same outputs one relay at a time — the immersion heater AZ30-EB17, the reversing valve QN37 open and closed, and the circulation pumps GQ2 and GQ3. |
+| 45009 | Follow externally calculated supply | Hands the supply temperature to whatever is on the other end of Modbus. If this app stops, the pump keeps regulating on a frozen setpoint. |
+| 45209–45230, 45987–45988, 46004–46007 | External sensor value injection, flags and values | Feeds the pump a value you supply instead of a real sensor. There is no dead-man's switch: if this app stops, the pump keeps regulating on a frozen number forever. 45988 is BT50, the room temperature the curve regulates against — the closest one of these to the house. The activation flags are blocked with the values: a flag left at 1 with a stale value behind it is the same failure. |
+| 40844, 46015–46061 | Smart Price Adaption on/off and its 24 hourly price slots | See the appendix below. |
+
+**The same settings, at the addresses other supported models use.** The tiers
+above were first written against one S735, and the models do not agree on
+numbering: floor drying is 40121–40135 on an S735 and 47276–47290 on an SMO 20,
+and the heating medium pump's operating mode is 40096 on one and 47138 on the
+other. Blocking an address a model does not implement costs that model nothing;
+leaving one open costs the model that does implement it.
+
+| Register | Setting | Which models use it |
+|---|---|---|
+| 40683, 47138, 48085, 48130, 48456 | Heating medium pump operating mode and manual speed | 40683 on an SMO S40 and VVM S500; 47138, 48085 and 48130 on an SMO 20/40 (48085 and 48130 are two writable registers for the same speed). 48456 is the same operating mode again, for cooling, with the same two settings — 10 intermittent, 20 continuous — and exists only on the F series. |
+| 47214 / 48755 | Main fuse rating, transformer ratio | SMO 20 and SMO 40. |
+| 47276–47291 | Floor drying programme, plus its timer | SMO 20 and SMO 40. |
+| 48567 / 48568 | Initiate inverter, force inverter initiation | F750 only, and the same pair as 40904 / 40905 above. This app cannot reach an F-series pump at all — they need a MODBUS 40 over RS485 rather than the TCP this speaks — but the rule reads better with no exceptions than with one, and blocking one of two registers that do the same job is worse than blocking neither. |
+| 48979–49009, 49208–49209 | Smart energy source | SMO 40 and the F-generation VVMs, where the feature is one contiguous run rather than the S-series' scattered quads. 48976, *Smart home room control*, sits just below it and is deliberately left guarded: a different feature that happens to be a neighbour. 49208–49209 are 41327–41328 again on a VVM 225/310/320/325/500, abbreviated further to *Max diff. SES prio 1.* — the same two settings, the same 1–25 °C, the same consequence. |
 
 **Anything not listed anywhere is treated as guarded**, not as free. A register
 nobody has thought about is not a register to write casually.
+
+Four that stay **guarded** although they are close relatives of blocked ones,
+because blocking them would cost a working feature and the risk is not the same:
+40767 *Set compressor frequency, cooling* (a bounded 1–100 % setpoint, not a
+limit on the compressor's window), 45344 *Silent mode, max. frequency 2 (EB101)*
+on an S2125 (a comfort setting with its own menu), 42756 *Inverter fault reset*
+(a recovery action rather than a way to force the inverter on), and 40859
+*Maximum speed of circulation pump for heating*. That last one is the closest
+call: it is the same pump as the blocked 40219, but its own range starts at
+50 %, so unlike 40219 — which goes down to 1 % — it cannot be used to stop the
+circulation the compressor depends on.
 
 ## Two things the tiers cannot protect you from
 
@@ -135,29 +176,90 @@ section (menu 1.30.7) says nothing about it in either direction.
 **How quickly the calculated supply temperature follows a change.** Nothing in
 any manual describes ramping or filtering of register 31018.
 
-### What we measured
+### What we measured, and why it is a floor rather than a number
 
-On an S735-family pump running an own curve (curve = 0), min supply 26 °C, no room
-sensor, 13 °C outdoors, holding each offset for six minutes and sampling every ten
-seconds:
+On an S735-family pump running an own curve (curve = 0), min supply 26 °C, no
+room sensor, 13 °C outdoors, holding each offset for six minutes and sampling
+every ten seconds:
 
-| Offset | Calculated supply |
+| Offset | Calculated supply after six minutes |
 |---|---|
 | −6 | 26.0 °C — pinned exactly at min supply |
 | 0 | 30.4 °C |
 | +6 | 39.0 °C |
 
-So on this pump: **the offset does apply to an own curve**, plus is warmer, and
-one step is worth roughly **1.5 °C of supply temperature** — the same order as
-NIBE's example, not the same number. Their text says "e.g.", not "equals".
+Two things this does establish, and they are the ones worth having:
 
-**The ramp is the practical finding.** After setting +6 the value moved 29.5 →
-30.3 → 32.8 → 35.5 → 38.1 → 39.0 over about five minutes. An earlier measurement
-that read the register ten seconds after each write concluded 0.2 °C per step and
-was wrong by a factor of eight. If you check whether a write "worked" by reading
-the calculated supply straight afterwards, you will measure the ramp, not the
-setting.
+- **The offset does apply to an own curve.** NIBE's manuals do not say either
+  way, and this pump answers the question: plus is warmer, on curve 0.
+- **The value ramps.** After setting +6 the calculated supply moved 29.5 → 30.3
+  → 32.8 → 35.5 → 38.1 → 39.0 over about five minutes. An earlier run that read
+  the register ten seconds after each write concluded 0.2 °C per step and was
+  wrong by more than an order of magnitude.
 
-Downwards, −6 hit 26.0 °C immediately and stayed there — the minimum supply, doing
-exactly what the manual says it does. On an own curve already sitting near its
-floor in mild weather, lowering the offset does nothing at all.
+What it does **not** establish is the size of a step. Dividing 13 °C by six
+steps gives 1.5 °C, which is tidy and wrong: at the six-minute cutoff the value
+was still climbing at roughly 0.6 °C per minute. The run was stopped before the
+ramp had flattened, so 1.5 °C/step is a lower bound on a value that had not
+finished arriving — not a measurement of it. NIBE documents about 2.5 °C, and
+this pump's owner puts it at about 2.5 °C from years of living with it. Those
+two agree; the short measurement is the odd one out, and the short measurement
+is the one with a known defect.
+
+**So: about 2.5 °C of supply temperature per step**, per NIBE and per the
+owner. This app uses 2.5. A proper measurement would hold each offset for at
+least half an hour and take the value only after it has been flat for several
+samples; if you do that on your own pump, the number you get is better than the
+number here.
+
+Downwards, −6 hit 26.0 °C immediately and stayed there — the minimum supply,
+doing exactly what the manual says it does. On an own curve already sitting near
+its floor in mild weather, lowering the offset does nothing at all.
+
+### One thing that could have explained the discrepancy, and did not
+
+NIBE firmware 4.0.10 notes: "Removed the use of heat curves and offset when
+Smart Room Comfort running under normal conditions." If Smart Room Comfort were
+active, the offset would have been partly bypassed and a small measured effect
+would be expected. It is not active on this pump: Smart Room Comfort regulates
+on a room sensor, and register 40203 (*use room sensor, climate system 1*) reads
+0, with no external BT50 being written (45988 is unset). Checked read-only,
+2026-09-06. The explanation for the small number is the ramp, not the firmware.
+
+## Appendix: Smart Price Adaption, and why this app does not use it
+
+This pump exposes NIBE's own price-following feature over Modbus: register
+**40844** (*Activated (Smart Price Adaption)*, writable, 0/1, currently 0),
+**31919** (*Operating mode*, read-only, currently 10, no published
+enumeration), and **46015–46061** in steps of two — twenty-four slots titled
+*Energy price 00:00 – 01:00* through *23:00 – 00:00*, writable s32, each
+defaulting to 2147483647, which is INT32_MAX and the conventional "unset".
+
+Twenty-four writable hourly price slots defaulting to a sentinel look exactly
+like an external price feed, and NIBE's marketing pages do mention manual price
+entry. If that inference is right, this app could drive NIBE's own optimiser
+without a myUplink subscription, which would be the neatest possible answer to
+the question this whole project exists to answer.
+
+It is still an inference, and these are the reasons it is not acted on:
+
+- NIBE's official S-series Modbus document (M12676EN) does not list 40844,
+  31919 or 46015–46061 at all. They appear only in per-model ModbusManager
+  exports.
+- Nothing published says what unit the s32 holds — öre, thousandths of a
+  currency unit, something else — nor which day the twenty-four slots refer to,
+  nor when they roll over.
+- At least one S-series owner has dumped every register looking for a way to
+  pass in electricity prices over Modbus and reported finding none.
+- The decisive one: the *degree of effect* — how hard SPA is allowed to push,
+  1–10 for heating and 1–4 for hot water — does not appear in the register map
+  at all. This app could arm the feature and then neither read nor set its
+  strength. That is precisely the objection this app makes to SG Ready, and it
+  does not become acceptable because the register has a nicer name.
+
+So 40844 and 46015–46061 are blocked, and price following is done with the
+heating offset instead: ±1 step, symmetric, summing to zero over a day,
+bounded, reversible, and expressed in the same units already on the pump's own
+display. Nothing was written to any of these registers to find this out.
+
+If you know what the unit of 46015 is, that is a good issue to open.

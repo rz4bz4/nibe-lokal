@@ -1,0 +1,2413 @@
+{
+ "_meta": {
+  "series": "S",
+  "language": "sv",
+  "fetched": "2026-09-06",
+  "count": 478,
+  "source": "https://www.nibe.eu/sv-se/support/larmkoder",
+  "source_api": "https://www.nibe.eu/sv-se/support/larmkoder?sv.target=12.11473d79186620520971f59&sv.12.11473d79186620520971f59.route=/all/noah",
+  "source_note": "NIBE's own alarm-code search on nibe.eu is a Sitevision web app that reads its texts from this route; 'noah' is the S series and 'emmy' the F series. The answer is {\"result\": [{code, text, textLong, extraTextLong}]}. The Swedish strings below are NIBE's own, verbatim: only whitespace was normalised, plus one pilcrow (U+00B6, code 144) and one no-break space turned into a line break and a plain space.",
+  "coverage": "Every code NIBE publishes for the S series (S1155, S1156, S1255, S1256, S320, S325, S735, SMO S40, VVM S320, VVM S325 and their accessories). It is the whole series, not just the S735, so codes for accessories a given house does not have can never appear.",
+  "text_confidence": "High. `sv` is NIBE's own short display text, fetched verbatim. Where NIBE lists two wordings for one code (different boards) they are joined with ' / '.",
+  "severity_confidence": "Derived, not published. NIBE's endpoint carries no severity field, so each code was classified by a rule over NIBE's own Swedish text: 'info' where the text says operation is unaffected or that the alarm clears itself, 'alarm' where it names larmdrift, hjalpdrift, blocked operation, a permanent alarm, or calling the installer, otherwise 'warning'. So `sv` and `action` are NIBE's words and `severity` is our reading of them: 174 alarm, 294 warning, 10 info.",
+  "action_note": "`action` is the last sentence of NIBE's longer text that actually tells the owner to do something, quoted verbatim. Nothing here is written by us. 289 of 478 codes have such a sentence; the rest are null, which means 'we do not know', not 'do nothing'.",
+  "not_verified": [
+   "The severity is not NIBE's -- see severity_confidence.",
+   "27 codes have no long text at NIBE and carry only the short one, so their severity rests on a handful of words.",
+   "Which register carries the number was taken from the register map in yozik04/nibe, not measured on a pump: 31976 'Alarm number' (s16) and 32196 'Class 1 alarm' (u8, 0=No alarm, 1=Alarm). 32196 is a flag, not an alarm reset -- the writable reset is 40023, which this app never touches.",
+   "F-series codes are not in this file."
+  ]
+ },
+ "codes": {
+  "101": {
+   "sv": "Givarfel –BT1 utegivare",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "102": {
+   "sv": "Givarfel –BT2 framledningsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "103": {
+   "sv": "Givarfel –BT3 returledningsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "104": {
+   "sv": "Givarfel –BT6 varmvatten laddning / Givarfel -AA5-BT6 varmvatten laddning",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "105": {
+   "sv": "Givarfel –BT7 VV-givare topp / Givarfel -AA5-BT7 varmvatten top",
+   "severity": "info",
+   "action": null
+  },
+  "106": {
+   "sv": "Givarfel –BT10 givare köldbärare in",
+   "severity": "warning",
+   "action": null
+  },
+  "107": {
+   "sv": "Givarfel –BT11 givare köldbärare ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "108": {
+   "sv": "Givarfel –AZ10-BT12 kondensor ut / Givarfel –BT12 kondensor ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "109": {
+   "sv": "Givarfel –BT14 hetgasgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "110": {
+   "sv": "Givarfel –AZ10-BT16 förångargivare",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "111": {
+   "sv": "",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "112": {
+   "sv": "Givarfel –EP21-BT50 rumstemperaturgivare / Givarfel –EP22-BT50 rumstemperaturgivare / Givarfel –EP23-BT50 rumstemperaturgivare / Givarfel –EP44-BT50 rumstemperaturgivare / Givarfel –EP45-BT50 rumstemperaturgivare / Givarfel –EP46-BT50 rumstemperaturgivare / Givarfel –EP47-BT50 rumstemperaturgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "113": {
+   "sv": "Givarfel –BT20 frånluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "114": {
+   "sv": "Givarfel –BT21 avluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "115": {
+   "sv": "Givarfel –AZ30-BT22 tilluftsgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "116": {
+   "sv": "Givarfel –BT25 extern framledningsgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "117": {
+   "sv": "Givarfel –AZ10-BT26 kollektor in",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "118": {
+   "sv": "Givarfel –BP8 lågtryckstransmitter",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "119": {
+   "sv": "Givarfel –BT71 extern returledningsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "122": {
+   "sv": "Givarfel –BT63 framledningsgivare efter tillsats",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "123": {
+   "sv": "Ingen rumsgivare i kyla",
+   "severity": "alarm",
+   "action": null
+  },
+  "124": {
+   "sv": "Givarfel –EP30-BT53 solfångartemperatur / Givarfel -AA5-BT53 solcell",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "125": {
+   "sv": "Givarfel –EP30-BT54 soltanktemp. botten / Givarfel -AA5-BT54 soltank",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "126": {
+   "sv": "Givarfel –BT52 panngivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "127": {
+   "sv": "Givarfel –EQ1-BT64 kylframledning / Givarfel ACS40 BT64 kylframledning",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "128": {
+   "sv": "Givarfel –BT28 uteluft / Givarfel–EB100-BT28 uteluft",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "130": {
+   "sv": "Givarfel –AZ30-BT23 uteluftsgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "131": {
+   "sv": "Givarfel –AZ20-BT68 framledningsgivare / Givarfel –AZ20-BT68 framledningsgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "132": {
+   "sv": "Givarfel –AZ20-BT69 returledningsgivare / Givarfel –AZ20-BT69 returledningsgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "133": {
+   "sv": "Givarfel –CL11-BT51 pooltemperaturgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "134": {
+   "sv": "Givarfel –CL12-BT51 pooltemperaturgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "135": {
+   "sv": "Givarfel –AZ11-BT20 frånluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "136": {
+   "sv": "Givarfel –AZ11-BT21 avluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "137": {
+   "sv": "Givarfel –AZ11-BT26 kollektor in",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "138": {
+   "sv": "Givarfel –AZ12-BT20 frånluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "139": {
+   "sv": "Givarfel –AZ12-BT21 avluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "140": {
+   "sv": "Givarfel –AZ12-BT26 kollektor in",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "141": {
+   "sv": "Givarfel –AZ13-BT20 frånluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "142": {
+   "sv": "Givarfel –AZ13-BT21 avluftsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "143": {
+   "sv": "Givarfel –AZ13-BT26 kollektor in",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "144": {
+   "sv": "Givarfel -QZ1-BT70 varmvatten framledningstemp",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "145": {
+   "sv": "Givarfel –EQ1-BT57 kollektorgivare / Givarfel –EP12-BT57",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "146": {
+   "sv": "Givarfel –EQ1-BT75 värmedumpsgivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "147": {
+   "sv": "Givarfel från värmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "148": {
+   "sv": "Givarfel från värmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "149": {
+   "sv": "Givarfel från värmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "150": {
+   "sv": "Givarfel från värmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "151": {
+   "sv": "Givarfel från värmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "152": {
+   "sv": "Givarfel –BT74 kyla-/värmegivare",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "153": {
+   "sv": "Givarfel –BT50",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "154": {
+   "sv": "Givarfel –EP12-BT58",
+   "severity": "warning",
+   "action": null
+  },
+  "155": {
+   "sv": "Givarfel –BT13-AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "156": {
+   "sv": "Givarfel –BT76-AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "157": {
+   "sv": "Givarfel –BT77-AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "158": {
+   "sv": "Kompressorfas 1 har fasfel",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt när fasen kommer tillbaka."
+  },
+  "159": {
+   "sv": "Kompressorfas 2 har fasfel",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt när fasen kommer tillbaka."
+  },
+  "160": {
+   "sv": "Kompressorfas 3 har fasfel",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt när fasen kommer tillbaka."
+  },
+  "161": {
+   "sv": "Mjukstartskortet har uppmätt fel fasföljd",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "162": {
+   "sv": "Fel på mjukstartskortets säkringar",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "163": {
+   "sv": "Fel fasföljd alt. saknad fas har uppmätts.",
+   "severity": "alarm",
+   "action": "Starta värmepumpen igen och om larmet återkommer, välj hjälpdrift och kontakta din installatör."
+  },
+  "164": {
+   "sv": "Högtryckslarm",
+   "severity": "alarm",
+   "action": "Återkommer larmet trots åtgärder, kontakta din installatör."
+  },
+  "165": {
+   "sv": "Lågtryckslarm / Best. larm p.g.a. lågtryck eller övertemperatur, kompr. / Lågtryckslarm (BP2) eller övertemp. (FQ14), kompr. / Lågtryckslarm (BP2)",
+   "severity": "alarm",
+   "action": "Återkommer larmet, kontakta din installatör."
+  },
+  "167": {
+   "sv": "Temperaturbegränsarlarm",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "168": {
+   "sv": "Nivåvakt KB",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "169": {
+   "sv": "Motorskydd",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "170": {
+   "sv": "Hetgaslarm",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "171": {
+   "sv": "Produkten har ett felaktigt serienummer",
+   "severity": "alarm",
+   "action": "Kontakta din installatör snarast."
+  },
+  "172": {
+   "sv": "Låg returtemperatur vid kyldrift",
+   "severity": "alarm",
+   "action": "Om larmet återkommer, kontakta din installatör."
+  },
+  "173": {
+   "sv": "Pressostatlarm",
+   "severity": "alarm",
+   "action": "Återkommer larmet trots åtgärder, kontakta din installatör."
+  },
+  "175": {
+   "sv": "Låg köldbärare ut",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "176": {
+   "sv": "Lågt luftflöde –BS1",
+   "severity": "alarm",
+   "action": "Återkommer larmet, kontakta din installatör."
+  },
+  "177": {
+   "sv": "Låg frånluftstemperatur",
+   "severity": "alarm",
+   "action": null
+  },
+  "178": {
+   "sv": "Hög kondensvattennivå",
+   "severity": "warning",
+   "action": null
+  },
+  "179": {
+   "sv": "Hög kondensvattennivå",
+   "severity": "warning",
+   "action": null
+  },
+  "180": {
+   "sv": "Pressostatlarm",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt."
+  },
+  "181": {
+   "sv": "Kalibrering: BS1",
+   "severity": "warning",
+   "action": null
+  },
+  "182": {
+   "sv": "Kommunikationsfel mjukstartskort",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "183": {
+   "sv": "Kommunikationsfel mot tillbehör klimatsystem 2 / Tillfälligt kom.fel mot klimatsystem 2",
+   "severity": "alarm",
+   "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
+  },
+  "184": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 3",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "185": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 4",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "186": {
+   "sv": "Kom.fel mot tillbehör shuntstyrd tillsats",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "187": {
+   "sv": "Kommunikationsfel mot tillbehör pool / Tillfälligt kommunikationsfel mot pool",
+   "severity": "alarm",
+   "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
+  },
+  "188": {
+   "sv": "Kommunikationsfel FLM",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "189": {
+   "sv": "Misslyckad avfrostning",
+   "severity": "warning",
+   "action": null
+  },
+  "190": {
+   "sv": "Kommunikationsfel mot tillbehör OEK",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "191": {
+   "sv": "Kom.fel mot SAM",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "192": {
+   "sv": "Kom.fel mot tillbehör stegstyrd tillsats",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "193": {
+   "sv": "Kommunikationsfel mot tillbehör Solar",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "194": {
+   "sv": "Kommunikationsfel mot tillbehör HPAC",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "195": {
+   "sv": "Kom.fel mot tillbehör grundvattenpump",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "196": {
+   "sv": "Kom.fel mot tillbehör varmvattencirkulation",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "197": {
+   "sv": "Kommunikationsfel mot tillbehör DEW",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "198": {
+   "sv": "Kom.fel mot tillbehör kyla 2-rör",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "199": {
+   "sv": "Kom.fel mot tillbehör kyla 4-rör",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "201": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 1 / Tappad kommunikation med innedelen",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "202": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 2",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "203": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 3",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "204": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 4",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "205": {
+   "sv": "Kommunikationsfel inverter",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "206": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 5",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "207": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 6",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "208": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 7",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "209": {
+   "sv": "Kom.fel mot tillbehör klimatsystem 8",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "210": {
+   "sv": "Tillfälligt HP larm",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt."
+  },
+  "211": {
+   "sv": "Låg temperatur på inkommande köldbärare",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt."
+  },
+  "212": {
+   "sv": "Låg LP kyldrift / Lågtryckslarm kyldrift",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "213": {
+   "sv": "Låg temperatur på utgående köldbärare",
+   "severity": "alarm",
+   "action": "Larmet återställs automatiskt."
+  },
+  "214": {
+   "sv": "Hög temperatur på inkommande köldbärare",
+   "severity": "warning",
+   "action": null
+  },
+  "215": {
+   "sv": "Hög kondensortemperatur ut",
+   "severity": "alarm",
+   "action": "Vid återkommande larm, kontakta din installatör."
+  },
+  "216": {
+   "sv": "Hög kondensortemperatur in",
+   "severity": "alarm",
+   "action": "Vid återkommande larm, kontakta din installatör."
+  },
+  "217": {
+   "sv": "Elanodproblem",
+   "severity": "alarm",
+   "action": "Var vänlig kontakta din installatör."
+  },
+  "218": {
+   "sv": "Frysskydd",
+   "severity": "alarm",
+   "action": null
+  },
+  "219": {
+   "sv": "Misslyckad periodisk höjning",
+   "severity": "alarm",
+   "action": "Återkommer problemet, kontakta din installatör."
+  },
+  "220": {
+   "sv": "Effektvakt aktiverad",
+   "severity": "warning",
+   "action": null
+  },
+  "221": {
+   "sv": "Avfrostning",
+   "severity": "warning",
+   "action": null
+  },
+  "222": {
+   "sv": "Filterlarm, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Rengör filtret med hjälp av guiden som finns under larmåtgärder."
+  },
+  "223": {
+   "sv": "Frysskydd tilluft",
+   "severity": "warning",
+   "action": null
+  },
+  "224": {
+   "sv": "Kom.fel mot tillbehör varmvattenkomfort",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "225": {
+   "sv": "Flödet av värmebäraren är under gränsvärdet / Temporärt lågt flöde av värmebärare",
+   "severity": "alarm",
+   "action": "Återkommer larmet, kontakta din installatör."
+  },
+  "226": {
+   "sv": "Ej kompatibel inverter",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "227": {
+   "sv": "Säkringen i värmepumpen har löst ut",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "228": {
+   "sv": "Kompressorns rotor är blockerad",
+   "severity": "alarm",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "229": {
+   "sv": "Högtryckslarm",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "230": {
+   "sv": "Lågtryckslarm",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "231": {
+   "sv": "Motorskyddslarm",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "232": {
+   "sv": "Kom.fel mot uteluftsvärmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "233": {
+   "sv": "Fläktlarm i uteluftsvärmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "234": {
+   "sv": "Flödesfel",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "235": {
+   "sv": "Givarfel uteluftsvärmepump",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "236": {
+   "sv": "Avfrostningsfel",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "237": {
+   "sv": "Kort drifttid på kompressor / Kort drifttid i vv/värme / Kort drifttid i kyla",
+   "severity": "warning",
+   "action": "Om detta inte går, se manual för värmepump."
+  },
+  "238": {
+   "sv": "Hög hetgas",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "239": {
+   "sv": "Fel fasföljd alt. saknad fas har uppmätts.",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "240": {
+   "sv": "Låg förångning",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "241": {
+   "sv": "Avfrostning pågår av FLM EP16-xx",
+   "severity": "warning",
+   "action": null
+  },
+  "242": {
+   "sv": "Best. komm. fel FLM",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "244": {
+   "sv": "Kommunikationsfel mot SMS-enhet",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "245": {
+   "sv": "Kommunikationsfel mot Modbus",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "247": {
+   "sv": "Kommunikationsfel mot tillbehör SCA",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "249": {
+   "sv": "Kommunikationsfel mot ACS",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "250": {
+   "sv": "Kommunikationsfel mot tillbehör SCA",
+   "severity": "warning",
+   "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
+  },
+  "251": {
+   "sv": "Hög VVX temp",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "252": {
+   "sv": "Power transistor för varm",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "253": {
+   "sv": "Spänningen från invertern utanför gränsvärden",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "254": {
+   "sv": "Kommunikationsfel mot inverter",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "255": {
+   "sv": "Fläkt fel",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "256": {
+   "sv": "Låg kylmediemängd",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "257": {
+   "sv": "Misslyckad start av kompressor",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "258": {
+   "sv": "Överström",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "259": {
+   "sv": "Förvärm. av kpr pågår",
+   "severity": "warning",
+   "action": null
+  },
+  "260": {
+   "sv": "Kall uteluft värmedrift",
+   "severity": "info",
+   "action": null
+  },
+  "261": {
+   "sv": "Varm uteluft värmedrift",
+   "severity": "info",
+   "action": null
+  },
+  "262": {
+   "sv": "VV start och VV stopp har fabriksåterställts",
+   "severity": "alarm",
+   "action": null
+  },
+  "263": {
+   "sv": "Kompressorns fas överbelastad",
+   "severity": "warning",
+   "action": null
+  },
+  "264": {
+   "sv": "Kompressorn begränsas av effektvakt",
+   "severity": "warning",
+   "action": null
+  },
+  "265": {
+   "sv": "Kommunikationsfel mot shuntstyrd köldbärare",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "266": {
+   "sv": "Kommunikationsfel tillbehör",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "269": {
+   "sv": "Icke kompatibel uteluftsvärmepump",
+   "severity": "alarm",
+   "action": "Kontakta din installatör / serviceombud för mer information."
+  },
+  "270": {
+   "sv": "Best. komm. fel ERS 1",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "271": {
+   "sv": "Best. komm. mot värmepump 1 –EB101",
+   "severity": "warning",
+   "action": null
+  },
+  "272": {
+   "sv": "Best. komm. mot värmepump 2 –EB102",
+   "severity": "warning",
+   "action": null
+  },
+  "273": {
+   "sv": "Best. komm. mot värmepump 3 –EB103",
+   "severity": "warning",
+   "action": null
+  },
+  "274": {
+   "sv": "Best. komm. mot värmepump 4 –EB104",
+   "severity": "warning",
+   "action": null
+  },
+  "275": {
+   "sv": "Best. komm. mot värmepump 5 –EB105",
+   "severity": "warning",
+   "action": null
+  },
+  "276": {
+   "sv": "Best. komm. mot värmepump 6 –EB106",
+   "severity": "warning",
+   "action": null
+  },
+  "277": {
+   "sv": "Best. komm. mot värmepump 7 –EB107",
+   "severity": "warning",
+   "action": null
+  },
+  "278": {
+   "sv": "Best. komm. mot värmepump 8 –EB108",
+   "severity": "warning",
+   "action": null
+  },
+  "279": {
+   "sv": "Kommunikationsfel mot AXC för –EB103/4-GP12",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "280": {
+   "sv": "Kommunikationsfel mot AXC för –EB105/6-GP12",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "281": {
+   "sv": "Kommunikationsfel mot AXC för –EB107/8-GP12",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "282": {
+   "sv": "Spotpris kunde inte hämtas",
+   "severity": "warning",
+   "action": null
+  },
+  "283": {
+   "sv": "Best. komm. fel fuktgivaren",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "284": {
+   "sv": "Kommunikationsfel mot ACS40",
+   "severity": "warning",
+   "action": null
+  },
+  "288": {
+   "sv": "Maxtemp ut från värmepump har överskridits / Maxtemp genom värmepump har överskridits",
+   "severity": "alarm",
+   "action": null
+  },
+  "289": {
+   "sv": "Inkompatibel inställning",
+   "severity": "warning",
+   "action": null
+  },
+  "290": {
+   "sv": "Låg tilluftstemperatur",
+   "severity": "warning",
+   "action": null
+  },
+  "291": {
+   "sv": "Återkommande säkerhetsavfrostningar",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "292": {
+   "sv": "Låg temperatur vatten in",
+   "severity": "warning",
+   "action": null
+  },
+  "293": {
+   "sv": "Låg temperatur vatten ut",
+   "severity": "warning",
+   "action": null
+  },
+  "294": {
+   "sv": "Återkommande lågtryck",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "295": {
+   "sv": "Återkommande högtryck",
+   "severity": "alarm",
+   "action": "Återkommer larmet trots åtgärder, kontakta din installatör."
+  },
+  "296": {
+   "sv": "Osäker givarnoggrannhet / Sensorkalibrering har misslyckats",
+   "severity": "warning",
+   "action": "Kontrollera de båda givarna samt flödet."
+  },
+  "297": {
+   "sv": "Osäker givarnoggrannhet / Sensorkalibrering har misslyckats",
+   "severity": "warning",
+   "action": "Kontrollera de båda givarna samt flödet."
+  },
+  "298": {
+   "sv": "Osäker givarnoggrannhet / Sensorkalibrering har misslyckats",
+   "severity": "warning",
+   "action": "Kontrollera de båda givarna samt flödet."
+  },
+  "299": {
+   "sv": "Felaktig PCA Base-version / Sensorkalibrering har misslyckats",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "300": {
+   "sv": "Sensorkalibrering har misslyckats",
+   "severity": "warning",
+   "action": "Kontrollera de båda givarna samt flödet."
+  },
+  "302": {
+   "sv": "Kommunikationsfel mot tillbehör OPT / Kom.fel mot tillbehör OPT",
+   "severity": "alarm",
+   "action": "Om larmet återkommer, kontakta din installatör."
+  },
+  "303": {
+   "sv": "OPT har detekterat OT fel \"Servicebegäran\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "304": {
+   "sv": "OPT larm (från gaspannan)",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "305": {
+   "sv": "Kommunikationsfel pool 2",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "306": {
+   "sv": "Kommunikationsfel cirkulationspump (GP1) / Kommunikationsfel cirkulationspump (GP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "307": {
+   "sv": "Flöde blockerat (GP1) / Flöde blockerat (GP2)",
+   "severity": "alarm",
+   "action": null
+  },
+  "308": {
+   "sv": "Underspänning pump (GP1) / Underspänning pump (GP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "309": {
+   "sv": "El-fel pump (GP1) / El-fel pump (GP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "310": {
+   "sv": "Överspänning pump (GP1) / DC-Underspänning (GP1) / Överspänning pump (GP2) / DC-Underspänning (GP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "313": {
+   "sv": "Torrkörning (GP1) / Torrkörning (GP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "314": {
+   "sv": "Odefinierat fel",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "315": {
+   "sv": "Givarfel på –EB10x",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "316": {
+   "sv": "Givarfel på –EB10x",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "317": {
+   "sv": "Givarfel på –EB10x-BT12",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "318": {
+   "sv": "Givarfel på –EB10x-BT15",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "319": {
+   "sv": "Stopp pga skyddsläge / Kommunikationsfel mot inverter",
+   "severity": "info",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "320": {
+   "sv": "Stopp pga skyddsläge / Inverter komfel",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "321": {
+   "sv": "Pressostat- eller temperaturlarm",
+   "severity": "warning",
+   "action": null
+  },
+  "322": {
+   "sv": "Pressostat- eller temperaturlarm",
+   "severity": "warning",
+   "action": "Kontrollera flöden på hög- och lågtrycksidan och avlufta vid behov."
+  },
+  "323": {
+   "sv": "Stopp pga skyddsläge / Skyddsstopp inverter",
+   "severity": "info",
+   "action": null
+  },
+  "324": {
+   "sv": "Stopp pga skyddsläge / Skyddsstopp inverter",
+   "severity": "info",
+   "action": null
+  },
+  "325": {
+   "sv": "Stopp pga skyddsläge / Hög nätspänning",
+   "severity": "info",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "326": {
+   "sv": "Stopp pga skyddsläge / Inverter underspänning",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "327": {
+   "sv": "Stopp pga skyddsläge / Inverter fasfel",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "328": {
+   "sv": "Stopp pga skyddsläge / Nätstörning",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "329": {
+   "sv": "Stopp pga skyddsläge / Överhettad inverter",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "330": {
+   "sv": "Stopp pga skyddsläge / Skyddsstopp inverter",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "331": {
+   "sv": "Stopp pga skyddsläge / Överhettad inverter",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "332": {
+   "sv": "Stopp pga skyddsläge / Inverterskydd",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "333": {
+   "sv": "Stopp pga skyddsläge / Fasbortfall",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "334": {
+   "sv": "Stopp pga skyddsläge / Misslyckad kompressorstart",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "335": {
+   "sv": "Stopp pga skyddsläge / Inverter kod",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "336": {
+   "sv": "Stopp pga skyddsläge / Hög strömlast kompressor",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "337": {
+   "sv": "Stopp pga skyddsläge / Hög effektlast kompressor",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "338": {
+   "sv": "Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "339": {
+   "sv": "Ett inverterfel har inträffat",
+   "severity": "info",
+   "action": null
+  },
+  "340": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "341": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "342": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "343": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "344": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "345": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "346": {
+   "sv": "Stopp pga skyddsläge / Inverter skyddsläge",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "353": {
+   "sv": "Misslyckad start, ej tryckdiff.",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "354": {
+   "sv": "Misslyckad start, ej tryckdiff.",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "355": {
+   "sv": "Inget land är defininerat",
+   "severity": "warning",
+   "action": "Vänligen besök meny 4.10 och välj land för optimerad prestanda."
+  },
+  "356": {
+   "sv": "Kommunikationsfel tillbehör. –AZ10",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "357": {
+   "sv": "Missl. avfr. –AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "358": {
+   "sv": "Låg avfr. temp –AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "359": {
+   "sv": "Hög förångning –AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "360": {
+   "sv": "Fläktlarm –AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "361": {
+   "sv": "Laddpump –AZ10",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "362": {
+   "sv": "Kompressorn är blockerad pga spärrband",
+   "severity": "alarm",
+   "action": null
+  },
+  "363": {
+   "sv": "Larm från extern ingång",
+   "severity": "warning",
+   "action": null
+  },
+  "364": {
+   "sv": "Tillsats extern blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "365": {
+   "sv": "Kompressor externt blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "366": {
+   "sv": "Startar",
+   "severity": "warning",
+   "action": null
+  },
+  "367": {
+   "sv": "Elpatronsdrift",
+   "severity": "warning",
+   "action": "Kontrollera inställningar."
+  },
+  "368": {
+   "sv": "Kommunikationsfel mot MCB kortet / Tillf. komm. fel MCB kortet / Kommunikationsfel mot MCB-L-kortet / Tillf. komm. fel MCB-L-kortet",
+   "severity": "warning",
+   "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
+  },
+  "369": {
+   "sv": "Kommunikationsfel mot ASB 1 kortet / Tillf. komm. fel ASB 1 kortet",
+   "severity": "warning",
+   "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
+  },
+  "371": {
+   "sv": "Kommunikationsfel tillbehör",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "372": {
+   "sv": "Sol inv. - Skickar information.",
+   "severity": "warning",
+   "action": null
+  },
+  "373": {
+   "sv": "Sol inv. - Jordningsfel.",
+   "severity": "warning",
+   "action": "har jordningsfel, kontrollera anslutningar."
+  },
+  "374": {
+   "sv": "Sol inv. - Vac fel.",
+   "severity": "warning",
+   "action": null
+  },
+  "375": {
+   "sv": "Sol inv. - Fac fel.",
+   "severity": "warning",
+   "action": null
+  },
+  "376": {
+   "sv": "Sol inv. - Anslutningsfel",
+   "severity": "warning",
+   "action": "Kontrollera säkringar och anslutningen."
+  },
+  "377": {
+   "sv": "Sol inv. - Hög temperatur.",
+   "severity": "warning",
+   "action": null
+  },
+  "378": {
+   "sv": "Sol inv. - Hög DC spänning",
+   "severity": "warning",
+   "action": null
+  },
+  "379": {
+   "sv": "Kom.fel mot solväxelriktaren",
+   "severity": "warning",
+   "action": "Kontrollera anläggningen."
+  },
+  "380": {
+   "sv": "Flödesskydd avfrostning",
+   "severity": "warning",
+   "action": null
+  },
+  "381": {
+   "sv": "Frysskydd växlare avfrostning",
+   "severity": "warning",
+   "action": null
+  },
+  "382": {
+   "sv": "Begränsad inverter",
+   "severity": "alarm",
+   "action": "Om larmet återkommer välj hjälpdrift och kontakta din installatör."
+  },
+  "384": {
+   "sv": "Best. komm. fel HTS, BM2",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "385": {
+   "sv": "Best. komm. fel HTS, BM3",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "386": {
+   "sv": "Best. komm. fel HTS, BM4",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "387": {
+   "sv": "Kommunikationsfel mot tillbehör DEW",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "388": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "389": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "390": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "391": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "392": {
+   "sv": "kom.fel mot -EPxx rumsenhet, zon 4",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "394": {
+   "sv": "Givarfel –AZ10-BT27 kollektor ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "395": {
+   "sv": "Givarfel –AZ11-BT27 kollektor ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "396": {
+   "sv": "Givarfel –AZ12-BT27 kollektor ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "397": {
+   "sv": "Givarfel –AZ13-BT27 kollektor ut",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "398": {
+   "sv": "Lågt tryck klimatsystem",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "399": {
+   "sv": "Givarfel: EQ1-BT50",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "400": {
+   "sv": "Givarfel rumsgivare kyldrift",
+   "severity": "warning",
+   "action": "Kontrollera anslutningen av givaren."
+  },
+  "401": {
+   "sv": "Givarfel BT1 från TSS20",
+   "severity": "warning",
+   "action": null
+  },
+  "402": {
+   "sv": "Givarfel: BT50 på HTS1",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "403": {
+   "sv": "Givarfel: BT50 på HTS2",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "404": {
+   "sv": "Givarfel: BT50 på HTS3",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "405": {
+   "sv": "Givarfel: BT50 på HTS4",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "406": {
+   "sv": "Givarfel: BT50 på RMU1",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "407": {
+   "sv": "Givarfel: BT50 på RMU2",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "408": {
+   "sv": "Givarfel: BT50 på RMU3",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "409": {
+   "sv": "Givarfel: BT50 på RMU4",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "410": {
+   "sv": "Givarfel: BT50 på RMU5",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "411": {
+   "sv": "Givarfel: BT50 på RMU6",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "412": {
+   "sv": "Givarfel: BT50 på RMU7",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "413": {
+   "sv": "Givarfel: BT50 på RMU8",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "414": {
+   "sv": "Givarfel: BM1 på HTS1",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "415": {
+   "sv": "Givarfel: BM1 på HTS2",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "416": {
+   "sv": "Givarfel: BM1 på HTS3",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "417": {
+   "sv": "Givarfel: BM1 på HTS4",
+   "severity": "alarm",
+   "action": "Om felet kvarstår, kontakta din installatör."
+  },
+  "418": {
+   "sv": "Flödet är lågt. Kontrollera smutsfilter och pump.",
+   "severity": "warning",
+   "action": null
+  },
+  "420": {
+   "sv": "Fel på mjukstartskortets reläer",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "421": {
+   "sv": "Kall uteluft kyldrift",
+   "severity": "info",
+   "action": null
+  },
+  "422": {
+   "sv": "Varm uteluft kyldrift",
+   "severity": "info",
+   "action": null
+  },
+  "423": {
+   "sv": "Driftstörning rotor 1",
+   "severity": "warning",
+   "action": null
+  },
+  "424": {
+   "sv": "Givarfel BM20 på ERS S40 1",
+   "severity": "warning",
+   "action": null
+  },
+  "425": {
+   "sv": "Givarfel BM20 på ERS S40 2",
+   "severity": "warning",
+   "action": null
+  },
+  "426": {
+   "sv": "Givarfel BM20 på ERS S40 3",
+   "severity": "warning",
+   "action": null
+  },
+  "427": {
+   "sv": "Givarfel BM20 på ERS S40 4",
+   "severity": "warning",
+   "action": null
+  },
+  "428": {
+   "sv": "Filterlarm ERS 2, dags att byta eller rengöra filtret. / Filterlarm ERS S40 2. / Filterlarm FLM 2, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Rengör filtret med hjälp av guiden som finns under larmåtgärder."
+  },
+  "429": {
+   "sv": "Filterlarm ERS 3, dags att byta eller rengöra filtret. / Filterlarm ERS S40 3. / Filterlarm FLM 3, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Rengör filtret med hjälp av guiden som finns under larmåtgärder."
+  },
+  "430": {
+   "sv": "Filterlarm ERS 4, dags att byta eller rengöra filtret. / Filterlarm ERS S40 4. / Filterlarm FLM 4, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Rengör filtret med hjälp av guiden som finns under larmåtgärder."
+  },
+  "431": {
+   "sv": "Driftstörning rotor 2",
+   "severity": "warning",
+   "action": null
+  },
+  "432": {
+   "sv": "Driftstörning rotor 3",
+   "severity": "warning",
+   "action": null
+  },
+  "433": {
+   "sv": "Driftstörning rotor 4",
+   "severity": "warning",
+   "action": null
+  },
+  "434": {
+   "sv": "Best. komm. fel ERS 2",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "435": {
+   "sv": "Best. komm. fel ERS 3",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "436": {
+   "sv": "Best. komm. fel ERS 4",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "437": {
+   "sv": "Fel PCB i värmepump.",
+   "severity": "warning",
+   "action": "Byt till ett nytt PCB anpassat för S2125."
+  },
+  "438": {
+   "sv": "Tappad anslutning till trådlös enhet",
+   "severity": "warning",
+   "action": "- Återinstallera de trådlösa tillbehören i meny 5.4 \"Trådlösa enheter\", se manual."
+  },
+  "439": {
+   "sv": "Låg batterinivå i trådlös enhet",
+   "severity": "warning",
+   "action": null
+  },
+  "440": {
+   "sv": "Misslyckad kalibrering SRV-10",
+   "severity": "warning",
+   "action": "Vänligen kontrollera enhetens montering."
+  },
+  "442": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 1",
+   "severity": "warning",
+   "action": null
+  },
+  "443": {
+   "sv": "Frånluftsfläkt i ERS S40 1 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "444": {
+   "sv": "Tilluftsfläkt i ERS S40 1 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "445": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 2",
+   "severity": "warning",
+   "action": null
+  },
+  "446": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 3",
+   "severity": "warning",
+   "action": null
+  },
+  "447": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 4",
+   "severity": "warning",
+   "action": null
+  },
+  "448": {
+   "sv": "Kom.fel mot DWS",
+   "severity": "warning",
+   "action": null
+  },
+  "449": {
+   "sv": "Överhettad smartplug",
+   "severity": "warning",
+   "action": null
+  },
+  "450": {
+   "sv": "Kommunikationsfel mot AXC för –EB101/2-GP12",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "451": {
+   "sv": "Kommunikationsfel mot SFT kortet",
+   "severity": "alarm",
+   "action": null
+  },
+  "452": {
+   "sv": "Givarfel –BP15 difftryck luftflöde",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "453": {
+   "sv": "Givarfel –BP16",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "454": {
+   "sv": "Lågt luftflöde",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "455": {
+   "sv": "Frysskydd SRV-10",
+   "severity": "warning",
+   "action": null
+  },
+  "456": {
+   "sv": "Internt fel SRV-10",
+   "severity": "warning",
+   "action": null
+  },
+  "457": {
+   "sv": "Fel vid uppdatering av trådlös enhet",
+   "severity": "warning",
+   "action": null
+  },
+  "459": {
+   "sv": "BT9 frysskydd / Givarfel BT9",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "462": {
+   "sv": "Frånluftsfläkt i ERS S40 2 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "463": {
+   "sv": "Tilluftsfläkt i ERS S40 2 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "464": {
+   "sv": "Frånluftsfläkt i ERS S40 3 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "465": {
+   "sv": "Tilluftsfläkt i ERS S40 3 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "466": {
+   "sv": "Frånluftsfläkt i ERS S40 4 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "467": {
+   "sv": "Tilluftsfläkt i ERS S40 4 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "468": {
+   "sv": "Frånluftsfläkt i ERS S40 5 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "469": {
+   "sv": "Tilluftsfläkt i ERS S40 5 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "470": {
+   "sv": "Frånluftsfläkt i ERS S40 6 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "471": {
+   "sv": "Tilluftsfläkt i ERS S40 6 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "472": {
+   "sv": "Frånluftsfläkt i ERS S40 7 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "473": {
+   "sv": "Tilluftsfläkt i ERS S40 7 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "474": {
+   "sv": "Frånluftsfläkt i ERS S40 8 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "475": {
+   "sv": "Tilluftsfläkt i ERS S40 8 rapporterar elfel",
+   "severity": "alarm",
+   "action": "Kontrollera ventilationsinställningarna och återkommer larmet kontakta er installatör."
+  },
+  "478": {
+   "sv": "Hög frånluftstemperatur",
+   "severity": "alarm",
+   "action": null
+  },
+  "479": {
+   "sv": "Fel på säkerhetskrets i SFT",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "480": {
+   "sv": "Kom.fel mot AXC för Extern värmemängdsmätare",
+   "severity": "warning",
+   "action": null
+  },
+  "481": {
+   "sv": "Larm smartplug",
+   "severity": "warning",
+   "action": null
+  },
+  "482": {
+   "sv": "Driftstörning rotor 5",
+   "severity": "warning",
+   "action": null
+  },
+  "483": {
+   "sv": "Driftstörning rotor 6",
+   "severity": "warning",
+   "action": null
+  },
+  "484": {
+   "sv": "Driftstörning rotor 7",
+   "severity": "warning",
+   "action": null
+  },
+  "485": {
+   "sv": "Driftstörning rotor 8",
+   "severity": "warning",
+   "action": null
+  },
+  "486": {
+   "sv": "Givarfel –BT84 förångare",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "487": {
+   "sv": "Givarfel –BP9 högtryck",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "489": {
+   "sv": "Givarfel ACS40 BT58 Fjärrvärme",
+   "severity": "warning",
+   "action": null
+  },
+  "490": {
+   "sv": "Tillbehör externt blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "491": {
+   "sv": "Framledningstemperatur utanför arbetsområde",
+   "severity": "warning",
+   "action": null
+  },
+  "492": {
+   "sv": "Returledningstemperatur utanför arbetsområde",
+   "severity": "warning",
+   "action": null
+  },
+  "493": {
+   "sv": "Stöd för funktion saknas",
+   "severity": "warning",
+   "action": null
+  },
+  "494": {
+   "sv": "Förvärmning misslyckad, lång körtid",
+   "severity": "alarm",
+   "action": "Om larmet återkommer, kontakta din installatör."
+  },
+  "495": {
+   "sv": "Givare BT14 eller BP9 lös eller felaktig",
+   "severity": "warning",
+   "action": "Återkommer larmet, se värmepumpens manual för mer information."
+  },
+  "496": {
+   "sv": "Kommunikationsfel mot ZAB",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "497": {
+   "sv": "Mjukvaruuppdatering misslyckades",
+   "severity": "alarm",
+   "action": "Vid upprepat misslyckande, kontakta din installatör."
+  },
+  "498": {
+   "sv": "Best. komm. fel ERS 5 / Best. komm. fel ERS 5",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "499": {
+   "sv": "Best. komm. fel ERS 6 / Best. komm. fel ERS 6",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "500": {
+   "sv": "Best. komm. fel ERS 7 / Best. komm. fel ERS 7",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "501": {
+   "sv": "Best. komm. fel ERS 8 / Best. komm. fel ERS 8",
+   "severity": "warning",
+   "action": null
+  },
+  "502": {
+   "sv": "Filterlarm ERS S40 5. / Filterlarm ERS 5, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Filterlarm ERS S40 5, dags att byta eller rengöra filtret."
+  },
+  "503": {
+   "sv": "Filterlarm ERS S40 6. / Filterlarm ERS 6, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Filterlarm ERS S40 6, dags att byta eller rengöra filtret."
+  },
+  "504": {
+   "sv": "Filterlarm ERS S40 7. / Filterlarm ERS 7, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Filterlarm ERS S40 7, dags att byta eller rengöra filtret."
+  },
+  "505": {
+   "sv": "Filterlarm ERS S40 8. / Filterlarm ERS 8, dags att byta eller rengöra filtret.",
+   "severity": "warning",
+   "action": "Filterlarm ERS S40 8, dags att byta eller rengöra filtret."
+  },
+  "506": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "507": {
+   "sv": "ERS blockerad",
+   "severity": "alarm",
+   "action": null
+  },
+  "508": {
+   "sv": "",
+   "severity": "alarm",
+   "action": null
+  },
+  "509": {
+   "sv": "",
+   "severity": "alarm",
+   "action": null
+  },
+  "510": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 5",
+   "severity": "warning",
+   "action": null
+  },
+  "511": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 6",
+   "severity": "warning",
+   "action": null
+  },
+  "512": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 7",
+   "severity": "warning",
+   "action": null
+  },
+  "513": {
+   "sv": "Upprepade avslut på max avfrostningstid ERS S40 8",
+   "severity": "warning",
+   "action": null
+  },
+  "514": {
+   "sv": "Givarfel BM20 på ERS S40 5",
+   "severity": "warning",
+   "action": null
+  },
+  "515": {
+   "sv": "Givarfel BM20 på ERS S40 6",
+   "severity": "warning",
+   "action": null
+  },
+  "516": {
+   "sv": "Givarfel BM20 på ERS S40 7",
+   "severity": "warning",
+   "action": null
+  },
+  "517": {
+   "sv": "Givarfel BM20 på ERS S40 8",
+   "severity": "warning",
+   "action": null
+  },
+  "518": {
+   "sv": "Växelventil QN10 kalibreras",
+   "severity": "alarm",
+   "action": null
+  },
+  "519": {
+   "sv": "Ventil QN10 kan inte öppna/stänga / Ventil QN10 har problem att öppna/stänga.",
+   "severity": "warning",
+   "action": null
+  },
+  "520": {
+   "sv": "Felaktig spänning växelventil QN10",
+   "severity": "warning",
+   "action": null
+  },
+  "521": {
+   "sv": "Kommunikationsfel mot växelventil QN10",
+   "severity": "warning",
+   "action": null
+  },
+  "525": {
+   "sv": "QN40 kan vara fast i stängd position / QN40 har fastnat i stängd position / Låg tilluftstemperatur",
+   "severity": "alarm",
+   "action": null
+  },
+  "530": {
+   "sv": "Givarfel BT3 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "531": {
+   "sv": "Givarfel BT12 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "532": {
+   "sv": "Givarfel BT14 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "533": {
+   "sv": "Givarfel BT15 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "534": {
+   "sv": "Givarfel BT16 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "535": {
+   "sv": "Givarfel BT17 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "536": {
+   "sv": "Givarfel BT28 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "537": {
+   "sv": "Givarfel BT81 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "538": {
+   "sv": "Givarfel BP8 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "539": {
+   "sv": "Givarfel BP9 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "540": {
+   "sv": "Givarfel BP11 uteluftsvärmepump",
+   "severity": "warning",
+   "action": null
+  },
+  "541": {
+   "sv": "Givarfel BT84 uteluftsvärmepump",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "542": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "543": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "544": {
+   "sv": "Felaktig spänning shuntventil QN11",
+   "severity": "warning",
+   "action": null
+  },
+  "545": {
+   "sv": "",
+   "severity": "alarm",
+   "action": null
+  },
+  "547": {
+   "sv": "Temperaturskydd kompressor / Bestående temperaturskydd kompressor",
+   "severity": "alarm",
+   "action": null
+  },
+  "548": {
+   "sv": "Nivåvakt köldbärare",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "549": {
+   "sv": "Nivåvakt köldbärare",
+   "severity": "alarm",
+   "action": "Återkommer larmet, välj hjälpdrift och kontakta din installatör."
+  },
+  "550": {
+   "sv": "",
+   "severity": "warning",
+   "action": "Kontrollera elnätet."
+  },
+  "551": {
+   "sv": "Givarfel: Varmvatten ut (BT38)",
+   "severity": "warning",
+   "action": null
+  },
+  "552": {
+   "sv": "Sensorfel - BF4 framledning varmvatten flöde.",
+   "severity": "warning",
+   "action": null
+  },
+  "556": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "557": {
+   "sv": "Givarfel -AA5-BT5 varmvatten start / Givarfel –AA25-BT5 varmvatten start",
+   "severity": "warning",
+   "action": null
+  },
+  "558": {
+   "sv": "Misslyckad tryckutjämning",
+   "severity": "warning",
+   "action": null
+  },
+  "559": {
+   "sv": "Pump stopp GP6 i SAM / Pump stopp GP6 i DWS",
+   "severity": "alarm",
+   "action": "Kontakta installatören."
+  },
+  "560": {
+   "sv": "Givarfel - BT7 varmvatten topp. Påverkar (GP8)",
+   "severity": "warning",
+   "action": null
+  },
+  "561": {
+   "sv": "Kompr. stopp kalibrering av EEV",
+   "severity": "warning",
+   "action": null
+  },
+  "564": {
+   "sv": "OPT har detekterat OT fel \"Låsningsbegäran\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "565": {
+   "sv": "Lågt batteri: Tappad anslutning till trådlös enhet",
+   "severity": "warning",
+   "action": null
+  },
+  "566": {
+   "sv": "OPT har detekterat OT fel \"Fel på låga\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "567": {
+   "sv": "OPT har detekterat OT fel \"Lufttrycksfel\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "568": {
+   "sv": "OPT har detekterat OT fel \"Övertemperatur vatten\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "569": {
+   "sv": "OPT har detekterat OT fel \"Lågt vattentryck\"",
+   "severity": "warning",
+   "action": "Om felet består kontakta tillverkaren av gaspannan."
+  },
+  "570": {
+   "sv": "Komm. fel Modbus TCP/IP Ext.",
+   "severity": "warning",
+   "action": null
+  },
+  "572": {
+   "sv": "Ingen kommunikation med gaspannan",
+   "severity": "alarm",
+   "action": "Om larmet återkommer, kontakta din installatör."
+  },
+  "574": {
+   "sv": "Frysskydd kyldrift",
+   "severity": "warning",
+   "action": null
+  },
+  "575": {
+   "sv": "Inkompatibel SFT, korttypen stämmer inte.",
+   "severity": "warning",
+   "action": null
+  },
+  "576": {
+   "sv": "Inkompatibel ZAB, fel revision på hårdvara.",
+   "severity": "warning",
+   "action": null
+  },
+  "577": {
+   "sv": "Hög avluftstemperatur i kyldrift",
+   "severity": "alarm",
+   "action": "Om larmet återkommer, kontakta din installatör."
+  },
+  "578": {
+   "sv": "Återkommande högtryckslarm i kyldrift / Högtryckslarm i kyldrift",
+   "severity": "alarm",
+   "action": null
+  },
+  "579": {
+   "sv": "Givarfel (BT9.1)",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "580": {
+   "sv": "Kommunikationsfel mot tillbehör PVT-source / Givarfel (BT9.2)",
+   "severity": "alarm",
+   "action": "Välj hjälpdrift och kontakta din installatör."
+  },
+  "581": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 5",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "582": {
+   "sv": "Kommunikationsfel rumsenheten / Fel vid inlärning pump-flöde VV / Kommunikationsfel rumsenhet 6",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "583": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 7",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "584": {
+   "sv": "Kommunikationsfel rumsenheten / Kommunikationsfel rumsenhet 8",
+   "severity": "warning",
+   "action": "Kontrollera tillbehörets gruppsäkringar och prova med att återställa larmet/starta om produkten."
+  },
+  "585": {
+   "sv": "Låg framledning kyla",
+   "severity": "warning",
+   "action": null
+  },
+  "587": {
+   "sv": "Möjlig låg fyllnadsmängd",
+   "severity": "warning",
+   "action": null
+  },
+  "591": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "601": {
+   "sv": "Ventil QN18 kan inte öppna/stänga. / Ventil QN18 har problem att öppna/stänga.",
+   "severity": "alarm",
+   "action": "Välj ”Sätt igång hjälpdrift” och kontakta din installatör."
+  },
+  "602": {
+   "sv": "Ventil QN35 kan inte öppna/stänga. / Ventil QN35 har problem att öppna/stänga.",
+   "severity": "alarm",
+   "action": "Kontakta din installatör omgående eftersom frysrisk i anläggningen föreligger vintertid."
+  },
+  "604": {
+   "sv": "Flödesvakt köldbärare",
+   "severity": "warning",
+   "action": null
+  },
+  "605": {
+   "sv": "Lågtryckslarm(Köldbärarpump) / Återkommande lågtryckslarm(Köldbärarpump) / Återkommande lågtryckslarm (frysskydd) / Tillfälligt lågtryckslarm (frysskydd)",
+   "severity": "alarm",
+   "action": "Vid återkommande larm, kontakta din installatör."
+  },
+  "606": {
+   "sv": "Lång blockering PVT / Lång blockering AAC",
+   "severity": "warning",
+   "action": null
+  },
+  "607": {
+   "sv": "GP8-pump blockerad / GP8-pump blockerad, varmvatten kan inte produceras",
+   "severity": "alarm",
+   "action": null
+  },
+  "608": {
+   "sv": "Underspänning på GP8-pump / Underspänning GP8-pump, varmv. kan ej produceras",
+   "severity": "warning",
+   "action": null
+  },
+  "609": {
+   "sv": "El-fel pump (GP8)",
+   "severity": "warning",
+   "action": null
+  },
+  "610": {
+   "sv": "DC-Underspänning (GP8) / Överspänning pump (GP8)",
+   "severity": "warning",
+   "action": null
+  },
+  "613": {
+   "sv": "Torrkörning (GP8)",
+   "severity": "warning",
+   "action": null
+  },
+  "615": {
+   "sv": "Lågtryckslarm (BP2)",
+   "severity": "warning",
+   "action": null
+  },
+  "616": {
+   "sv": "Högtryckslarm (BP1)",
+   "severity": "warning",
+   "action": null
+  },
+  "617": {
+   "sv": "Temperaturskydd kompressor",
+   "severity": "warning",
+   "action": null
+  },
+  "622": {
+   "sv": "Kom.fel mot tillbehör DEH S500",
+   "severity": "warning",
+   "action": null
+  },
+  "623": {
+   "sv": "Flödeskalibrering har inte utförts korrekt.",
+   "severity": "warning",
+   "action": "avstängningsventiler.Om felet består, kontakta servicetekniker."
+  },
+  "624": {
+   "sv": "Givarfel -BT68 fjärrvärme primärkrets inlopp",
+   "severity": "warning",
+   "action": null
+  },
+  "625": {
+   "sv": "Givarfel -BT69 fjärrvärme primärkrets utlopp",
+   "severity": "warning",
+   "action": null
+  },
+  "626": {
+   "sv": "Återkommande lågt klimatsystemtryck / Lågt klimatsystemtryck",
+   "severity": "warning",
+   "action": null
+  },
+  "627": {
+   "sv": "Återkommande högt klimatsystemtryck / Högt klimatsystemtryck / Köldmediesensorfel / Köldmediesensor behöver bytas / Köldmediegivare frånkopplad / Köldmediesensor behöver snart bytas / Köldmediegivare måste snart bytas ut",
+   "severity": "warning",
+   "action": null
+  },
+  "628": {
+   "sv": "Givarfel BP5 intern tryckgivare",
+   "severity": "warning",
+   "action": null
+  },
+  "680": {
+   "sv": "Sol inv. - Begränsning i nätfrekvensen.",
+   "severity": "warning",
+   "action": null
+  },
+  "681": {
+   "sv": "Sol inv. - Strängfel.",
+   "severity": "warning",
+   "action": "Kontrollera polaritet och kopplingen av solcellerna."
+  },
+  "682": {
+   "sv": "QN2 misslyckades att byta",
+   "severity": "warning",
+   "action": "Larmet kommer återställa sig automatiskt efter 10 sekunder."
+  },
+  "683": {
+   "sv": "Alarm för lågt vattenflöde från utedelen",
+   "severity": "warning",
+   "action": null
+  },
+  "684": {
+   "sv": "Sensor BT39 utanför arbetsområde",
+   "severity": "warning",
+   "action": null
+  },
+  "685": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "686": {
+   "sv": "",
+   "severity": "warning",
+   "action": null
+  },
+  "687": {
+   "sv": "Kompressorvärmare behöver service / Kompressorvärmare genererar ingen värme",
+   "severity": "warning",
+   "action": null
+  },
+  "689": {
+   "sv": "Rumsgivarfel i klimatsystem 1",
+   "severity": "warning",
+   "action": null
+  },
+  "690": {
+   "sv": "Rumsgivarfel i klimatsystem 2",
+   "severity": "warning",
+   "action": null
+  },
+  "691": {
+   "sv": "Rumsgivarfel i klimatsystem 3",
+   "severity": "warning",
+   "action": null
+  },
+  "692": {
+   "sv": "Rumsgivarfel i klimatsystem 4",
+   "severity": "warning",
+   "action": null
+  },
+  "693": {
+   "sv": "Rumsgivarfel i klimatsystem 5",
+   "severity": "warning",
+   "action": null
+  },
+  "694": {
+   "sv": "Rumsgivarfel i klimatsystem 6",
+   "severity": "warning",
+   "action": null
+  },
+  "695": {
+   "sv": "Rumsgivarfel i klimatsystem 7",
+   "severity": "warning",
+   "action": null
+  },
+  "696": {
+   "sv": "Rumsgivarfel i klimatsystem 8",
+   "severity": "warning",
+   "action": null
+  },
+  "906": {
+   "sv": "Kontrollera Evakueringsfläktsfilter",
+   "severity": "warning",
+   "action": null
+  },
+  "938": {
+   "sv": "Osäker givarnoggrannhet",
+   "severity": "warning",
+   "action": null
+  },
+  "993": {
+   "sv": "Nödomstart (GP8)",
+   "severity": "warning",
+   "action": null
+  },
+  "994": {
+   "sv": "Nödomstart (GP1)",
+   "severity": "warning",
+   "action": null
+  }
+ }
+}

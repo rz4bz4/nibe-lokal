@@ -1,6 +1,6 @@
 [project]
 name = "nibe-lokal"
-version = "0.2.1"
+version = "0.3.0"
 description = "Local Modbus TCP web app for NIBE S-series heat pumps, without the cloud subscription"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["nibelokal"]
+
+# NIBE's alarm-code table ships with the package; without this an installed
+# wheel would omit it and every alarm would read as an unknown number.
+[tool.setuptools.package-data]
+nibelokal = ["data/*.json"]
 
 # Note: web/ lives at the repo root, not inside the package, and the server
 # looks for it next to config.yaml. Run this from a clone

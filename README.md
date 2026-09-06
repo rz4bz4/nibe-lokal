@@ -4,7 +4,7 @@ A small web app for a NIBE S-series heat pump that talks **directly to the pump
 over Modbus TCP on your own network**. No cloud account, no subscription, no
 myUplink. Your settings and your history stay in files you own.
 
-It does four things:
+It does six things:
 
 - **Shows the pump** — temperatures, hot water, ventilation, fan speed, degree
   minutes, compressor hours, alarms. Five tabs, built for a phone, installable
@@ -21,6 +21,23 @@ It does four things:
   day — and diffs two snapshots so you can see what changed since June. A backup
   you have to remember to take is one you will not have when you need it, and you
   need it right after changing something you should not have.
+- **Pushes alarms to your phone.** NIBE's own 478 S-series alarm texts, in
+  Swedish, verbatim, sent once per alarm rather than once per minute. 289 of the
+  478 also carry the sentence from NIBE's longer text that tells you what to do;
+  the other 189 have no such sentence at NIBE, and the app shows nothing rather
+  than inventing one. Eleven codes have no short text either — for those you get
+  the number and the fact that it fired. The severity that decides whether a code
+  is worth waking you is this project's reading of NIBE's Swedish wording, not
+  something NIBE publishes. This is the one thing myUplink gave away free that
+  actually matters when something breaks at two in the morning.
+- **Knows things the pump does not** — indoor temperature from your own sensors,
+  the SMHI forecast, and hourly electricity prices — and uses them to suggest
+  gentle, symmetric changes it never applies on its own. Given weeks of indoor
+  readings it will also say whether the heat curve's height or its slope is the
+  thing that is wrong. Those three feeds, the alarm push above and the curve
+  autotuning are five optional integrations; with none of them configured the app
+  is exactly what it was before. See
+  [Optional integrations](#optional-integrations).
 
 It is deliberately boring: Python standard library plus one optional package for
 the register map. No framework, no build step, no container. It should still run
@@ -99,8 +116,11 @@ that hostname to `allowed_hosts` in `config.yaml`, or the Host check will refuse
 it. A reverse proxy with any other certificate does the same job.
 
 ```bash
-python3 -m unittest discover tests    # 53 tests, no pump required
+python3 -m unittest discover tests    # no pump required
 ```
+
+Nothing in the suite touches a pump or the network. The ones that walk every
+register map the `nibe` package ships skip themselves if it is not installed.
 
 There is also a browser smoke test that clicks through a running instance. It
 only reads and opens panels — it changes nothing on the pump:
@@ -200,14 +220,17 @@ supply** (menu 1.30.6), so a curve already sitting on either limit will not move
 **One thing NIBE does not document at all:** whether the offset still applies when
 the curve is set to 0, i.e. when your own curve points are in force. Seven NIBE
 manuals say nothing about it either way. Measured on one S735-family pump running
-an own curve, it does apply, at roughly 1.5 °C of supply temperature per step —
-the same order as NIBE's example, not the same number.
+an own curve, it does apply.
 
 **And a trap worth knowing:** the calculated supply temperature *ramps* to a new
 offset over about five minutes. Reading it ten seconds after a write measures the
-ramp, not the setting — an earlier measurement here got 0.2 °C per step that way
-and was wrong by a factor of eight. [docs/registers.md](docs/registers.md) has the
-full measurement and the sources.
+ramp, not the setting — an early measurement here got 0.2 °C per step that way and
+was wrong by more than an order of magnitude. A later six-minute run got 1.5 °C
+per step and was *also* short: the value was still climbing at 0.6 °C a minute
+when the run ended. The app uses NIBE's 2.5 °C, which is also what this pump's
+owner puts it at after years of living with it.
+[docs/registers.md](docs/registers.md) has the measurement, what it does and does
+not establish, and the sources.
 
 It is not a model and makes no predictions. Alongside the rule it uses what the
 pump can say about itself, and several of those facts silently invalidate the
@@ -227,6 +250,171 @@ Every suggestion is one step, and the app says to wait before the next one — a
 day for radiators, two for underfloor heating, which is what the `emitters`
 setting in `config.yaml` is for. Suggestions that only make sense together are
 applied together, in one request that either does all of it or none.
+
+## Optional integrations
+
+Five things the app can do if you give it a credential, and does not do
+otherwise. **All five are optional and the app is complete without them.** A
+fresh clone with none of them configured starts, polls the pump, serves the web
+app and gates writes exactly as described above. There is no nag, no placeholder
+and no degraded mode: an integration you have not configured simply does not
+render — its panel is absent, not empty. If one you *have* configured is down,
+slow or misconfigured, its own endpoint says so in Swedish and the rest of the
+app carries on. None of them can stop the pump being read or written.
+
+Four of the five need a credential. All four live in `config.yaml` in plain
+text — see [Security](#security) before you put them there. SMHI needs none.
+
+Every key below is also settable as an environment variable with a `NIBE_`
+prefix (`NIBE_TIBBER_TOKEN`, and so on). The authoritative list, with the
+defaults and the reasoning, is `config.example.yaml`; this section is the setup.
+
+### Indoor temperature, from a Homey
+
+**What it gives you.** The pump only knows the room temperature if a room sensor
+is wired to it, and most installations have none — which is why the room setpoint
+in the web app is often a knob that regulates nothing. If you run a Homey Pro, it
+already knows what every room is doing. The app reads those sensors, averages
+them, shows the number, stores it in the history, and hands it to the curve
+autotuning below. It never writes anything to Homey.
+
+```yaml
+homey_host: "192.168.1.20"           # IP or hostname; http:// is added if missing
+homey_token: "..."                   # local API key, see below
+homey_devices: "Sovrum, Vardagsrum"  # device names or ids, comma separated
+homey_max_age_minutes: 60
+homey_timeout: 5.0
+homey_cache_seconds: 120
+```
+
+**The credential** is a *local* API key made on the Homey itself, not the Athom
+cloud login: my.homey.app → Settings → System (Advanced) → API keys → New API
+key, scope `homey.device.readonly` (add `homey.zone.readonly` if you want zone
+names). It is shown once.
+
+Set `homey_devices`. Leaving it empty means every device that reports a
+temperature, which is convenient for a first look and almost never right: door
+and window sensors sit in the draught on an outside wall and read several degrees
+off the room they are nominally in. `homey_max_age_minutes` exists because a
+sensor with a flat battery does not disappear — Homey keeps serving its last
+value indefinitely — and a reading frozen at 24 °C in June would otherwise hold
+the heating down all winter.
+
+**If you skip it:** no indoor panel, no indoor history, and the curve autotuning
+below has nothing to work from and says so.
+
+### Weather forecast, from SMHI
+
+**What it gives you.** The pump's own outdoor sensor says what is happening now.
+A house with hours of thermal inertia is better served by what is about to
+happen, and the heating advice reads the forecast before suggesting a change.
+
+```yaml
+weather_lat: 59.3293
+weather_lon: 18.0686
+weather_ttl_minutes: 60
+weather_timeout: 8.0
+```
+
+**No credential.** SMHI's open point forecast is free and unauthenticated; it
+needs only the coordinates of the house. Decimal degrees, dot as the decimal
+point, and do not swap them — a longitude in the latitude field is a point
+outside SMHI's model and answers 404. The forecast covers Sweden and its
+surroundings; elsewhere the model has nothing to say.
+
+**If you skip it:** no forecast panel, and the advice works from the pump's own
+outdoor sensor as it did before.
+
+### Electricity prices, from Tibber
+
+**What it gives you.** Hourly spot prices, and an advisory plan that shifts
+heating into the cheap hours. The plan shifts load, it never sheds it: every hour
+it heats a step extra is paid back by an hour it coasts, within the same day, so
+the day's offsets sum to zero. Only useful on an hourly variable contract.
+
+```yaml
+tibber_token: "..."
+tibber_home_id: ""          # only if your Tibber account has several homes
+spot_timeout: 10.0
+spot_cache_seconds: 900
+spot_min_spread: 0.15       # kr/kWh; below this the day is too flat to bother
+spot_cheap_rank: 0.25
+spot_expensive_rank: 0.75
+spot_max_offset: 1
+spot_max_pairs: 4
+```
+
+**The credential** is a personal API token from
+[developer.tibber.com](https://developer.tibber.com) — log in with your Tibber
+account and take the access token. Read-only is enough.
+
+**It is advisory. Nothing in this app writes the heating offset by itself.** The
+plan is a table you can act on or ignore. `spot_max_offset` is clamped to 1
+whatever you write there, because one step of register 40031 is already about
+2.5 °C of supply temperature.
+
+**If you skip it:** no price panel and no plan. The heating advice is unaffected;
+it never depended on prices.
+
+### Alarm push, via Pushover
+
+**What it gives you.** A notification when the pump raises an alarm, and another
+when it clears. This matters because a pump that has quietly dropped to the
+immersion heater still keeps the house warm — the first sign is the electricity
+bill six weeks later.
+
+**Watching is always on and needs no credential.** The alarm register is polled
+with everything else, every alarm and all-clear is written to the database, and
+`/api/alarms` and the web app show them with NIBE's own text. Only the push off
+the machine needs Pushover.
+
+```yaml
+pushover_token: "..."             # application token
+pushover_user: "..."              # user key
+alarm_notify: true
+alarm_min_severity: "warning"     # info | warning | alarm
+alarm_emergency_priority: true
+alarm_retry_seconds: 300
+alarm_expire_seconds: 10800
+```
+
+**The credentials** are both from [pushover.net](https://pushover.net): log in,
+the **user key** is on the front page, then *Create an Application/API Token* for
+the **application token**. Leave either empty and nothing is sent. Pushover is a
+paid app, one-off, per platform.
+
+`alarm_emergency_priority` sends priority 2 — repeating until acknowledged — for
+codes classified as real alarms. Turn it off if being woken at 03:00 by a sensor
+fault is worse than finding out at breakfast. Note that the severity doing that
+classifying is derived by this project from NIBE's Swedish wording, not published
+by NIBE; `docs/` and the `_meta` block in `nibelokal/data/alarms_s.json` say
+exactly how.
+
+**If you skip it:** alarms are still recorded and still shown in the web app. You
+just have to look.
+
+### Heat curve autotuning
+
+**What it gives you.** Given weeks of history it proposes at most one small
+change, and says whether the curve's *height* or its *slope* is the thing that is
+wrong — which is the question the heating advice asks you to answer from memory.
+Here it is answered from the data.
+
+```yaml
+autotune_target_indoor: 21.0
+autotune_days: 30
+```
+
+**No credential**, but it needs an indoor temperature, which the pump does not
+have — so in practice it needs the Homey integration above, and enough history
+for the weather to have varied. Without `autotune_target_indoor` there is no
+error to measure and the analysis says so rather than guessing.
+
+**Advisory only: it never writes.** Like everything else in the heating advice,
+the change it proposes is one step, and it tells you how long to wait.
+
+**If you skip it:** no autotuning panel. The two-question heating advice above is
+unaffected and does not depend on it.
 
 ## Backups
 
@@ -262,17 +450,28 @@ Worth knowing before you cancel the subscription:
 
 | | myUplink | Here |
 |---|---|---|
-| Alarm push notification | yes | shows a banner when you open the app; no push |
-| Weekly schedules | yes | no — but the pump's own display has them (menu 1.x) |
-| Holiday / away mode | yes | no |
+| Alarm push notification | yes | yes, via Pushover, with NIBE's own alarm texts |
+| Weekly schedules | yes | no, deliberately — see below |
+| Holiday / away mode | yes | no, deliberately — see below |
 | History and graphs | yes, while you pay | yes, in a file you own, for as long as you like |
 | Remote access | yes | via VPN or Tailscale |
+| Electricity price control | Smart Price Adaption, paid tier | yes, from your own Tibber account, advisory only — it proposes an offset, it does not write one |
+| Weather forecast | yes | yes, from SMHI directly |
+| Indoor temperature | only if a room sensor is wired to the pump | from your own sensors via Homey, if you have one |
 | Firmware updates, NIBE support | yes | no — done from the pump's display |
 
-The alarm notification is the one that matters. A pump typically alarms on a
-winter night and stops heating; myUplink pushes to your phone, this shows you a
-red banner the next time you open it. If that gap matters to you, keep the
-subscription or wire the alarm register into whatever notifier you already run.
+Weekly schedules and holiday mode are not implemented and are not planned. Set
+them on the pump's display, where they work with no subscription and nothing of
+ours in the path. They are not in myUplink's public API either, so the gap is not
+one this app could close by talking to NIBE differently — and on the S series
+Modbus does not expose the settings at all. There is no weekly-schedule register
+anywhere in the S-series map, and holiday has only a status flag (40020, plus
+45391 for away mode) with no dates, temperatures or fan modes behind it. The
+F-series map has the whole holiday block at 48043–48051; the S series simply does
+not. Toggling a status the pump's own calendar also drives is a good way to end
+up with two things fighting over the same setting, so the app leaves those two
+registers where everything unclassified lands: guarded, writable only if you ask
+for it explicitly.
 
 ## Security
 
@@ -292,6 +491,35 @@ every setting. Assume the same about this app:
 - Set the **IP address restriction** in the pump's menu 7.5.9.
 - Do not expose port 8377 to the internet. Use a VPN or Tailscale if you want it
   from outside; a heat pump is not a thing to publish.
+
+### The credentials in config.yaml
+
+Configuring the [optional integrations](#optional-integrations) puts four
+secrets in `config.yaml` **in plain text**: the Homey local API key, the Tibber
+personal token, and the Pushover application token and user key. There is no
+keyring, no encryption and no indirection — the file is read as it is written.
+
+What that means in practice:
+
+- **Set the file mode.** `chmod 600 config.yaml`, owned by the user the service
+  runs as. On a shared machine the default umask leaves it world-readable, and
+  `auth_token` is in the same file as everything above.
+- **Do not commit it.** `config.yaml` is in `.gitignore` and should stay there.
+  `config.example.yaml` is the one that is tracked, and it has no values in it.
+  If you have already committed a config with tokens, rotating the tokens is the
+  fix; deleting the file in a later commit is not.
+- **Prefer the environment if your supervisor gives you somewhere better to put
+  it.** Every key also reads from `NIBE_HOMEY_TOKEN`, `NIBE_TIBBER_TOKEN`,
+  `NIBE_PUSHOVER_TOKEN`, `NIBE_PUSHOVER_USER`, and a systemd
+  `EnvironmentFile=` with mode 600 is a slightly better place than the repo.
+- **Know what each one is worth if it leaks.** The Homey key is read-only in the
+  scope suggested above, but it is a key to your house's sensors. The Tibber
+  token reads your consumption and prices, and is tied to your electricity
+  account. The Pushover pair lets someone send notifications to your phone. None
+  of them can reach the heat pump — that is what `auth_token` and the pump's own
+  IP restriction are for — but none of them are throwaway either.
+
+SMHI needs no credential, so there is nothing to protect there.
 
 ## Configuration
 

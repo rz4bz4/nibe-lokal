@@ -17,11 +17,16 @@
   --muted:#6b7789; --line:#e2e6ed; --line-2:#d3d9e3;
   --accent:#1663d8; --accent-ink:#fff; --accent-soft:#e8f0fe;
   --warm:#c2621c; --warm-soft:#fdf0e4; --cool:#1d7fa8; --ok:#127a48; --bad:#b3271e;
+  /* Elpris är inte ett fel. Billig och dyr har egna färger som inte är larmrött. */
+  --cheap:#127a48; --cheap-soft:#e4f2ea; --exp:#a2600b; --exp-soft:#faf0dd;
   --sh-1:0 1px 2px rgba(14,22,36,.07);
   --sh-2:0 2px 4px rgba(14,22,36,.05),0 8px 20px rgba(14,22,36,.06);
   --sh-3:0 12px 32px rgba(14,22,36,.14);
   --r:14px; --r-sm:10px;
   --nav-h:calc(56px + env(safe-area-inset-bottom));
+  /* En typskala för hela appen: fyra siffergrader, inget mer.
+     hero 40 · stor 28 · kakel 20 · brödtext 15 */
+  --fs-hero:40px; --fs-big:28px; --fs-mid:20px;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#0b1119; --raise:#141c27; --sunk:#0f1720; --ink:#e9eef6; --ink-2:#aab6c8;
@@ -29,6 +34,7 @@
   --accent:#5c9bff; --accent-ink:#08111c; --accent-soft:#152540;
   --warm:#e5964f; --warm-soft:#2a1f14; --cool:#54b6e2;
   --ok:#3fc383; --bad:#f0705f;
+  --cheap:#3fc383; --cheap-soft:#12271d; --exp:#e5b04f; --exp-soft:#2a2314;
   --sh-1:0 1px 2px rgba(0,0,0,.4);
   --sh-2:0 2px 4px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.35);
   --sh-3:0 12px 32px rgba(0,0,0,.5);
@@ -51,9 +57,11 @@ h1,h2,h3{margin:0;font-weight:640;letter-spacing:-.011em}
 .top h1{font-size:17px;flex:1}
 .status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
   font-variant-numeric:tabular-nums}
+.status.alarm{color:var(--bad);font-weight:640}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:0 0 auto}
 .dot.live{background:var(--ok);animation:breathe 2.6s ease-in-out infinite}
 .dot.stale{background:var(--bad)}
+.dot.alarm{background:var(--bad);animation:none;width:9px;height:9px}
 @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.82)}}
 .iconbtn{width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;padding:0;
   border-radius:9px;border:1px solid transparent;background:transparent;color:var(--ink-2);
@@ -82,16 +90,20 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;height:var(--nav-h);
   background:color-mix(in srgb,var(--raise) 97%,transparent);
   backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
   border-top:1px solid var(--line);display:flex;justify-content:center}
-nav .in{max-width:640px;width:100%;display:grid;grid-template-columns:repeat(5,1fr)}
+nav .in{max-width:640px;width:100%;display:grid;
+  grid-template-columns:repeat(var(--tabs,5),1fr)}
 nav button{background:none;border:0;padding:6px 2px 4px;color:var(--muted);cursor:pointer;
   display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;
   font-weight:550;letter-spacing:.01em;-webkit-tap-highlight-color:transparent;
   transition:color .18s;position:relative}
+nav button[hidden]{display:none}
 nav button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.65;
   stroke-linecap:round;stroke-linejoin:round;transition:transform .28s cubic-bezier(.3,1.5,.5,1)}
 nav button[aria-selected=true]{color:var(--accent)}
 nav button[aria-selected=true] svg{transform:translateY(-1.5px) scale(1.09)}
 nav button:active svg{transform:scale(.9)}
+nav button .bug{position:absolute;top:2px;right:calc(50% - 17px);width:8px;height:8px;
+  border-radius:50%;background:var(--bad);border:1.5px solid var(--raise)}
 
 /* ---------- cards ---------- */
 .card{background:var(--raise);border:1px solid var(--line);border-radius:var(--r);
@@ -99,35 +111,50 @@ nav button:active svg{transform:scale(.9)}
 .card>h2{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
   margin-bottom:13px;font-weight:660}
 .card .lead{color:var(--ink-2);font-size:13px;margin:-6px 0 13px;line-height:1.5}
+.card h3.sub-h{font-size:12.5px;margin:18px 0 6px;letter-spacing:.01em;text-transform:none;
+  color:var(--ink)}
 
 /* ---------- hero + tiles ---------- */
 .hero{background:var(--raise);border:1px solid var(--line);border-radius:var(--r);
   padding:18px 18px 16px;margin-bottom:12px;box-shadow:var(--sh-1)}
 .hero .big{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
-.hero .n{font-size:44px;font-weight:660;letter-spacing:-.03em;line-height:1;
+.hero .n{font-size:var(--fs-hero);font-weight:660;letter-spacing:-.03em;line-height:1;
   font-variant-numeric:tabular-nums}
-.hero .n .u{font-size:19px;font-weight:560;color:var(--muted);margin-left:4px;
-  letter-spacing:0}
-.hero .k{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
-  font-weight:640;margin-bottom:7px}
-.hero .side{flex:1;min-width:130px;text-align:right;color:var(--ink-2);font-size:13px;
-  line-height:1.65}
-.hero .side b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.hero .k,.metric .k{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);font-weight:640;margin-bottom:7px}
+.hero .side,.metric .side{flex:1;min-width:132px;text-align:right;color:var(--ink-2);
+  font-size:13px;line-height:1.7}
+.hero .side b,.metric .side b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:9px}
+/* En enda enhetsregel: enheten står efter siffran, med ett mellanrum, dämpad.
+   I ett rutnät där varje ruta har samma enhet står enheten i rubriken i stället. */
+.u{margin-left:.26em;font-weight:550;color:var(--muted);letter-spacing:0;font-size:.44em}
+.side .u,.sub .u,td .u,.hint .u{font-size:.86em;margin-left:.24em}
+
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+@media (min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
 .tile{background:var(--raise);border:1px solid var(--line);border-radius:var(--r-sm);
   padding:11px 12px;box-shadow:var(--sh-1);transition:transform .2s,box-shadow .2s}
 .tile:hover{transform:translateY(-1px);box-shadow:var(--sh-2)}
 .tile .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;
-  font-weight:640;margin-bottom:5px;line-height:1.3;height:13px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile .v{font-size:21px;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
-  line-height:1.2}
-.tile .v .u{font-size:12.5px;font-weight:550;color:var(--muted);margin-left:3px;
-  letter-spacing:0}
+  font-weight:640;margin-bottom:5px;line-height:1.3;min-height:26px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile .v{font-size:var(--fs-mid);font-weight:640;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;line-height:1.2}
 .tile.warm .v{color:var(--warm)} .tile.cool .v{color:var(--cool)}
 .tile.live{border-color:var(--warm);background:var(--warm-soft)}
 .tile.live .v{color:var(--warm)}
+
+/* elpriset är en genväg till en egen flik, inte ett kakel bland andra */
+.striplink{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  background:var(--raise);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 14px;margin-bottom:9px;box-shadow:var(--sh-1);cursor:pointer;font:inherit}
+.striplink .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  font-weight:640}
+.striplink .v{font-size:var(--fs-mid);font-weight:640;font-variant-numeric:tabular-nums;
+  line-height:1.2}
+.striplink .go{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
+.striplink.billig .v{color:var(--cheap)} .striplink.dyr .v{color:var(--exp)}
 
 /* ---------- controls ---------- */
 button{font:inherit;font-weight:580;border:1px solid var(--line-2);background:var(--raise);
@@ -160,8 +187,8 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   padding:11px 8px;background:var(--sunk)}
 .stepval .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;
   font-weight:640}
-.stepval .v{font-size:29px;font-weight:660;font-variant-numeric:tabular-nums;line-height:1.2;
-  transition:transform .25s cubic-bezier(.3,1.6,.5,1)}
+.stepval .v{font-size:var(--fs-big);font-weight:660;font-variant-numeric:tabular-nums;
+  line-height:1.2;transition:transform .25s cubic-bezier(.3,1.6,.5,1)}
 .stepval .v.bump{transform:scale(1.16)}
 
 /* ---------- notes, warnings, toast ---------- */
@@ -170,6 +197,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   padding:10px 12px;margin:9px 0;font-size:12.5px;border-radius:0 var(--r-sm) var(--r-sm) 0;
   line-height:1.55;color:var(--ink-2)}
 .warn.quiet{border-left-color:var(--line-2);background:var(--sunk)}
+.warn.bad{border-left-color:var(--bad);background:color-mix(in srgb,var(--bad) 9%,var(--raise))}
 .alarm{background:color-mix(in srgb,var(--bad) 11%,var(--raise));border:1px solid var(--bad);
   color:var(--bad);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;font-size:13.5px;
   line-height:1.55;animation:pulseIn .5s ease}
@@ -187,6 +215,28 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .toast.out{animation:toastOut .25s ease forwards}
 @keyframes toastIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes toastOut{to{opacity:0;transform:translateY(8px) scale(.98)}}
+
+/* ---------- en enda bekräftelseruta för varje skrivning ---------- */
+#modal{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;
+  justify-content:center;background:rgba(8,14,22,.44);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);padding:0 0 0}
+@media (min-width:560px){#modal{align-items:center;padding:20px}}
+#modal[hidden]{display:none}
+.sheet{background:var(--raise);border:1px solid var(--line);width:100%;max-width:520px;
+  border-radius:var(--r) var(--r) 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+  box-shadow:var(--sh-3);max-height:88vh;overflow:auto;
+  animation:sheetIn .26s cubic-bezier(.22,.9,.3,1)}
+@media (min-width:560px){.sheet{border-radius:var(--r)}}
+@keyframes sheetIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+.sheet h3{font-size:16px;margin-bottom:10px}
+.sheet .change{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 13px;margin:0 0 9px}
+.sheet .change b{display:block;font-size:14px;font-weight:620}
+.sheet .change .arrow{font-size:17px;font-weight:660;font-variant-numeric:tabular-nums;
+  margin-top:2px;letter-spacing:-.01em}
+.sheet .why{color:var(--ink-2);font-size:12.5px;line-height:1.55;margin:9px 0}
+.sheet .row{margin-top:14px}
+.sheet .row button{flex:1 1 120px}
 
 /* ---------- tables, lists ---------- */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -216,16 +266,49 @@ tr:last-child td{border-bottom:0}
 .tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--warm);
   background:var(--warm-soft);border-radius:4px;padding:2px 5px;margin-left:6px;
   vertical-align:1px;font-weight:700}
+.tag.quiet{color:var(--muted);background:var(--sunk)}
+
+/* ---------- avancerat: kurvans punkter ---------- */
+.advnote{color:var(--ink-2);font-size:12.5px;line-height:1.55;margin:2px 0 12px}
+.ptrow{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)}
+.ptrow:last-of-type{border-bottom:0}
+.ptrow.sel{background:var(--accent-soft);border-radius:var(--r-sm);
+  box-shadow:0 0 0 6px var(--accent-soft)}
+.ptrow .n{flex:1;min-width:0;cursor:pointer}
+.ptrow .n b{font-weight:570;font-size:13.5px;display:block;line-height:1.35}
+.ptrow .n .say{color:var(--muted);font-size:11.5px;line-height:1.4;display:block}
+.ptrow .val{font-variant-numeric:tabular-nums;font-weight:660;font-size:15px;white-space:nowrap;
+  min-width:64px;text-align:right}
+.ptrow .pm{display:flex;gap:5px;flex:0 0 auto}
+.ptrow .pm button{width:36px;height:36px;padding:0;font-size:18px;font-weight:400;
+  border-radius:9px;line-height:1}
+.ptrow.over .val{color:var(--exp)}
+.curvenote{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 13px;margin:11px 0 0;font-size:12.5px;line-height:1.6;color:var(--ink-2)}
+.curvenote b{color:var(--ink)}
 
 /* ---------- chart ---------- */
 .chart{width:100%;height:168px;display:block;overflow:visible}
 .chart .ln{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .chart .area{fill:url(#g);stroke:none}
 .chart .ax{stroke:var(--line);stroke-width:1}
+.chart .grid{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
 .chart text{fill:var(--muted);font-size:10px;font-weight:550}
 .chart .ln{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
   animation:draw 1s cubic-bezier(.3,.8,.4,1) forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
+#curveChart{height:186px}
+#curveChart .ln{animation:none;stroke-dasharray:none}
+#curveChart .raw{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:4 3;opacity:.75}
+#curveChart .band{fill:var(--ink);opacity:.055}
+#curveChart .lim{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:5 4;opacity:.5}
+#curveChart .now{stroke:var(--warm);stroke-width:1.3;stroke-dasharray:3 3}
+#curveChart circle.pt{fill:var(--accent)}
+#curveChart circle.pt.sel{fill:var(--accent);stroke:var(--accent);stroke-width:5;
+  stroke-opacity:.25}
+#curveChart circle.pt.over{fill:var(--raise);stroke:var(--exp);stroke-width:2}
+#curveChart circle.ghost{fill:none;stroke:var(--ok);stroke-width:2;stroke-dasharray:3 2}
+#curveChart .hit{fill:transparent;cursor:pointer}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
 .chips button{flex:0 1 auto;padding:6px 12px;font-size:12.5px;border-radius:99px;
   border-color:var(--line);background:var(--sunk);font-weight:560}
@@ -237,8 +320,13 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:13px;padding:7px 0;f
 details summary::-webkit-details-marker{display:none}
 details summary::before{content:"";width:6px;height:6px;border-right:1.7px solid currentColor;
   border-bottom:1.7px solid currentColor;transform:rotate(-45deg);transition:transform .22s;
-  margin-left:2px}
+  margin-left:2px;flex:0 0 auto}
 details[open] summary::before{transform:rotate(45deg)}
+details.adv{border:1px solid var(--line);border-radius:var(--r-sm);padding:2px 13px;
+  margin-top:14px;background:var(--sunk)}
+details.adv>summary{font-weight:640;color:var(--ink);font-size:13.5px;padding:11px 0}
+details.adv[open]>summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+details.adv .inner{padding-bottom:12px}
 .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.55}
 .skel{background:linear-gradient(90deg,var(--sunk) 25%,var(--line) 37%,var(--sunk) 63%);
   background-size:400% 100%;animation:shim 1.3s ease-in-out infinite;border-radius:6px;
@@ -246,6 +334,88 @@ details[open] summary::before{transform:rotate(45deg)}
 @keyframes shim{0%{background-position:100% 0}100%{background-position:-100% 0}}
 footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.75}
 footer a{color:var(--muted)}
+
+/* ---------- integrationer: larm, inne, väder, elpris ---------- */
+.alarm.sev-warning{border-color:var(--warm);color:var(--warm);
+  background:color-mix(in srgb,var(--warm) 11%,var(--raise))}
+.alarm.sev-info{border-color:var(--line-2);color:var(--ink-2);background:var(--sunk)}
+.alarm .act{margin-top:6px;font-size:12.5px;line-height:1.55;opacity:.94}
+.alarm .meta{margin-top:8px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  font-weight:660;opacity:.7;font-variant-numeric:tabular-nums}
+
+.metric{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.metric .n{font-size:var(--fs-big);font-weight:660;letter-spacing:-.03em;line-height:1;
+  font-variant-numeric:tabular-nums}
+
+.zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:9px}
+.zone{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 12px}
+.zone .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  font-weight:640;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zone .v{font-size:var(--fs-mid);font-weight:640;letter-spacing:-.02em;line-height:1.2;
+  font-variant-numeric:tabular-nums}
+.sub{color:var(--muted);font-size:12.5px;margin-top:10px;line-height:1.55}
+tr.dim{opacity:.55}
+
+.days{display:grid;grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:6px;margin-top:6px}
+.day{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:8px 3px;text-align:center;line-height:1.35}
+.day .d{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  font-weight:660}
+.day .mx{font-size:15px;font-weight:640;font-variant-numeric:tabular-nums}
+.day .mn{font-size:13px;color:var(--cool);font-variant-numeric:tabular-nums}
+#wxChart{height:118px}
+#wxChart .ln{stroke:var(--cool)}
+#wxChart .area{fill:url(#gw)}
+#wxChart .mark{stroke:var(--cool);stroke-width:1.4;stroke-dasharray:3 3;opacity:.65}
+
+.bars{width:100%;height:132px;display:block;margin-top:12px}
+.bars rect.bar{fill:var(--line-2)}
+.bars rect.billig{fill:var(--cheap)}
+.bars rect.dyr{fill:var(--exp)}
+.bars rect.nowcol{fill:var(--accent);opacity:.16}
+.bars rect.split{fill:var(--line-2);opacity:.9}
+.bars .ax{stroke:var(--line);stroke-width:1}
+.bars .grid{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.bars .mean{stroke:var(--muted);stroke-width:1;stroke-dasharray:5 4;opacity:.8}
+.bars text{fill:var(--muted);font-size:9px;font-weight:550}
+.axrow{display:grid;font-size:10px;color:var(--muted);margin-top:5px;
+  font-variant-numeric:tabular-nums}
+.axrow span{grid-row:1;text-align:center;white-space:nowrap}
+.axrow.dayrow span{text-align:left;font-weight:640;letter-spacing:.03em;text-transform:uppercase}
+.tile.billig .v{color:var(--cheap)} .tile.dyr .v{color:var(--exp)}
+
+.pill{display:inline-block;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+  font-weight:700;border-radius:5px;padding:2px 6px;vertical-align:2px;margin-left:6px}
+.pill.billig{background:var(--cheap-soft);color:var(--cheap)}
+.pill.dyr{background:var(--exp-soft);color:var(--exp)}
+.pill.normal{background:var(--sunk);color:var(--muted)}
+
+.planrow{display:flex;gap:11px;align-items:flex-start;padding:10px 0;
+  border-bottom:1px solid var(--line)}
+.planrow:last-of-type{border-bottom:0}
+.delta{flex:0 0 auto;min-width:36px;text-align:center;border-radius:8px;padding:4px 6px;
+  font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;line-height:1.2}
+.delta.up{background:var(--cheap-soft);color:var(--cheap)}
+.delta.down{background:var(--exp-soft);color:var(--exp)}
+.planrow .t{font-weight:600;font-variant-numeric:tabular-nums;font-size:13.5px}
+.planrow .w{color:var(--muted);font-size:12.5px;line-height:1.5;margin-top:2px}
+
+.meter{height:5px;border-radius:3px;background:var(--sunk);overflow:hidden;margin:10px 0 4px}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:3px;
+  transition:width .25s cubic-bezier(.22,.8,.3,1)}
+.prop{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:13px 14px;margin-top:12px}
+.prop .h{font-weight:640;font-variant-numeric:tabular-nums;margin-bottom:4px;font-size:14.5px}
+.prop .w{color:var(--ink-2);font-size:12.5px;line-height:1.55;margin-top:5px}
+.src{display:flex;align-items:center;gap:8px;margin:16px 0 8px}
+.src h3{font-size:13px;font-weight:640}
+.src .badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;
+  color:var(--muted);background:var(--sunk);border-radius:5px;padding:2px 6px}
+.cfg{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+  background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
+  color:var(--ink-2);overflow-x:auto;white-space:pre-wrap;word-break:break-word;line-height:1.6}
+ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-height:1.6}
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
@@ -257,7 +427,7 @@ footer a{color:var(--muted)}
 
 <header class="top" id="top"><div class="in">
   <h1 id="viewTitle">Just nu</h1>
-  <div class="status"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
+  <div class="status" id="statusWrap"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
   <button class="iconbtn" id="goSettings" title="Inställningar och backup" aria-label="Inställningar">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
@@ -265,22 +435,45 @@ footer a{color:var(--muted)}
 
 <div class="wrap">
 
+<!-- Larmrutan ligger utanför vyerna: ett stående larm ska synas på varje flik,
+     inte bara på Just nu. -->
+<div id="alarmBanner" hidden></div>
+
 <!-- ===================== NU ===================== -->
 <section class="view on" id="v-now">
-  <div id="alarmBanner" hidden></div>
+
+  <div class="card" id="alarmHistWrap" hidden>
+    <details><summary id="alarmHistSum">Larmhistorik</summary>
+      <table id="alarmHist"></table>
+      <div id="alarmHistNote"></div>
+      <p class="hint">Larm som varit. Ett larm som kom och gick av sig självt är ändå något
+        pumpen tyckte var fel — därför ligger det kvar här.</p>
+    </details>
+  </div>
 
   <div class="hero">
     <div class="big">
       <div>
-        <div class="k">Varmvatten</div>
-        <div class="n" id="heroHw">–</div>
+        <div class="k" id="heroKey">Inne</div>
+        <div class="n" id="heroVal">–</div>
       </div>
       <div class="side" id="heroSide"><div class="skel" style="width:80%;margin-left:auto"></div>
         <div class="skel" style="width:60%;margin-left:auto"></div></div>
     </div>
   </div>
 
+  <div id="priceStrip"></div>
   <div class="grid" id="tiles"></div>
+
+  <div class="card" id="indoorCard" hidden style="margin-top:12px">
+    <h2>Rummen</h2>
+    <div id="indoorBody"></div>
+  </div>
+
+  <div class="card" id="weatherCard" hidden style="margin-top:12px">
+    <h2>Vädret framåt</h2>
+    <div id="weatherBody"></div>
+  </div>
 
   <div class="card" style="margin-top:12px">
     <h2>Alla avlästa värden</h2>
@@ -292,6 +485,7 @@ footer a{color:var(--muted)}
 <section class="view" id="v-heat">
   <div class="card">
     <h2>Justera värmen</h2>
+    <div id="heatState"></div>
     <div id="heatLine" class="lead" style="margin:-4px 0 12px"></div>
     <div class="stepper">
       <button id="heatDown" aria-label="Sänk värmen">−</button>
@@ -302,14 +496,14 @@ footer a{color:var(--muted)}
     <div id="heatFlags"></div>
   </div>
 
-  <div class="card" id="curveCard" hidden>
-    <h2>Din värmekurva</h2>
-    <div id="curveBody"></div>
-  </div>
+  <!-- Ett råd, två källor: din känsla och appens mätning. Samma förslagsruta,
+       samma bekräftelse, samma väntetid. -->
+  <div class="card" id="adviceCard">
+    <h2>Vad ska jag ändra?</h2>
+    <p class="lead">Två källor pekar på samma reglage: hur huset känns för dig, och vad appen
+      har mätt över tid. Båda föreslår en ändring i taget — och appen gör ingen av dem själv.</p>
 
-  <div class="card">
-    <h2>Hjälp mig ställa in</h2>
-    <p class="lead">Två frågor. Svaret blir en konkret ändring med motivering — inte en gissning.</p>
+    <div class="src"><h3>Så känns det inne</h3><span class="badge">din känsla</span></div>
     <label>Hur känns det?</label>
     <div class="chips" id="feelingTabs">
       <button data-feeling="warmer" aria-pressed="true">För kallt</button>
@@ -325,10 +519,28 @@ footer a{color:var(--muted)}
       <button class="primary" id="adviceGo">Ge mig ett förslag</button>
     </div>
     <div id="adviceOut" style="margin-top:12px"></div>
+
+    <div id="tuneCard" hidden>
+      <div class="src"><h3>Så mäter appen</h3><span class="badge">veckor av historik</span></div>
+      <div id="tuneBody"></div>
+    </div>
+  </div>
+
+  <div class="card" id="curveCard" hidden>
+    <h2>Din värmekurva</h2>
+    <div id="curveBody"></div>
   </div>
 </section>
 
-<!-- ===================== VATTEN ===================== -->
+<!-- ===================== ELPRIS ===================== -->
+<section class="view" id="v-price">
+  <div class="card" id="spotCard">
+    <h2>Elpris och plan</h2>
+    <div id="spotBody"><div class="skel" style="width:62%"></div><div class="skel" style="width:84%"></div></div>
+  </div>
+</section>
+
+<!-- ===================== VATTEN OCH LUFT ===================== -->
 <section class="view" id="v-water">
   <div class="card">
     <h2>Extra varmvatten</h2>
@@ -353,10 +565,6 @@ footer a{color:var(--muted)}
     <h2>Varmvatteninställningar</h2>
     <div id="setWater"><div class="skel" style="width:60%"></div><div class="skel" style="width:75%"></div></div>
   </div>
-</section>
-
-<!-- ===================== LUFT ===================== -->
-<section class="view" id="v-air">
   <div class="card">
     <h2>Ventilation</h2>
     <p class="lead" id="fanNote">Lägena är inte ordnade lågt till högt — procenten i listan är det som gäller,
@@ -431,6 +639,14 @@ footer a{color:var(--muted)}
     <table id="wlog"></table>
   </div>
 
+  <div class="card" id="featHint" hidden>
+    <h2>Kan slås på</h2>
+    <p class="lead">Funktioner appen kan visa men som inte är konfigurerade. Fyll i nyckeln
+      i <code>config.yaml</code> och starta om appen.</p>
+    <div id="featHintList"></div>
+    <div class="row"><button class="ghost" id="featHintHide">Dölj det här</button></div>
+  </div>
+
   <footer>
     nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
     ingen molntjänst, ingen prenumeration<br>
@@ -442,632 +658,23 @@ footer a{color:var(--muted)}
 
 <div id="toast"></div>
 
-<nav><div class="in">
+<div id="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+    <div class="row">
+      <button class="ghost" id="modalNo">Avbryt</button>
+      <button class="primary" id="modalYes">Genomför</button>
+    </div>
+  </div>
+</div>
+
+<nav><div class="in" id="navIn">
   <button data-view="now" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Just nu</button>
   <button data-view="heat"><svg viewBox="0 0 24 24"><path d="M14 14.76V4a2 2 0 1 0-4 0v10.76a4 4 0 1 0 4 0z"/></svg>Värme</button>
+  <button data-view="price" hidden><svg viewBox="0 0 24 24"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/></svg>Elpris</button>
   <button data-view="water"><svg viewBox="0 0 24 24"><path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/></svg>Vatten</button>
-  <button data-view="air"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 16h13a3 3 0 1 1-3 3"/><path d="M3 12h17"/></svg>Luft</button>
   <button data-view="hist"><svg viewBox="0 0 24 24"><path d="M3 18l5-6 4 3 5-8 4 5"/></svg>Historik</button>
 </div></nav>
 
 <script>
-const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
-
-/* ---------------- token + api ---------------- */
-let token = (() => {
-  const u = new URLSearchParams(location.search).get('token');
-  try {
-    if (u) localStorage.setItem('nibe_token', u);
-    return u || localStorage.getItem('nibe_token') || '';
-  } catch (e) { return u || ''; }
-})();
-
-async function api(path, opts = {}) {
-  const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
-  if (token) headers['X-Auth-Token'] = token;
-  const res = await fetch(path, Object.assign({}, opts, {headers}));
-  const body = await res.json().catch(() => ({error: 'svaret gick inte att tolka'}));
-  if (res.status === 401) {
-    // An installed home-screen app has its own storage, so a ?token= from the
-    // browser is not there. Ask once rather than showing a dead dashboard.
-    const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
-    if (given) {
-      token = given.trim();
-      try { localStorage.setItem('nibe_token', token); } catch (e) {}
-      return api(path, opts);
-    }
-  }
-  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
-  return body;
-}
-const post = (p, b) => api(p, {method: 'POST', body: JSON.stringify(b || {})});
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function toast(text, ok = true, ms = 7000) {
-  const el = document.createElement('div');
-  el.className = 'toast ' + (ok ? 'ok' : 'bad');
-  el.textContent = text;
-  $('#toast').appendChild(el);
-  setTimeout(() => {
-    el.classList.add('out');
-    setTimeout(() => el.remove(), 260);
-  }, ms);
-}
-
-/* ---------------- navigation ---------------- */
-const TITLES = {now:'Just nu', heat:'Värme', water:'Varmvatten', air:'Ventilation',
-                hist:'Historik', set:'Inställningar'};
-const ONSHOW = {};
-let current = 'now';
-
-function show(name) {
-  if (!TITLES[name]) return;
-  current = name;
-  $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + name));
-  $$('nav button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === name));
-  $('#viewTitle').textContent = TITLES[name];
-  window.scrollTo({top: 0, behavior: 'instant'});
-  try { history.replaceState(null, '', '#' + name); } catch (e) {}
-  if (ONSHOW[name]) ONSHOW[name]();
-}
-$$('nav button').forEach(b => b.onclick = () => show(b.dataset.view));
-$('#goSettings').onclick = () => show('set');
-addEventListener('hashchange', () => show(location.hash.slice(1) || 'now'));
-addEventListener('scroll', () => $('#top').classList.toggle('scrolled', scrollY > 4),
-                 {passive: true});
-
-/* ---------------- status ---------------- */
-const TILES = [
-  [30010, 'Laddning', 'warm'], [30002, 'Ute', 'cool'], [30020, 'Frånluft', ''],
-  [30006, 'Framledning', 'warm'], [30008, 'Retur', ''], [31047, 'Kompressor', ''],
-  [40012, 'Gradminuter', ''], [32134, 'Fläkt', ''], [40057, 'VV-läge', ''],
-  [40105, 'Ventilation', ''], [31028, 'Elpatron', ''], [31088, 'Drifttid', ''],
-];
-let latest = [], byAddr = {}, fanSpeeds = null;
-
-// The register map's titles are English installer shorthand. Where settings.py
-// has already given a register a plain-Swedish name, use that instead.
-const SWEDISH = {
-  30002:'Utetemperatur', 30006:'Framledning', 30008:'Returledning',
-  30009:'Varmvatten, topp', 30010:'Varmvatten, laddning', 30020:'Frånluft',
-  30117:'Rumstemperatur', 31018:'Beräknad framledning', 31026:'Drifttid, tillskott',
-  31028:'Elpatron just nu', 31047:'Kompressorfrekvens', 31079:'Extra varmvatten, status',
-  31088:'Drifttid, kompressor', 31092:'Drifttid, varmvatten', 31535:'Kompressorstarter',
-  31975:'Fläktvarvtal', 31976:'Larmnummer', 32134:'Frånluftsfläkt',
-  40012:'Gradminuter', 40057:'Varmvattenkomfort', 40067:'Periodisk höjning, intervall',
-  40105:'Ventilationsläge', 40110:'Frånluftsfläkt, normal',
-  40226:'Extra varmvatten, minuter kvar',
-};
-const namn = r => SWEDISH[r.address] || r.title;
-
-function fmt(v, unit) {
-  if (v === null || v === undefined) return '–';
-  if (typeof v === 'number') {
-    const s = (unit === '°C' || !Number.isInteger(v)) ? v.toFixed(1) : String(v);
-    return esc(s) + (unit ? '<span class="u">' + esc(unit) + '</span>' : '');
-  }
-  return esc(String(v));
-}
-
-function freshness(ts, err) {
-  const dot = $('#dot'), out = $('#freshness');
-  if (err) { dot.className = 'dot stale'; out.textContent = 'pumpen svarar inte'; return; }
-  if (!ts) { dot.className = 'dot'; out.textContent = 'väntar'; return; }
-  const age = Math.round(Date.now() / 1000 - ts);
-  dot.className = 'dot ' + (age < 180 ? 'live' : 'stale');
-  out.textContent = age < 90 ? 'live' : Math.round(age / 60) + ' min sedan';
-}
-
-function boosts() {
-  const out = [];
-  const hw = byAddr[40226] && byAddr[40226].value;
-  if (hw) out.push(['Extra varmvatten', hw + '<span class="u">min kvar</span>']);
-  const mode = byAddr[40105] && byAddr[40105].value;
-  if (mode) {
-    const pct = fanSpeeds && fanSpeeds[mode] !== undefined ? fanSpeeds[mode] : null;
-    out.push(['Ventilationsboost',
-              pct === null ? 'läge ' + mode : pct + '<span class="u">%</span>']);
-  }
-  return out;
-}
-
-function renderNow() {
-  byAddr = Object.fromEntries(latest.map(r => [r.address, r]));
-
-  const top = byAddr[30009];
-  $('#heroHw').innerHTML = top ? fmt(top.value, top.unit) : '–';
-  const bits = [];
-  const put = (a, label) => {
-    const r = byAddr[a];
-    if (r && r.value !== null && r.value !== undefined)
-      bits.push(label + ' <b>' + fmt(r.value, r.unit) + '</b>');
-  };
-  put(30002, 'Ute'); put(30006, 'Framledning'); put(31976, 'Larm');
-  $('#heroSide').innerHTML = bits.join('<br>') || '&nbsp;';
-
-  const alarm = byAddr[31976] && byAddr[31976].value;
-  const ab = $('#alarmBanner');
-  if (alarm) {
-    ab.hidden = false; ab.className = 'alarm';
-    ab.innerHTML = `<b>Pumpen larmar (kod ${esc(String(alarm))})</b>
-      Slå upp koden på pumpens display — den visar larmtexten och vad som ska göras.
-      Ett larm kan betyda att pumpen slutat värma, så vänta inte på att det går över.`;
-  } else { ab.hidden = true; ab.innerHTML = ''; }
-
-  const live = boosts().map(([k, v]) =>
-    `<div class="tile live"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
-  $('#tiles').innerHTML = live + TILES
-    .filter(([a]) => byAddr[a] && byAddr[a].value !== null && byAddr[a].value !== undefined)
-    .map(([a, label, cls]) => {
-      const r = byAddr[a];
-      return `<div class="tile ${cls}"><div class="k">${label}</div>
-              <div class="v">${fmt(r.value, r.unit)}</div></div>`;
-    }).join('');
-
-  $('#all').innerHTML = latest.map(r =>
-    `<tr><td>${esc(namn(r))}<div class="addr">${r.address} · ${esc(r.title)}</div></td>
-     <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
-  ).join('');
-
-  const hwLive = byAddr[40226] && byAddr[40226].value;
-  $('#hwLive').innerHTML = hwLive
-    ? `<div class="warn">Extra varmvatten pågår — ${hwLive} minuter kvar.</div>` : '';
-  const vm = byAddr[40105] && byAddr[40105].value;
-  $('#ventLive').innerHTML = vm
-    ? `<div class="warn">Ventilationsläge ${vm}${fanSpeeds && fanSpeeds[vm] !== undefined
-        ? ' (' + fanSpeeds[vm] + ' %)' : ''} är aktivt. Pumpen går tillbaka själv.</div>` : '';
-}
-
-async function refresh() {
-  try {
-    const d = await api('/api/status');
-    latest = d.registers;
-    freshness(d.polled_at, d.poll_error);
-    renderNow();
-    if (!$('#histTabs').children.length) buildHistTabs();
-    if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
-  } catch (e) {
-    $('#dot').className = 'dot stale';
-    $('#freshness').textContent = 'fel';
-    if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
-  }
-}
-
-/* ---------------- heating ---------------- */
-let heat = null;
-
-async function loadHeating() {
-  try { heat = await api('/api/heating'); }
-  catch (e) { $('#heatState').innerHTML = `<div class="warn">${esc(e.message)}</div>`; return; }
-
-  const el = $('#offsetNow');
-  const next = heat.offset === null ? '–' : (heat.offset > 0 ? '+' : '') + heat.offset;
-  if (el.textContent !== next) {
-    el.textContent = next;
-    el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 260);
-  }
-
-  const bits = [];
-  if (heat.uses_own_curve) bits.push('egen kurva');
-  else if (heat.curve !== null) bits.push('kurva ' + heat.curve);
-  if (heat.outdoor !== null) bits.push('ute ' + heat.outdoor.toFixed(1) + ' °C');
-  if (heat.calculated_supply !== null && heat.calculated_supply !== undefined)
-    bits.push('kurvan begär ' + heat.calculated_supply.toFixed(1) + ' °C');
-  if (heat.degree_minutes !== null) bits.push(Math.round(heat.degree_minutes) + ' gradminuter');
-  $('#heatLine').textContent = bits.join(' · ');
-
-  // Warnings first and always visible; the longer background notes are folded
-  // away. Five expanded text blocks above the button is not a heating control.
-  const warns = heat.warnings || [];
-  const notes = (heat.observations || []).filter(o => o.length > 90);
-  $('#heatFlags').innerHTML =
-    warns.slice(0, 2).map(w => `<div class="warn">${esc(w)}</div>`).join('') +
-    ((warns.length > 2 || notes.length)
-      ? `<details><summary>Mer om din anläggning</summary>${
-          warns.slice(2).map(w => `<div class="warn">${esc(w)}</div>`).join('')}${
-          notes.map(o => `<div class="warn quiet">${esc(o)}</div>`).join('')}</details>`
-      : '');
-
-  renderCurve();
-
-  $('#offsetNote').textContent =
-    'Plus ger varmare hus, minus svalare — uppmätt på din pump. Utslaget syns tydligare i ' +
-    'kyla än i milt väder, och nedåt tar det stopp vid min framledning' +
-    (heat.min_supply != null ? ' (' + heat.min_supply + ' °C).' : '.') +
-    ' Vänta ' + (heat.wait || 'ett dygn') + ' innan du justerar igen.';
-}
-
-const CURVE_OUT = [-30, -20, -10, 0, 10, 20, 30];
-
-function renderCurve() {
-  const card = $('#curveCard');
-  const pts = (heat && heat.own_curve) || [];
-  if (!heat || !heat.uses_own_curve || !pts.filter(p => p !== null).length) {
-    card.hidden = true; return;
-  }
-  card.hidden = false;
-  const vals = pts.map(p => (p === null ? null : Number(p)));
-  const known = vals.filter(v => v !== null);
-  const lo = Math.min(...known), hi = Math.max(...known);
-  const W = 600, H = 120, P = 34;
-  const X = i => P + i / (CURVE_OUT.length - 1) * (W - P - 16);
-  const Y = v => H - 24 - (v - lo) / ((hi - lo) || 1) * (H - 44);
-  const path = vals.map((v, i) => v === null ? '' :
-    ((i === 0 || vals[i - 1] === null ? 'M' : 'L') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)))
-    .join(' ').trim();
-  const dots = vals.map((v, i) => v === null ? '' :
-    `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3"
-      fill="var(--accent)"/>`).join('');
-  const labels = CURVE_OUT.map((t, i) => (i % 2 === 0)
-    ? `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${t > 0 ? '+' : ''}${t}</text>`
-    : '').join('');
-
-  card.querySelector('#curveBody').innerHTML = `
-    <p class="lead" style="margin:-4px 0 10px">Kurvan står på 0, alltså egen kurva: pumpen
-      följer dina punkter i stället för en numrerad kurva. Vänster är kallt ute, höger varmt.</p>
-    <svg class="chart" style="height:132px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <path class="ln" style="--len:0;animation:none" d="${path}"/>${dots}
-      <line class="ax" x1="${P}" y1="${H - 24}" x2="${W - 16}" y2="${H - 24}"/>
-      <text x="2" y="14">${hi} °C</text><text x="2" y="${H - 28}">${lo} °C</text>
-      ${labels}
-    </svg>
-    <table style="margin-top:8px">${vals.map((v, i) => v === null ? '' :
-      `<tr><td>P${i + 1} — ${CURVE_OUT[i] > 0 ? '+' : ''}${CURVE_OUT[i]} °C ute</td>
-       <td>${v} °C fram</td></tr>`).join('')}</table>
-    <p class="hint">Ändra punkterna under Inställningar → Värmekurvan.</p>`;
-}
-
-async function nudgeOffset(step, button) {
-  await loadHeating();                       // the display may have moved it since
-  if (!heat || heat.offset === null) return;
-  const to = heat.offset + step;
-  const dir = step > 0 ? 'varmare' : 'svalare';
-  const golv = heat.min_supply != null ? heat.min_supply + ' °C' : 'min framledning';
-  if (!confirm(`Värmeoffset ${heat.offset} → ${to}\n\n` +
-               `Plus = varmare, minus = svalare. Det här gör huset ${dir}.\n\n` +
-               `Offset flyttar hela värmekurvan lika mycket vid alla utetemperaturer — ` +
-               `ungefär en grad inomhus per steg, men hur många steg som behövs beror ` +
-               `på ditt värmesystem.` +
-               (step < 0 ? `\n\nNedåt tar det stopp vid ${golv}: ligger kurvan redan ` +
-                           `där gör en sänkning ingenting.` : '') +
-               `\n\nHuset svarar långsamt: utvärdera om ${heat.wait || 'ett dygn'}, ` +
-               `inte om en timme.`))
-    return;
-  await act(button,
-    () => post('/api/write', {address: 40031, value: to, expect: heat.offset, confirm: true}),
-    r => `Värmeoffset ${r.before} → ${r.after}. Känn efter om ${heat.wait || 'ett dygn'}.`);
-  await loadHeating();
-}
-$('#heatUp').onclick = e => nudgeOffset(1, e.currentTarget);
-$('#heatDown').onclick = e => nudgeOffset(-1, e.currentTarget);
-
-/* ---------------- advice ---------------- */
-function picker(sel, attr) {
-  $$(sel + ' button').forEach(b => b.onclick = () =>
-    $$(sel + ' button').forEach(x => x.setAttribute('aria-pressed', x === b)));
-  return () => $(sel + ' [aria-pressed=true]').dataset[attr];
-}
-const feeling = picker('#feelingTabs', 'feeling');
-const when = picker('#whenTabs', 'when');
-
-$('#adviceGo').onclick = async e => {
-  const btn = e.currentTarget, out = $('#adviceOut');
-  btn.disabled = true;
-  out.innerHTML = '<div class="skel" style="width:60%"></div><div class="skel" style="width:80%"></div>';
-  try {
-    const a = await api(`/api/advice?feeling=${feeling()}&when=${when()}`);
-    let html = (a.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
-    const groups = [];
-    (a.suggestions || []).forEach((sg, i) => {
-      const key = sg.group || ('one' + i);
-      let g = groups.find(x => x.key === key);
-      if (!g) groups.push(g = {key, items: []});
-      g.items.push(sg);
-    });
-    if (a.blocked) html += `<div class="warn">${esc(a.blocked)}</div>`;
-    else if (!groups.length) html += '<p class="hint">Inget förslag den här gången.</p>';
-    else {
-      html += groups.map((g, gi) => `<div class="card" style="margin:0 0 10px;box-shadow:none;
-        background:var(--sunk)">` + g.items.map(sg =>
-          `<div style="font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:3px">
-            ${esc(sg.title)}: ${esc(sg.current + ' → ' + sg.proposed + (sg.unit ? ' ' + sg.unit : ''))}</div>
-           <div style="color:var(--muted);font-size:12.5px;margin-bottom:10px">${esc(sg.why)}</div>`
-        ).join('') +
-        `<button class="primary" data-group="${gi}" style="width:100%">
-          ${g.items.length > 1 ? 'Genomför båda' : 'Genomför'}</button></div>`).join('');
-      html += `<p class="hint">En justering i taget, och vänta ${esc(a.wait || 'ett dygn')}
-        innan nästa — två ändringar samtidigt går inte att utvärdera.</p>`;
-    }
-    out.innerHTML = html;
-    out.querySelectorAll('[data-group]').forEach(b => b.onclick = async ev => {
-      const items = groups[+ev.currentTarget.dataset.group].items;
-      const lines = items.map(s => `${s.title}: ${s.current} → ${s.proposed}`).join('\n');
-      if (!confirm(`${lines}\n\n${items[0].why}`)) return;
-      await act(ev.currentTarget,
-        () => post('/api/write', {confirm: true,
-          changes: items.map(s => ({address: s.address, value: s.proposed, expect: s.current}))}),
-        r => {
-          const done = (r.changes || []).map(c => `${c.title}: ${c.before} → ${c.after}`).join('. ');
-          if (r.partial) {
-            return 'Bara en del gick igenom: ' + (r.error || '') +
-                   (r.rolled_back && r.rolled_back.length
-                     ? ' Återställde: ' + r.rolled_back.join(', ') + '.' : '');
-          }
-          return done + `. Utvärdera om ${a.wait || 'ett dygn'}.`;
-        },
-        r => !r.partial);
-      await loadHeating();
-    });
-  } catch (err) {
-    out.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
-  } finally { btn.disabled = false; }
-};
-
-/* ---------------- actions ---------------- */
-async function act(button, fn, describe, okTest) {
-  button.disabled = true;
-  const label = button.textContent;
-  button.textContent = '…';
-  try {
-    const r = await fn();
-    const ok = okTest ? okTest(r) : true;
-    toast(describe(r), ok);
-    await refresh();
-  } catch (e) {
-    toast(e.message, false, 11000);
-  } finally { button.disabled = false; button.textContent = label; }
-}
-
-$('#hwOn').onclick = e => act(e.currentTarget,
-  () => post('/api/hotwater', {minutes: +$('#hwMin').value}),
-  r => `Extra varmvatten igång i ${r.minutes} minuter.`);
-$('#hwOff').onclick = e => act(e.currentTarget,
-  () => post('/api/hotwater', {off: true}), () => 'Extra varmvatten avbrutet.');
-
-async function loadFanModes() {
-  try { fanSpeeds = (await api('/api/fan')).speeds; } catch (e) { return; }
-  const normal = fanSpeeds['0'], sel = $('#ventMode');
-  sel.innerHTML = Object.keys(fanSpeeds).filter(m => m !== '0').map(m => {
-    const p = fanSpeeds[m];
-    if (p === null || p === undefined) return '';
-    const rel = (normal === null || normal === undefined) ? ''
-      : (p > normal ? ' — mer luft' : (p < normal ? ' — MINDRE luft' : ' — som normalt'));
-    return `<option value="${m}">Läge ${m}: ${p} %${rel}</option>`;
-  }).join('') || '<option value="">inga lägen kunde läsas</option>';
-  const higher = Object.keys(fanSpeeds).filter(m => m !== '0' &&
-    fanSpeeds[m] !== null && normal != null && fanSpeeds[m] > normal);
-  if (higher.length) sel.value = higher.sort((a, b) => fanSpeeds[a] - fanSpeeds[b])[0];
-  if (normal != null) {
-    $('#fanNote').textContent = `Normalt är ${normal} %. Lägena är inte ordnade lågt till högt — ` +
-      `procenten i listan är det som gäller, inte numret.`;
-  }
-}
-
-$('#ventSet').onclick = e => {
-  const mode = $('#ventMode').value;
-  if (mode === '') return;
-  const p = fanSpeeds ? fanSpeeds[mode] : null, normal = fanSpeeds ? fanSpeeds['0'] : null;
-  if (p != null && normal != null && p < normal &&
-      !confirm(`Läge ${mode} är ${p} %, alltså MINDRE luft än normalt (${normal} %).\n\n` +
-               `På en frånluftspump är ventilationen värmekällan — låg fläkt betyder mindre ` +
-               `värme och risk för fukt. Är det verkligen vad du vill?`)) return;
-  return act(e.currentTarget,
-    () => post('/api/ventilation', {mode: +mode, hours: +$('#ventH').value}),
-    r => `Läge ${r.mode} — ${r.percent} % mot normalt ${r.normal_percent} %. Tillbaka om ${r.hours} h.`);
-};
-$('#ventNorm').onclick = e => act(e.currentTarget,
-  () => post('/api/ventilation', {direction: 'normal'}),
-  r => `Tillbaka till normal ventilation (${r.normal_percent} %).`);
-
-/* ---------------- settings editor ---------------- */
-const WATER_GROUP = 'hotwater';
-
-async function loadSettings() {
-  let groups;
-  try { groups = (await api('/api/settings')).groups; }
-  catch (e) {
-    $('#settings').innerHTML = `<div class="warn">${esc(e.message)}</div>`;
-    return;
-  }
-  const rows = {};
-  groups.forEach(g => g.rows.forEach(r => { rows[r.address] = r; }));
-
-  const render = g => `<div class="setgroup"><h3>${esc(g.title)}</h3>
-    ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
-    ${g.rows.map(r => {
-      const val = typeof r.value === 'number' && !Number.isInteger(r.value)
-        ? r.value.toFixed(1) : r.value;
-      const range = (r.min !== null && r.max !== null)
-        ? `${r.address} · ${r.min}–${r.max}${r.unit ? ' ' + r.unit : ''}` : String(r.address);
-      return `<div class="setrow">
-        <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
-          ? '<span class="tag">skyddad</span>' : ''}</b>
-          <span class="addr">${esc(range)}</span></div>
-        <div class="val">${esc(String(val))}${r.unit ? ' ' + esc(r.unit) : ''}</div>
-        <button data-edit="${r.address}">Ändra</button></div>
-      <div data-panel="${r.address}" hidden></div>`;
-    }).join('')}</div>`;
-
-  // Hot water settings live on the water tab, where you look for them.
-  $('#settings').innerHTML = groups.filter(g => g.key !== WATER_GROUP).map(render).join('');
-  const water = groups.find(g => g.key === WATER_GROUP);
-  $('#setWater').innerHTML = water ? render(water) : '<p class="hint">Inga lästes.</p>';
-
-  $$('[data-edit]').forEach(btn => btn.onclick = () => {
-    const addr = btn.dataset.edit, row = rows[addr];
-    const panel = document.querySelector(`[data-panel="${addr}"]`);
-    if (!panel.hidden) {
-      panel.hidden = true; panel.innerHTML = ''; btn.textContent = 'Ändra'; return;
-    }
-    panel.hidden = false; btn.textContent = 'Avbryt';
-    const field = row.options
-      ? `<select id="sv-${addr}">${row.options.map(([k, l]) =>
-          `<option value="${esc(k)}"${String(row.value) === l ? ' selected' : ''}>${esc(l)}</option>`
-        ).join('')}</select>`
-      : `<input id="sv-${addr}" type="number" inputmode="decimal" step="any"
-           value="${esc(String(row.value))}"
-           ${row.min !== null ? `min="${row.min}"` : ''} ${row.max !== null ? `max="${row.max}"` : ''}>`;
-    panel.innerHTML = `<div class="setwhy">${esc(row.why)}</div>
-      <div class="setedit">${field}<button class="primary" data-save="${addr}">Spara</button></div>`;
-    panel.querySelector('[data-save]').onclick = async ev => {
-      const value = Number($('#sv-' + addr).value);
-      if (Number.isNaN(value)) { toast('Ogiltigt värde.', false); return; }
-      if (value === Number(row.value)) { toast('Samma värde som förut.'); return; }
-      const shown = row.options
-        ? (row.options.find(([k]) => Number(k) === value) || [null, value])[1] : value;
-      let extra = '';
-      if (Number(addr) === 40027) {
-        if (value === 0 && Number(row.value) !== 0)
-          extra = '\n\nOBS: 0 är inte en flackare kurva. Det byter pumpen till egen kurva, ' +
-                  'alltså punkterna P1–P7, och kurvnumret slutar gälla.';
-        else if (Number(row.value) === 0 && value !== 0)
-          extra = '\n\nOBS: du kör egen kurva idag. Sätter du ett kurvnummer slutar pumpen ' +
-                  'använda dina egna punkter P1–P7. De ligger kvar men styr inget.';
-      }
-      if (!confirm(`${row.label}\n${row.value} → ${shown}${row.unit ? ' ' + row.unit : ''}\n\n` +
-                   `${row.why}${extra}\n\nRegister ${addr}. Vill du ändra?`)) return;
-      await act(ev.currentTarget,
-        () => post('/api/write',
-          {address: Number(addr), value, expect: row.value, confirm: true}),
-        r => `${row.label}: ${r.before} → ${r.after}.`);
-      await loadSettings(); await loadHeating();
-    };
-  });
-}
-
-async function loadBackups() {
-  let d;
-  try { d = await api('/api/backups'); }
-  catch (e) { $('#backupState').textContent = e.message; return; }
-
-  $('#backups').innerHTML = d.backups.slice(0, 20).map(b => {
-    const t = new Date(b.taken_at * 1000);
-    return `<tr><td>${esc(b.name)}<div class="addr">${t.toLocaleString('sv-SE')}</div></td>
-            <td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`;
-  }).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
-
-  const n = d.backups.length;
-  const auto = d.auto
-    ? `Appen tar en automatiskt var ${d.auto_every_hours} timme${d.auto_every_hours == 1 ? '' : 'r'}.`
-    : 'Automatisk backup är avstängd i config.yaml.';
-  if (!n) {
-    $('#backupState').innerHTML =
-      `<div class="warn">Ingen backup ännu. Ta en innan du ändrar något — det är den
-       som gör en felställd kurva möjlig att ångra.</div>${esc(auto)}`;
-    return;
-  }
-  const h = d.age_hours;
-  const when = h < 1 ? 'för mindre än en timme sedan'
-    : (h < 48 ? `för ${Math.round(h)} timmar sedan` : `för ${Math.round(h / 24)} dygn sedan`);
-  const stale = h > (d.auto_every_hours || 24) * 2;
-  $('#backupState').innerHTML =
-    (stale ? `<div class="warn">Senaste backupen togs ${esc(when)} — äldre än väntat.</div>` : '') +
-    `${n} backup${n === 1 ? '' : 'er'} sparade, den senaste ${esc(when)}. ${esc(auto)}`;
-}
-
-async function loadLog() {
-  try {
-    const rows = await api('/api/log?limit=25');
-    $('#wlog').innerHTML = rows.length ? rows.map(r => {
-      const d = new Date(r.ts * 1000);
-      const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-      const day = `${d.getDate()}/${d.getMonth() + 1}`;
-      return `<tr><td>${esc(r.title || r.address)}<div class="addr">${day} ${t}</div></td>
-              <td>${esc(String(r.before))} → ${esc(String(r.after))}</td></tr>`;
-    }).join('') : '<tr><td>Inget skrivet ännu</td><td></td></tr>';
-  } catch (e) { /* optional */ }
-}
-
-$('#doBackup').onclick = e => act(e.currentTarget,
-  () => post('/api/backup', {note: 'från appen'}),
-  r => `Backup sparad som ${r.name}.`);
-// loadBackups also runs when the view opens; this keeps the list fresh after one.
-$('#backups').closest('details').addEventListener('toggle', ev => {
-  if (ev.target.open) loadBackups();
-});
-
-/* ---------------- history ---------------- */
-let histAddr = 30009, histHours = 24;
-
-function buildHistTabs() {
-  const want = [[30009,'Varmvatten'],[30002,'Ute'],[30020,'Frånluft'],[30006,'Framledning'],
-                [40012,'Gradminuter'],[32134,'Fläkt'],[31047,'Kompressor']];
-  const have = new Set(latest.filter(r => !r.error).map(r => r.address));
-  $('#histTabs').innerHTML = want.filter(([a]) => have.has(a))
-    .map(([a, n]) => `<button data-a="${a}" aria-pressed="${a === histAddr}">${n}</button>`).join('');
-  $$('#histTabs button').forEach(b => b.onclick = () => {
-    histAddr = +b.dataset.a;
-    $$('#histTabs button').forEach(x => x.setAttribute('aria-pressed', x === b));
-    drawHistory();
-  });
-}
-
-async function drawHistory() {
-  const svg = $('#chart');
-  let pts = [];
-  try { pts = (await api(`/api/history?address=${histAddr}&hours=${histHours}`)).points; }
-  catch (e) { /* empty state below */ }
-
-  const defs = svg.querySelector('defs').outerHTML;
-  if (pts.length < 2) {
-    svg.setAttribute('viewBox', '0 0 600 168');
-    svg.innerHTML = defs + `<text x="14" y="86">Ingen historik för den här perioden ännu.</text>`;
-    return;
-  }
-  const W = 600, H = 168, P = 30;
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  let y0 = Math.min(...ys), y1 = Math.max(...ys);
-  if (y1 - y0 < 0.5) { y0 -= 0.5; y1 += 0.5; }
-  const pad = (y1 - y0) * 0.14; y0 -= pad; y1 += pad;
-  const X = t => P + (t - x0) / (x1 - x0 || 1) * (W - P - 10);
-  const Y = v => H - 22 - (v - y0) / (y1 - y0 || 1) * (H - 38);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
-  const area = line + ` L${X(x1).toFixed(1)} ${H - 22} L${X(x0).toFixed(1)} ${H - 22} Z`;
-  const ft = t => {
-    const d = new Date(t * 1000);
-    return histHours > 48 ? `${d.getDate()}/${d.getMonth() + 1}`
-                          : String(d.getHours()).padStart(2, '0') + ':00';
-  };
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = defs +
-    `<path class="area" d="${area}"/><path class="ln" d="${line}"/>
-     <line class="ax" x1="${P}" y1="${H - 22}" x2="${W - 10}" y2="${H - 22}"/>
-     <text x="2" y="15">${y1.toFixed(1)}</text><text x="2" y="${H - 26}">${y0.toFixed(1)}</text>
-     <text x="${P}" y="${H - 6}">${ft(x0)}</text>
-     <text x="${W - 46}" y="${H - 6}">${ft(x1)}</text>`;
-  const path = svg.querySelector('.ln');
-  try { path.style.setProperty('--len', path.getTotalLength()); } catch (e) {}
-}
-$$('[data-h]').forEach(b => b.onclick = () => {
-  histHours = +b.dataset.h;
-  $$('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
-  drawHistory();
-});
-
-/* ---------------- lifecycle ---------------- */
-ONSHOW.heat = loadHeating;
-ONSHOW.air = () => { if (!fanSpeeds) loadFanModes(); };
-ONSHOW.hist = drawHistory;
-ONSHOW.set = () => { loadSettings(); loadLog(); loadBackups(); };
-ONSHOW.water = () => { if (!$('#setWater').querySelector('.setrow')) loadSettings(); };
-
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-
-refresh();
-loadHeating();
-loadFanModes();
-show(location.hash.slice(1) || 'now');
-setInterval(refresh, 30000);
-setInterval(() => { if (current === 'hist') drawHistory(); }, 300000);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) { refresh(); loadHeating(); }
-});
-</script>
-</body>
-</html>
