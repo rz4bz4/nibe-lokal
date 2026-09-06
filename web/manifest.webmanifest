@@ -1,0 +1,14 @@
+{
+  "name": "Värmepumpen",
+  "short_name": "Värmepump",
+  "description": "Styr och följ en NIBE S-serie värmepump lokalt, utan molnabonnemang.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f1720",
+  "theme_color": "#0f1720",
+  "orientation": "portrait",
+  "icons": [
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+    {"src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}

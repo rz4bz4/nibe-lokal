@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1720">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Värmepumpen</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#fff; --ink:#131820; --muted:#657085; --line:#e3e7ee;
+  --accent:#1f6feb; --warm:#d9772b; --cool:#2b8cbe; --ok:#1a7f4b; --bad:#c0392b;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 12px rgba(16,24,40,.05);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1720; --card:#161f2b; --ink:#e8edf5; --muted:#94a1b6; --line:#25303f;
+  --accent:#4c8ef7; --warm:#e8944a; --cool:#4bb3e0; --ok:#3fbe7d; --bad:#e56a5a;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 6px 18px rgba(0,0,0,.28);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding:16px 16px 48px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:8px 0 18px}
+h1{font-size:20px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 12px;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.tile .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  margin-bottom:6px;min-height:26px}
+.tile .v{font-size:26px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:14px;font-weight:500;color:var(--muted);margin-left:2px}
+.tile.warm .v{color:var(--warm)} .tile.cool .v{color:var(--cool)}
+button{font:inherit;font-weight:550;border:1px solid var(--line);background:var(--card);
+  color:var(--ink);border-radius:11px;padding:13px 14px;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:transform .06s,border-color .15s}
+button:active{transform:scale(.985)}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);border-color:transparent;color:#fff}
+button.warm{background:var(--warm);border-color:transparent;color:#fff}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1 1 130px}
+label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
+select,input{font:inherit;width:100%;padding:11px 12px;border-radius:11px;
+  border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.note{color:var(--muted);font-size:12.5px;margin-top:11px}
+.msg{padding:11px 13px;border-radius:11px;margin-top:12px;font-size:13.5px;display:none;
+  border:1px solid transparent}
+.msg.on{display:block}
+.msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border-color:var(--ok);color:var(--ok)}
+.msg.bad{background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad);color:var(--bad)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;
+  background:var(--muted);vertical-align:middle}
+.dot.live{background:var(--ok)} .dot.stale{background:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td{padding:8px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+.addr{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.chart{width:100%;height:150px;display:block;overflow:visible}
+.chart path{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .area{fill:color-mix(in srgb,var(--accent) 13%,transparent);stroke:none}
+.chart .ax{stroke:var(--line);stroke-width:1}
+.chart text{fill:var(--muted);font-size:10px}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tabs button{flex:0 1 auto;padding:7px 12px;font-size:12.5px;border-radius:9px}
+.tabs button[aria-pressed=true]{background:var(--accent);color:#fff;border-color:transparent}
+details summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Värmepumpen</h1>
+  <div class="sub"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
+</header>
+
+<div class="grid" id="tiles"></div>
+
+<div class="card">
+  <h2>Extra varmvatten</h2>
+  <div class="row">
+    <div style="flex:2 1 160px">
+      <label for="hwMin">Hur länge</label>
+      <select id="hwMin">
+        <option value="60">1 timme</option>
+        <option value="120">2 timmar</option>
+        <option value="180" selected>3 timmar — ett badkar</option>
+        <option value="240">4 timmar</option>
+        <option value="360">6 timmar</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:flex-end"><button class="warm" id="hwOn">Starta</button></div>
+    <div style="display:flex;align-items:flex-end"><button id="hwOff">Avbryt</button></div>
+  </div>
+  <p class="note">Kostar el medan det pågår. Starta när någon faktiskt ska bada — pumpen går
+    tillbaka till normal drift av sig själv när tiden runnit ut.</p>
+  <div class="msg" id="hwMsg"></div>
+</div>
+
+<div class="card">
+  <h2>Ventilation</h2>
+  <div class="row">
+    <div style="flex:2 1 160px">
+      <label for="ventH">Återgång efter</label>
+      <select id="ventH">
+        <option value="1">1 timme</option>
+        <option value="2">2 timmar</option>
+        <option value="3" selected>3 timmar</option>
+        <option value="4">4 timmar</option>
+        <option value="6">6 timmar</option>
+        <option value="12">12 timmar</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:flex-end"><button class="primary" id="ventUp">Mer luft</button></div>
+    <div style="display:flex;align-items:flex-end"><button id="ventNorm">Normal</button></div>
+  </div>
+  <p class="note" id="fanNote">Lägena är inte ordnade lågt till högt i den här pumpen — appen läser
+    procenten ur pumpen och väljer rätt läge åt dig.</p>
+  <div class="msg" id="ventMsg"></div>
+</div>
+
+<div class="card">
+  <h2>Historik</h2>
+  <div class="tabs" id="histTabs"></div>
+  <svg class="chart" id="chart" preserveAspectRatio="none"></svg>
+  <div class="row" style="margin-top:10px">
+    <button data-h="6">6 h</button><button data-h="24" aria-pressed="true">24 h</button>
+    <button data-h="168">7 d</button><button data-h="720">30 d</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Alla värden</h2>
+  <table id="all"></table>
+</div>
+
+<div class="card">
+  <h2>Backup</h2>
+  <div class="row">
+    <button id="doBackup">Ta backup nu</button>
+  </div>
+  <p class="note" id="backupNote">Läser varje register pumpen svarar på och sparar en tidsstämplad
+    JSON-fil. Jämför två med <code>python3 -m nibelokal diff gammal.json ny.json</code>.</p>
+  <details style="margin-top:10px"><summary>Tidigare backuper</summary>
+    <table id="backups"></table></details>
+  <div class="msg" id="bkMsg"></div>
+</div>
+
+<footer>
+  nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
+  ingen molntjänst, ingen prenumeration
+</footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('nibe_token') || '';
+if (token) localStorage.setItem('nibe_token', token);
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+  if (token) headers['X-Auth-Token'] = token;
+  const res = await fetch(path, Object.assign({}, opts, {headers}));
+  const body = await res.json().catch(() => ({error: 'svaret gick inte att tolka'}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+function say(el, text, ok = true) {
+  el.textContent = text;
+  el.className = 'msg on ' + (ok ? 'ok' : 'bad');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'msg'; }, 9000);
+}
+
+// Which registers get a big tile, and what to call them in plain Swedish.
+const TILES = [
+  [30009, 'Varmvatten topp', 'warm'],
+  [30010, 'Varmvatten laddning', 'warm'],
+  [30002, 'Utetemperatur', 'cool'],
+  [30020, 'Frånluft', ''],
+  [30006, 'Framledning', 'warm'],
+  [31047, 'Kompressor', ''],
+  [40012, 'Gradminuter', ''],
+  [32134, 'Frånluftsfläkt', ''],
+  [40057, 'Varmvattenläge', ''],
+  [40105, 'Ventilationsläge', ''],
+  [31028, 'Elpatron just nu', ''],
+  [31976, 'Larm', ''],
+];
+let latest = [];
+
+function fmt(v, unit) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') {
+    const s = Number.isInteger(v) ? v : v.toFixed(1);
+    return s + (unit ? '<small>' + unit + '</small>' : '');
+  }
+  return String(v);
+}
+
+function renderTiles() {
+  const by = Object.fromEntries(latest.map(r => [r.address, r]));
+  $('#tiles').innerHTML = TILES
+    .filter(([a]) => by[a] && by[a].value !== null && by[a].value !== undefined)
+    .map(([a, label, cls]) => {
+      const r = by[a];
+      return `<div class="tile ${cls}"><div class="k">${label}</div>
+              <div class="v">${fmt(r.value, r.unit)}</div></div>`;
+    }).join('') || '<div class="tile"><div class="k">Inga värden ännu</div><div class="v">–</div></div>';
+}
+
+function renderAll() {
+  $('#all').innerHTML = latest.map(r =>
+    `<tr><td>${r.title}<div class="addr">${r.address}</div></td>
+     <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
+  ).join('');
+}
+
+function freshness(ts, err) {
+  const dot = $('#dot'), out = $('#freshness');
+  if (err) { dot.className = 'dot stale'; out.textContent = 'pumpen svarar inte'; return; }
+  if (!ts) { dot.className = 'dot'; out.textContent = 'väntar på första avläsningen'; return; }
+  const age = Math.round(Date.now() / 1000 - ts);
+  dot.className = 'dot ' + (age < 180 ? 'live' : 'stale');
+  out.textContent = age < 90 ? 'nyss avläst' : 'avläst för ' + Math.round(age / 60) + ' min sedan';
+}
+
+async function refresh() {
+  try {
+    const d = await api('/api/status');
+    latest = d.registers;
+    freshness(d.polled_at, d.poll_error);
+    renderTiles(); renderAll();
+    if (!$('#histTabs').children.length) buildTabs();
+  } catch (e) {
+    $('#dot').className = 'dot stale';
+    $('#freshness').textContent = e.message.slice(0, 60);
+  }
+}
+
+// -- history ---------------------------------------------------------------
+
+let histAddr = 30009, histHours = 24;
+
+function buildTabs() {
+  const wanted = [[30009,'Varmvatten'],[30002,'Ute'],[30020,'Frånluft'],
+                  [30006,'Framledning'],[40012,'Gradminuter'],[32134,'Fläkt'],
+                  [31047,'Kompressor']];
+  const have = new Set(latest.filter(r => !r.error).map(r => r.address));
+  $('#histTabs').innerHTML = wanted.filter(([a]) => have.has(a))
+    .map(([a, n]) => `<button data-a="${a}" aria-pressed="${a === histAddr}">${n}</button>`).join('');
+  $('#histTabs').querySelectorAll('button').forEach(b => b.onclick = () => {
+    histAddr = +b.dataset.a;
+    $('#histTabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    drawHistory();
+  });
+  drawHistory();
+}
+
+async function drawHistory() {
+  const svg = $('#chart');
+  let pts = [];
+  try { pts = (await api(`/api/history?address=${histAddr}&hours=${histHours}`)).points; }
+  catch (e) { /* fall through to the empty state */ }
+
+  if (pts.length < 2) {
+    svg.innerHTML = `<text x="12" y="76">Ingen historik ännu — appen sparar ett värde per avläsning.</text>`;
+    return;
+  }
+  const W = 600, H = 150, P = 26;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 0.5) { y0 -= 0.5; y1 += 0.5; }
+  const pad = (y1 - y0) * 0.12; y0 -= pad; y1 += pad;
+  const X = t => P + (t - x0) / (x1 - x0 || 1) * (W - P - 8);
+  const Y = v => H - 18 - (v - y0) / (y1 - y0 || 1) * (H - 30);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+  const area = line + ` L${X(x1).toFixed(1)} ${H - 18} L${X(x0).toFixed(1)} ${H - 18} Z`;
+  const fmtT = t => {
+    const d = new Date(t * 1000);
+    return histHours > 48 ? `${d.getDate()}/${d.getMonth() + 1}`
+                          : `${d.getHours()}`.padStart(2, '0') + ':00';
+  };
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML =
+    `<path class="area" d="${area}"/><path d="${line}"/>
+     <line class="ax" x1="${P}" y1="${H - 18}" x2="${W - 8}" y2="${H - 18}"/>
+     <text x="2" y="14">${y1.toFixed(1)}</text><text x="2" y="${H - 22}">${y0.toFixed(1)}</text>
+     <text x="${P}" y="${H - 5}">${fmtT(x0)}</text>
+     <text x="${W - 40}" y="${H - 5}">${fmtT(x1)}</text>`;
+}
+
+document.querySelectorAll('[data-h]').forEach(b => b.onclick = () => {
+  histHours = +b.dataset.h;
+  document.querySelectorAll('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  drawHistory();
+});
+
+// -- actions ---------------------------------------------------------------
+
+async function act(button, fn, msgEl, describe) {
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = '…';
+  try {
+    say(msgEl, describe(await fn()), true);
+    await refresh();
+  } catch (e) {
+    say(msgEl, e.message, false);
+  } finally {
+    button.disabled = false; button.textContent = label;
+  }
+}
+const post = (p, b) => api(p, {method: 'POST', body: JSON.stringify(b || {})});
+
+$('#hwOn').onclick = e => act(e.target,
+  () => post('/api/hotwater', {minutes: +$('#hwMin').value}),
+  $('#hwMsg'), r => `Extra varmvatten igång i ${r.minutes} minuter.`);
+
+$('#hwOff').onclick = e => act(e.target,
+  () => post('/api/hotwater', {off: true}),
+  $('#hwMsg'), () => 'Extra varmvatten avbrutet.');
+
+$('#ventUp').onclick = e => act(e.target,
+  () => post('/api/ventilation', {direction: 'up', hours: +$('#ventH').value}),
+  $('#ventMsg'),
+  r => `Läge ${r.mode} — ${r.percent}% mot normalt ${r.normal_percent}%. Tillbaka om ${r.hours} h.`);
+
+$('#ventNorm').onclick = e => act(e.target,
+  () => post('/api/ventilation', {direction: 'normal'}),
+  $('#ventMsg'), r => `Tillbaka till normal ventilation (${r.normal_percent}%).`);
+
+$('#doBackup').onclick = e => act(e.target,
+  () => post('/api/backup', {note: 'från appen'}),
+  $('#bkMsg'), r => `Backup sparad som ${r.name}.`);
+
+async function loadBackups() {
+  try {
+    const d = await api('/api/backups');
+    $('#backups').innerHTML = d.backups.slice(0, 20).map(b =>
+      `<tr><td>${b.name}</td><td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`
+    ).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
+  } catch (e) { /* the panel is optional */ }
+}
+
+document.querySelector('details').addEventListener('toggle', e => {
+  if (e.target.open) loadBackups();
+});
+
+refresh();
+setInterval(refresh, 30000);
+setInterval(drawHistory, 300000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+[project]
+name = "nibe-lokal"
+version = "0.1.0"
+description = "Local Modbus TCP web app for NIBE S-series heat pumps, without the cloud subscription"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "rz4bz4"}]
+keywords = ["nibe", "modbus", "heat-pump", "myuplink", "home-automation"]
+dependencies = []
+
+[project.optional-dependencies]
+# The register map. Not required if you export the CSV from the pump itself.
+registers = ["nibe>=2.0"]
+# Only used to read config.yaml comments-and-all; a plain parser is built in.
+yaml = ["PyYAML>=6"]
+
+[project.urls]
+Homepage = "https://github.com/rz4bz4/nibe-lokal"
+
+[project.scripts]
+nibelokal = "nibelokal.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["nibelokal"]

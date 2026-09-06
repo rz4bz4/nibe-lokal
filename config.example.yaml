@@ -1,0 +1,48 @@
+# Copy this to config.yaml and fill in your own pump.
+# Every key can also be set as an environment variable: NIBE_HOST, NIBE_PORT, ...
+
+# --- the pump -------------------------------------------------------------
+
+# Your heat pump's IP address on your LAN. Find it in the router's DHCP list;
+# it appears as NIBE-<serial number>. Required -- there is no default.
+host: ""
+
+port: 502          # Modbus TCP. Enable it on the pump: menu 7.5.9 Modbus TCP/IP.
+unit: 1            # Modbus slave id. Try 1; if nothing answers, try 0.
+
+# --- the register map -----------------------------------------------------
+
+# Used when register_csv is empty. Models the `nibe` package knows:
+#   S735 S735C S1155 S1255 S1156 S1256 S320 S325 S330 S332 S2125
+#   SMO20 SMO40 SMOS40 VVM225 VVM320 VVM325 VVM310 VVM500 VVMS320 VVMS325 VVMS500
+#   F1145 F1155 F1245 F1255 F1345 F1355 F370 F470 F730 F750
+model: "S735"
+
+# Better: export the register list from the pump itself (menu 7.5.9 ->
+# "Export all registers" onto a USB stick) and point this at the CSV. It is the
+# only map guaranteed to match your unit and its firmware. Takes precedence.
+register_csv: ""
+
+# --- the web app ----------------------------------------------------------
+
+listen: "127.0.0.1"   # "0.0.0.0" to reach it from a phone on the same network
+listen_port: 8377
+
+# Modbus has no authentication, and neither does this app unless you set a
+# token here. Anyone who can reach the port can change settings. Send it as an
+# X-Auth-Token header, or once as ?token=... which the browser then remembers.
+auth_token: ""
+
+# --- history and safety ---------------------------------------------------
+
+poll_seconds: 60      # NIBE allows 100 registers/s; 60 s is the community norm
+history_days: 400     # older readings are pruned daily
+
+# false blocks every "guarded" write (heating curve, operating mode, hot water
+# temperatures, ...) outright, leaving only the everyday ones. Blocked registers
+# are never written regardless. See nibelokal/safety.py.
+allow_guarded_writes: true
+
+database: "nibe.db"
+backup_dir: "backup"
+timeout: 5.0
