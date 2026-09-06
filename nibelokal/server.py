@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import advisor
+from . import advisor, settings
 from .pump import DASHBOARD
 from .safety import Refused, tier
 from .store import Poller, Store
@@ -203,6 +203,10 @@ class Handler(BaseHTTPRequestHandler):
                 store,
                 self.ctx["emitters"],
             ).as_dict())
+
+        if path == "/api/settings":
+            values = pump.read_many(settings.ADDRESSES)
+            return self._json({"groups": settings.build(pump, values)})
 
         if path == "/api/fan":
             return self._json({"speeds": pump.fan_speeds()})

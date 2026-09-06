@@ -13,7 +13,9 @@ It does four things:
   the heat up or down a step.
 - **Helps you get the heat curve right**, which is the part everyone gets wrong.
   Two questions — is it too cold or too warm, and *when* — turn into one concrete
-  register change, with the reasoning shown. See "Heating advice" below.
+  register change, with the reasoning shown. See "Heating advice" below. Every
+  setting the pump exposes is also editable directly, grouped and explained in
+  plain language rather than as raw register numbers.
 - **Backs up every setting** to a timestamped JSON file, and diffs two snapshots
   so you can see what changed since June.
 
@@ -95,6 +97,14 @@ it. A reverse proxy with any other certificate does the same job.
 
 ```bash
 python3 -m unittest discover tests    # 53 tests, no pump required
+```
+
+There is also a browser smoke test that clicks through a running instance. It
+only reads and opens panels — it changes nothing on the pump:
+
+```bash
+pip install playwright && playwright install chromium
+python3 tests/ui_smoke.py              # against a running `serve`
 ```
 
 To keep it running, use whatever your machine already has — `systemd`, `launchd`,

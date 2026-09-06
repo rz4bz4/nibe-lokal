@@ -492,7 +492,10 @@ def _history_hours(store) -> float:
 
 def _duration(hours: float) -> str:
     if hours < 1:
-        return "%d minuter" % int(hours * 60)
+        minutes = max(1, int(hours * 60))
+        return "%d minut%s" % (minutes, "er" if minutes != 1 else "")
     if hours < 48:
-        return "%d timmar" % int(hours)
-    return "%d dygn" % int(hours / 24)
+        whole = int(hours)
+        return "%d timm%s" % (whole, "ar" if whole != 1 else "e")
+    days = int(hours / 24)
+    return "%d dyg%s" % (days, "n" if days != 1 else "n")

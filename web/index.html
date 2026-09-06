@@ -87,6 +87,25 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0}
   background:var(--bg)}
 .sugg .h{font-weight:600;margin-bottom:4px;font-variant-numeric:tabular-nums}
 .sugg .w{color:var(--muted);font-size:13px;margin-bottom:11px}
+.setgroup{margin:16px 0 4px}
+.setgroup h3{font-size:13px;margin:0 0 3px;font-weight:650}
+.setgroup .intro{color:var(--muted);font-size:12.5px;margin:0 0 10px;line-height:1.5}
+.setrow{display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--line)}
+.setrow:last-child{border-bottom:0}
+.setrow .n{flex:1;min-width:0}
+.setrow .n b{font-weight:550;font-size:13.5px;display:block}
+.setrow .n .d{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+.setrow .val{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;
+  font-size:14px}
+.setrow button{padding:7px 11px;font-size:12.5px;border-radius:9px;flex:0 0 auto}
+.setedit{display:flex;gap:8px;align-items:center;padding:4px 0 12px}
+.setedit input,.setedit select{flex:1;min-width:0}
+.setedit button{flex:0 0 auto}
+.setwhy{color:var(--muted);font-size:12.5px;padding:0 0 10px;line-height:1.5}
+.tag{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--warm);
+  border:1px solid var(--warm);border-radius:5px;padding:1px 5px;margin-left:6px;
+  vertical-align:middle}
 .alarm{background:color-mix(in srgb,var(--bad) 13%,transparent);border:1px solid var(--bad);
   color:var(--bad);border-radius:12px;padding:14px;margin-bottom:14px;font-size:14px}
 .alarm b{display:block;font-size:15px;margin-bottom:3px}
@@ -145,10 +164,9 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
     <div id="adviceOut" style="margin-top:12px"></div>
   </div>
 
-  <details style="margin-top:12px"><summary>Alla värmeinställningar</summary>
-    <table id="heatTable"></table>
-    <p class="hint">Kurva och offset är skyddade inställningar — appen frågar innan den
-      ändrar dem, och en felställd kurva kostar el i veckor innan någon märker det.</p>
+  <details id="settingsBox" style="margin-top:12px">
+    <summary>Alla inställningar</summary>
+    <div id="settings"><p class="hint">läser…</p></div>
   </details>
   <div class="msg" id="heatMsg"></div>
 </div>
@@ -465,20 +483,6 @@ async function loadHeating() {
       .map(o => `<div class="warn" style="border-left-color:var(--muted)">${esc(o)}</div>`).join('') +
     (heat.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
 
-  const rows = [
-    ['Värmekurva', heat.uses_own_curve ? '0 (egen kurva)' : heat.curve, 40027],
-    ['Värmeoffset', heat.offset, 40031],
-    ['Min framledning', heat.min_supply, 40035, '°C'],
-    ['Max framledning', heat.max_supply, 40039, '°C'],
-    ['Rumsbörvärde', heat.room_setpoint, 40207, '°C'],
-  ];
-  if (heat.uses_own_curve) {
-    heat.own_curve.forEach((v, i) => rows.push(['Egen kurva P' + (i + 1), v, 40046 - i, '°C']));
-  }
-  $('#heatTable').innerHTML = rows.filter(r => r[1] !== null && r[1] !== undefined)
-    .map(([name, val, addr, unit]) =>
-      `<tr><td>${esc(name)}<div class="addr">${addr}</div></td>
-       <td>${esc(String(val))}${unit ? ' ' + unit : ''}</td></tr>`).join('');
 }
 
 async function nudgeOffset(step, button) {
@@ -576,6 +580,108 @@ $('#adviceGo').onclick = async e => {
     e.target.disabled = false;
   }
 };
+
+// -- all settings ----------------------------------------------------------
+
+let settingsLoaded = false;
+
+async function loadSettings() {
+  const box = $('#settings');
+  box.innerHTML = '<p class="hint">läser…</p>';
+  let groups;
+  try {
+    groups = (await api('/api/settings')).groups;
+  } catch (e) {
+    box.innerHTML = `<div class="warn">${esc(e.message)}</div>`;
+    return;
+  }
+  settingsLoaded = true;
+  box.innerHTML = groups.map(g => `
+    <div class="setgroup">
+      <h3>${esc(g.title)}</h3>
+      ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
+      ${g.rows.map(r => {
+        const val = typeof r.value === 'number' && !Number.isInteger(r.value)
+          ? r.value.toFixed(1) : r.value;
+        const range = (r.min !== null && r.max !== null)
+          ? `${r.address} · ${r.min}–${r.max}${r.unit ? ' ' + r.unit : ''}`
+          : String(r.address);
+        return `<div class="setrow" data-addr="${r.address}">
+          <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
+            ? '<span class="tag">skyddad</span>' : ''}</b>
+            <span class="d">${esc(range)}</span></div>
+          <div class="val">${esc(String(val))}${r.unit ? ' ' + esc(r.unit) : ''}</div>
+          <button data-edit="${r.address}">Ändra</button>
+        </div>
+        <div class="setedit" data-panel="${r.address}" hidden></div>
+        <div class="setwhy" data-why="${r.address}" hidden>${esc(r.why)}</div>`;
+      }).join('')}
+    </div>`).join('');
+
+  const byAddr = {};
+  groups.forEach(g => g.rows.forEach(r => { byAddr[r.address] = r; }));
+
+  box.querySelectorAll('[data-edit]').forEach(btn => btn.onclick = () => {
+    const addr = btn.dataset.edit;
+    const row = byAddr[addr];
+    const panel = box.querySelector(`[data-panel="${addr}"]`);
+    const why = box.querySelector(`[data-why="${addr}"]`);
+    if (!panel.hidden) {
+      panel.hidden = why.hidden = true;
+      panel.innerHTML = '';
+      btn.textContent = 'Ändra';
+      return;
+    }
+    why.hidden = false;
+    panel.hidden = false;
+    btn.textContent = 'Avbryt';
+    const field = row.options
+      ? `<select id="sv-${addr}">${row.options.map(([k, label]) =>
+          `<option value="${esc(k)}"${String(row.value) === label ? ' selected' : ''}>${esc(label)}</option>`
+        ).join('')}</select>`
+      : `<input id="sv-${addr}" type="number" inputmode="decimal" step="any"
+           value="${esc(String(row.value))}"
+           ${row.min !== null ? `min="${row.min}"` : ''}
+           ${row.max !== null ? `max="${row.max}"` : ''}>`;
+    panel.innerHTML = field + `<button class="primary" data-save="${addr}">Spara</button>`;
+    panel.querySelector('[data-save]').onclick = async ev => {
+      const raw = $('#sv-' + addr).value;
+      const value = row.options ? Number(raw) : Number(raw);
+      if (Number.isNaN(value)) { say($('#heatMsg'), 'Ogiltigt värde.', false); return; }
+      if (value === Number(row.value)) { say($('#heatMsg'), 'Samma värde som förut.', true); return; }
+      const shown = row.options
+        ? (row.options.find(([k]) => Number(k) === value) || [null, raw])[1]
+        : value;
+      // Curve 0 is not "one flatter than 1": it swaps the pump onto the own-curve
+      // points entirely. The advisor refuses to suggest crossing that line, so the
+      // manual editor should at least not let you do it by accident.
+      let extra = '';
+      if (Number(addr) === 40027) {
+        if (value === 0 && Number(row.value) !== 0) {
+          extra = '\n\nOBS: 0 är inte en flackare kurva. Det byter pumpen till egen ' +
+                  'kurva, alltså punkterna P1–P7, och kurvnumret slutar gälla.';
+        } else if (Number(row.value) === 0 && value !== 0) {
+          extra = '\n\nOBS: du kör egen kurva idag. Sätter du ett kurvnummer slutar ' +
+                  'pumpen använda dina egna punkter P1–P7. De ligger kvar, men styr ' +
+                  'inget förrän du sätter tillbaka 0.';
+        }
+      }
+      if (!confirm(`${row.label}\n${row.value} → ${shown}${row.unit ? ' ' + row.unit : ''}\n\n` +
+                   `${row.why}${extra}\n\nRegister ${addr}. Vill du ändra?`)) return;
+      await act(ev.target,
+        () => post('/api/write',
+                   {address: Number(addr), value: value, expect: row.value, confirm: true}),
+        $('#heatMsg'),
+        r => `${row.label}: ${r.before} → ${r.after}.`);
+      await loadSettings();
+      await loadHeating();
+    };
+  });
+}
+
+$('#settingsBox').addEventListener('toggle', e => {
+  if (e.target.open) loadSettings();
+});
 
 // -- actions ---------------------------------------------------------------
 
