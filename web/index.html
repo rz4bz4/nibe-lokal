@@ -7,7 +7,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Värmepump">
 <title>Värmepumpen</title>
 <style>
 :root{
@@ -76,6 +77,18 @@ tr:last-child td{border-bottom:0}
 .tabs button[aria-pressed=true]{background:var(--accent);color:#fff;border-color:transparent}
 details summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0}
 .hint{font-size:12px;color:var(--muted);margin-top:8px}
+.stepper{display:flex;align-items:stretch;gap:12px}
+.stepper button{flex:0 0 64px;font-size:26px;font-weight:400;line-height:1;padding:0}
+.stepval{flex:1;text-align:center;border:1px solid var(--line);border-radius:11px;
+  padding:10px 8px;background:var(--bg)}
+.stepval .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.stepval .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
+.sugg{border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:10px;
+  background:var(--bg)}
+.sugg .h{font-weight:600;margin-bottom:4px;font-variant-numeric:tabular-nums}
+.sugg .w{color:var(--muted);font-size:13px;margin-bottom:11px}
+.warn{border-left:3px solid var(--warm);padding:8px 0 8px 11px;margin:9px 0;
+  font-size:13px;color:var(--ink)}
 footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.7}
 </style>
 </head>
@@ -88,6 +101,52 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
 </header>
 
 <div class="grid" id="tiles"></div>
+
+<div class="card">
+  <h2>Värme</h2>
+  <div id="heatState" class="hint" style="margin:0 0 12px">läser…</div>
+
+  <div class="stepper">
+    <button id="heatDown" aria-label="Sänk värmen">−</button>
+    <div class="stepval">
+      <div class="k">Värmeoffset</div>
+      <div class="v" id="offsetNow">–</div>
+    </div>
+    <button id="heatUp" aria-label="Höj värmen">+</button>
+  </div>
+  <p class="note">Ett steg motsvarar ungefär en grad inomhus. Vänta ett dygn innan du
+    justerar igen — huset svarar långsamt, och tre ändringar på en dag går inte att
+    utvärdera.</p>
+
+  <div class="row" style="margin-top:12px">
+    <button id="adviceOpen">Hjälp mig ställa in</button>
+  </div>
+
+  <div id="adviceBox" hidden style="margin-top:14px">
+    <label>Hur känns det?</label>
+    <div class="tabs" id="feelingTabs">
+      <button data-feeling="warmer" aria-pressed="true">För kallt</button>
+      <button data-feeling="colder">För varmt</button>
+    </div>
+    <label style="margin-top:10px">När då?</label>
+    <div class="tabs" id="whenTabs">
+      <button data-when="always" aria-pressed="true">I alla väder</button>
+      <button data-when="cold_outside">Bara när det är kallt ute</button>
+      <button data-when="mild_outside">Bara i milt väder</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="adviceGo">Ge mig ett förslag</button>
+    </div>
+    <div id="adviceOut" style="margin-top:12px"></div>
+  </div>
+
+  <details style="margin-top:12px"><summary>Alla värmeinställningar</summary>
+    <table id="heatTable"></table>
+    <p class="hint">Kurva och offset är skyddade inställningar — appen frågar innan den
+      ändrar dem, och en felställd kurva kostar el i veckor innan någon märker det.</p>
+  </details>
+  <div class="msg" id="heatMsg"></div>
+</div>
 
 <div class="card">
   <h2>Extra varmvatten</h2>
@@ -336,6 +395,116 @@ document.querySelectorAll('[data-h]').forEach(b => b.onclick = () => {
   drawHistory();
 });
 
+// -- heating ---------------------------------------------------------------
+
+let heat = null;
+
+async function loadHeating() {
+  try {
+    heat = await api('/api/heating');
+  } catch (e) {
+    $('#heatState').textContent = 'kunde inte läsa värmeinställningarna: ' + e.message;
+    return;
+  }
+  $('#offsetNow').textContent = heat.offset === null ? '–'
+    : (heat.offset > 0 ? '+' : '') + heat.offset;
+
+  const bits = [];
+  if (heat.uses_own_curve) bits.push('egen kurva');
+  else if (heat.curve !== null) bits.push('kurva ' + heat.curve);
+  if (heat.outdoor !== null) bits.push('ute ' + heat.outdoor.toFixed(1) + ' °C');
+  if (heat.supply !== null) bits.push('framledning ' + heat.supply.toFixed(1) + ' °C');
+  if (heat.degree_minutes !== null) bits.push(heat.degree_minutes + ' gradminuter');
+  $('#heatState').innerHTML = esc(bits.join(' · ')) +
+    (heat.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
+
+  const rows = [
+    ['Värmekurva', heat.uses_own_curve ? '0 (egen kurva)' : heat.curve, 40027],
+    ['Värmeoffset', heat.offset, 40031],
+    ['Min framledning', heat.min_supply, 40035, '°C'],
+    ['Max framledning', heat.max_supply, 40039, '°C'],
+    ['Rumsbörvärde', heat.room_setpoint, 40207, '°C'],
+  ];
+  if (heat.uses_own_curve) {
+    heat.own_curve.forEach((v, i) => rows.push(['Egen kurva P' + (i + 1), v, 40046 - i, '°C']));
+  }
+  $('#heatTable').innerHTML = rows.filter(r => r[1] !== null && r[1] !== undefined)
+    .map(([name, val, addr, unit]) =>
+      `<tr><td>${esc(name)}<div class="addr">${addr}</div></td>
+       <td>${esc(String(val))}${unit ? ' ' + unit : ''}</td></tr>`).join('');
+}
+
+async function nudgeOffset(step, button) {
+  if (!heat || heat.offset === null) return;
+  const to = heat.offset + step;
+  if (!confirm(`Ändra värmeoffset från ${heat.offset} till ${to}?\n\n` +
+               `Ungefär ${Math.abs(step)} grad ${step > 0 ? 'varmare' : 'svalare'} inomhus. ` +
+               `Huset svarar långsamt — utvärdera i morgon, inte om en timme.`)) return;
+  await act(button,
+    () => post('/api/write', {address: 40031, value: to, confirm: true}),
+    $('#heatMsg'),
+    r => `Värmeoffset ${r.before} → ${r.after}. Känn efter i morgon.`);
+  await loadHeating();
+}
+
+$('#heatUp').onclick = e => nudgeOffset(1, e.target);
+$('#heatDown').onclick = e => nudgeOffset(-1, e.target);
+
+$('#adviceOpen').onclick = e => {
+  const box = $('#adviceBox');
+  box.hidden = !box.hidden;
+  e.target.textContent = box.hidden ? 'Hjälp mig ställa in' : 'Stäng';
+};
+
+function pickable(container, attr) {
+  $(container).querySelectorAll('button').forEach(b => b.onclick = () => {
+    $(container).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  });
+  return () => $(container).querySelector('[aria-pressed=true]').dataset[attr];
+}
+const feeling = pickable('#feelingTabs', 'feeling');
+const when = pickable('#whenTabs', 'when');
+
+$('#adviceGo').onclick = async e => {
+  const out = $('#adviceOut');
+  e.target.disabled = true;
+  out.innerHTML = '<div class="hint">tänker…</div>';
+  try {
+    const a = await api(`/api/advice?feeling=${feeling()}&when=${when()}`);
+    let html = (a.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
+    if (a.blocked) {
+      html += `<div class="warn">${esc(a.blocked)}</div>`;
+    } else if (!a.suggestions.length) {
+      html += '<div class="hint">Inget förslag den här gången.</div>';
+    } else {
+      html += a.suggestions.map((s, i) => {
+        const arrow = `${s.current} → ${s.proposed}${s.unit ? ' ' + s.unit : ''}`;
+        return `<div class="sugg">
+          <div class="h">${esc(s.title)}: ${esc(arrow)}</div>
+          <div class="w">${esc(s.why)}</div>
+          <button class="primary" data-apply="${i}">Genomför</button>
+        </div>`;
+      }).join('');
+      html += '<p class="hint">Gör en ändring i taget och vänta ett dygn. Två knappar ' +
+              'som hör ihop ska tryckas båda — texten säger när.</p>';
+    }
+    out.innerHTML = html;
+    out.querySelectorAll('[data-apply]').forEach(btn => btn.onclick = async ev => {
+      const s = a.suggestions[+ev.target.dataset.apply];
+      if (!confirm(`${s.title}: ${s.current} → ${s.proposed}?\n\n${s.why}`)) return;
+      await act(ev.target,
+        () => post('/api/write', {address: s.address, value: s.proposed, confirm: true}),
+        $('#heatMsg'),
+        r => `${r.title}: ${r.before} → ${r.after}. Utvärdera i morgon.`);
+      await loadHeating();
+    });
+  } catch (err) {
+    out.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
+  } finally {
+    e.target.disabled = false;
+  }
+};
+
 // -- actions ---------------------------------------------------------------
 
 async function act(button, fn, msgEl, describe) {
@@ -392,6 +561,7 @@ if ('serviceWorker' in navigator) {
 }
 
 refresh();
+loadHeating();
 setInterval(refresh, 30000);
 setInterval(drawHistory, 300000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

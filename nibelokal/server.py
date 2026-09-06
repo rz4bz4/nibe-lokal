@@ -18,6 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from . import advisor
 from .pump import DASHBOARD
 from .safety import Refused, tier
 from .store import Poller, Store
@@ -164,6 +165,17 @@ class Handler(BaseHTTPRequestHandler):
                 "poll_error": poller.last_error,
                 "registers": out,
             })
+
+        if path == "/api/heating":
+            return self._json(advisor.diagnose(pump, store))
+
+        if path == "/api/advice":
+            return self._json(advisor.advise(
+                pump,
+                q.get("feeling", ["warmer"])[0],
+                q.get("when", ["always"])[0],
+                store,
+            ).as_dict())
 
         if path == "/api/fan":
             return self._json({"speeds": pump.fan_speeds()})

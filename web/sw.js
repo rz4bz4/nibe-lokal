@@ -1,7 +1,8 @@
 // Just enough service worker to make the installed app open without a network:
 // the shell is cached, live data is always fetched fresh and never cached.
 const SHELL = 'nibe-shell-v1';
-const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon.png'];
+const FILES = ['/', '/index.html', '/manifest.webmanifest',
+               '/icon.svg', '/icon.png', '/icon-180.png', '/icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -25,6 +26,6 @@ self.addEventListener('fetch', e => {
         caches.open(SHELL).then(c => c.put(e.request, copy)).catch(() => {});
         return res;
       })
-      .catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
+      .catch(() => caches.match(e.request).then(hit => hit || caches.match('/index.html')))
   );
 });
