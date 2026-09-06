@@ -46,9 +46,26 @@ python3 -m nibelokal status      # does it answer?
 python3 -m nibelokal serve       # http://localhost:8377/
 ```
 
-On a phone: open the address in Safari or Chrome and use *Add to Home Screen*.
-It then behaves like an app — the shell is cached by a service worker so it
-opens without a network, though of course it needs the network to reach the pump.
+### On a phone
+
+Open the address in Safari or Chrome and use *Add to Home Screen*. It then
+behaves like an app: own icon, no address bar, and the shell is cached by a
+service worker so it opens instantly (it still needs the network to reach the
+pump).
+
+One catch worth knowing before you try: **service workers only run on HTTPS or
+localhost.** Over plain `http://192.168.x.y:8377` the home-screen shortcut works
+but the caching does not. The easy fix, if you use Tailscale, is to let it put a
+real certificate in front:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8377
+```
+
+That gives you `https://<machine>.<tailnet>.ts.net` — a proper certificate, works
+from anywhere on your tailnet, and nothing is exposed to the public internet. Add
+that hostname to `allowed_hosts` in `config.yaml`, or the Host check will refuse
+it. A reverse proxy with any other certificate does the same job.
 
 ```bash
 python3 -m unittest discover tests    # 29 tests, no pump required
