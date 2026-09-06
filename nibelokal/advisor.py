@@ -452,7 +452,11 @@ def _points_for(when: str, outdoor) -> list[int]:
     point that governs a normal cold day is the one bracketing it.
     """
     if when == "cold_outside":
-        target = -10.0 if outdoor is None else min(outdoor - 12.0, -5.0)
+        # Aim just below the current temperature, not far below it: at -10 out,
+        # subtracting twelve lands on the -20 and -30 points, which govern
+        # weather this house may never see. The mild branch below uses the
+        # current temperature directly, and these should be symmetric.
+        target = -10.0 if outdoor is None else min(outdoor - 1.0, -5.0)
     else:
         target = 8.0 if outdoor is None else max(outdoor, 5.0)
     # The two points bracketing `target`, clamped to the ends of the curve.

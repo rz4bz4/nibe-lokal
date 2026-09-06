@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 serve.log
 *.log
+.DS_Store

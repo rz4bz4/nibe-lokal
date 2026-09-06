@@ -41,6 +41,10 @@ auth_token: ""
 # other name you reach it by, space or comma separated: "varme.lan pi.local"
 allowed_hosts: ""
 
+# Bare IP addresses are always accepted (an IP cannot be DNS-rebound). Set this
+# to true only if something in front of the app already checks the Host header.
+allow_any_host: false
+
 # --- history and safety ---------------------------------------------------
 
 poll_seconds: 60      # NIBE allows 100 registers/s; 60 s is the community norm

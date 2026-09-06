@@ -21,6 +21,26 @@ It is deliberately boring: Python standard library plus one optional package for
 the register map. No framework, no build step, no container. It should still run
 in five years without anyone touching its dependencies.
 
+> **The web UI and the heating advice are in Swedish.** The README, the CLI and
+> the API are in English. NIBE's home market being what it is, that made sense
+> for the author; translations are welcome.
+
+> **This writes to a heat pump.** A wrong setting can cost you money for weeks
+> before you notice, or damage the installation. The app refuses the settings
+> most likely to do that (see below), but the responsibility is yours, and this
+> may affect your warranty. No warranty is given — see [LICENSE](LICENSE).
+
+## Who this is for
+
+**If you already run Home Assistant, use its
+[Nibe integration](https://www.home-assistant.io/integrations/nibe_heatpump/)
+instead.** It is more capable than this, has more people looking after it, and
+this project borrows its register maps anyway.
+
+This is for the case where you want the three or four things you actually use —
+extra hot water, a ventilation boost, a nudge to the heat, and your own history
+— on a phone, without running a home automation platform to get them.
+
 ## What you need
 
 - A NIBE S-series heat pump (S735, S1155, S1255, S320, SMO40 …) with software
@@ -43,9 +63,11 @@ Find the pump's address in your router's DHCP list — it shows up as
 ```bash
 git clone https://github.com/rz4bz4/nibe-lokal.git
 cd nibe-lokal
+# On Debian, Raspberry Pi OS and Homebrew Python, pip needs a venv:
+#   python3 -m venv .venv && . .venv/bin/activate
 pip install nibe                 # optional but recommended, see "The register map"
 cp config.example.yaml config.yaml
-$EDITOR config.yaml              # set `host` to your pump's IP
+$EDITOR config.yaml              # set `host` and `model` (or `register_csv`)
 python3 -m nibelokal status      # does it answer?
 python3 -m nibelokal serve       # http://localhost:8377/
 ```
@@ -72,7 +94,7 @@ that hostname to `allowed_hosts` in `config.yaml`, or the Host check will refuse
 it. A reverse proxy with any other certificate does the same job.
 
 ```bash
-python3 -m unittest discover tests    # 29 tests, no pump required
+python3 -m unittest discover tests    # 53 tests, no pump required
 ```
 
 To keep it running, use whatever your machine already has — `systemd`, `launchd`,
@@ -104,7 +126,7 @@ three tiers:
 
 | Tier | What is in it | Behaviour |
 |---|---|---|
-| **Everyday** | extra hot water, hot water comfort mode, ventilation mode and its return time, room setpoint, SG Ready | written freely |
+| **Everyday** | extra hot water, hot water comfort mode, ventilation mode and its return time, room setpoint, periodic hot water interval, SG Ready | written freely |
 | **Guarded** | heating curve and offset, supply temperature limits, hot water start/stop temperatures, immersion heater power, operating mode, fan speed percentages | require `confirm: true`, are range-checked against the register's own min/max, and are logged |
 | **Blocked** | compressor frequency limits, heating medium pump mode, floor drying, AUX-over-Modbus, external sensor value injection, smart-price control | never written by this app |
 
@@ -157,8 +179,10 @@ obvious advice:
 - **A curve point already at max supply** is a setting the pump will not act on.
   Suggesting it would look like it worked and change nothing.
 
-Every suggestion is one step, and the app says to wait a day before the next one.
-Suggestions that only make sense together are applied together, by one button.
+Every suggestion is one step, and the app says to wait before the next one — a
+day for radiators, two for underfloor heating, which is what the `emitters`
+setting in `config.yaml` is for. Suggestions that only make sense together are
+applied together, in one request that either does all of it or none.
 
 ## Backups
 
@@ -212,8 +236,9 @@ every setting. Assume the same about this app:
 - Set `auth_token` in `config.yaml` to require a token
   (`X-Auth-Token` header, or `?token=` once, which the app remembers).
 - The app refuses requests whose `Host` header is not localhost, its bind
-  address or this machine's own name, and requires `Content-Type:
-  application/json` on writes. Together those stop a web page you happen to open
+  address, this machine's own name, or a bare IP address (an IP cannot be
+  DNS-rebound, and reaching the app at `192.168.1.5` is the normal case), and
+  requires `Content-Type: application/json` on writes. Together those stop a web page you happen to open
   from POSTing to your heat pump through your own browser, and stop DNS
   rebinding. If you front it with a proxy under another name, add that name to
   `allowed_hosts`.
@@ -284,11 +309,7 @@ constant, reboot the pump.
 ## Prior art and thanks
 
 The register maps come from [yozik04/nibe](https://github.com/yozik04/nibe),
-which also powers the Home Assistant integration. If you already run Home
-Assistant, use that integration instead — it is more capable than this and has
-more people looking after it. This exists for the case where you want the two or
-three things you actually use, on a phone, without running a home automation
-platform to get them.
+which also powers the Home Assistant integration.
 
 Register semantics and the protocol limits come from NIBE's own
 [Modbus S-Series](https://installer.nibe.eu/download/18.47aa975e18a8b43315f342c/1696946129027/Modbus%20S-Series.pdf)

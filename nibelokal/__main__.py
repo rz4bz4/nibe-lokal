@@ -23,8 +23,10 @@ def build(args) -> tuple[Pump, dict, str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="nibelokal", description=__doc__)
-    ap.add_argument("-c", "--config", default="config.yaml")
-    ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("-c", "--config", default="config.yaml",
+                    help="path to config.yaml (default: ./config.yaml)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="log every Modbus exchange")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("backup", help="read every register and save a JSON snapshot")
@@ -33,17 +35,21 @@ def main(argv=None) -> int:
     sub.add_parser("status", help="print the dashboard registers")
 
     p = sub.add_parser("read", help="read specific registers")
-    p.add_argument("address", type=int, nargs="+")
+    p.add_argument("address", type=int, nargs="+",
+                   help="NIBE register addresses, e.g. 30009 40105")
 
     p = sub.add_parser("search", help="search the register map")
-    p.add_argument("needle")
-    p.add_argument("--writable", action="store_true")
+    p.add_argument("needle", help="text to look for in register titles")
+    p.add_argument("--writable", action="store_true",
+                   help="only registers that can be changed")
 
     p = sub.add_parser("serve", help="run the web app")
-    p.add_argument("--listen"); p.add_argument("--port", type=int)
+    p.add_argument("--listen", help="bind address, overrides config.yaml")
+    p.add_argument("--port", type=int, help="port, overrides config.yaml")
 
     p = sub.add_parser("diff", help="compare two backup snapshots")
-    p.add_argument("old"); p.add_argument("new")
+    p.add_argument("old", help="the earlier snapshot")
+    p.add_argument("new", help="the later snapshot")
 
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -108,5 +114,17 @@ def main(argv=None) -> int:
     return 1
 
 
+def cli() -> int:
+    """Entry point that turns the expected failures into one readable line."""
+    from .modbus import ModbusError, ModbusOffline
+    try:
+        return main()
+    except (RuntimeError, ModbusOffline, ModbusError) as exc:
+        print("nibelokal: %s" % exc, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli())

@@ -60,11 +60,19 @@ def load(path: str = "config.yaml") -> dict:
             loaded = {}
             with open(path, encoding="utf-8") as fh:
                 for line in fh:
-                    line = line.split("#", 1)[0].strip()
-                    if not line or ":" not in line:
+                    line = line.strip()
+                    if not line or line.startswith("#") or ":" not in line:
                         continue
                     k, v = line.split(":", 1)
-                    loaded[k.strip()] = v.strip()
+                    v = v.strip()
+                    # Strip a trailing comment, but not a # inside a quoted
+                    # value -- a token containing one would be silently cut.
+                    if v[:1] in ("'", '"'):
+                        end = v.find(v[0], 1)
+                        v = v[:end + 1] if end > 0 else v
+                    else:
+                        v = v.split("#", 1)[0].strip()
+                    loaded[k.strip()] = v
         for k, v in (loaded or {}).items():
             if v in (None, ""):
                 continue

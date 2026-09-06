@@ -5,8 +5,19 @@ import json
 
 
 def load(path: str) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        raise SystemExit("No such snapshot: %s" % path)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            "%s is not a complete snapshot (%s). A backup interrupted partway "
+            "through can leave one; take a fresh one." % (path, exc)
+        )
+    if not isinstance(data, dict) or "registers" not in data:
+        raise SystemExit("%s does not look like a nibe-lokal snapshot." % path)
+    return data
 
 
 def print_diff(old_path: str, new_path: str) -> int:

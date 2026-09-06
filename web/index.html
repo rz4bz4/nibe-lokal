@@ -557,16 +557,17 @@ $('#adviceGo').onclick = async e => {
       const items = groups[+ev.target.dataset.group].items;
       const lines = items.map(s => `${s.title}: ${s.current} → ${s.proposed}`).join('\n');
       if (!confirm(`${lines}\n\n${items[0].why}`)) return;
-      await act(ev.target, async () => {
-        const done = [];
-        for (const s of items) {
-          done.push(await post('/api/write',
-            {address: s.address, value: s.proposed, expect: s.current, confirm: true}));
-        }
-        return done;
-      }, $('#heatMsg'),
-        rs => rs.map(r => `${r.title}: ${r.before} → ${r.after}`).join('. ') +
-              `. Utvärdera om ${a.wait || 'ett dygn'}.`);
+      // One request for the whole group: half of a paired change is worse
+      // than neither, so the server validates all of it before writing any.
+      await act(ev.target,
+        () => post('/api/write', {
+          confirm: true,
+          changes: items.map(s => ({address: s.address, value: s.proposed,
+                                    expect: s.current})),
+        }),
+        $('#heatMsg'),
+        r => r.changes.map(c => `${c.title}: ${c.before} → ${c.after}`).join('. ') +
+             `. Utvärdera om ${a.wait || 'ett dygn'}.`);
       await loadHeating();
     });
   } catch (err) {

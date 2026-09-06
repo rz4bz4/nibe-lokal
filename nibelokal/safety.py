@@ -75,10 +75,28 @@ BLOCKED: dict[int, str] = {
     40696: "manual heating medium pump speed - same risk",
     42741: "AUX function selector via Modbus - can silently block the compressor",
     42742: "AUX on/off via Modbus - same",
+    40104: "main fuse rating - this is what current limiting protects; raising it "
+           "removes the protection",
+    40981: "current transformer ratio - same protection, from the other end",
+    45001: "forced control - the service menu's manual override of compressor and valves",
+    40904: "initiate inverter",
+    40905: "force initiated inverter",
+    42743: "start guide state - writing 0 leaves the pump's display stuck in the "
+           "start guide",
+    45009: "follow externally calculated supply - if this app stops, the pump keeps "
+           "regulating on a frozen setpoint",
+    40219: "circulation pump speed for heating - same risk as the pump operating mode",
+    43029: "immersion heater power in emergency mode",
 }
 
 # Ranges of addresses that are blocked wholesale.
 BLOCKED_RANGES: list[tuple[int, int, str]] = [
+    (40212, 40216, "AUX input function selectors - the same selector as 42741, which "
+                   "can silently block the compressor"),
+    (40768, 40768, "AUX input function selector - same"),
+    (41556, 41558, "AUX input function selectors - same"),
+    (46005, 46007, "external sensor value injection (BT68) - if this app stops, the "
+                   "pump keeps regulating on a frozen fake reading"),
     (40121, 40135, "floor drying programme - runs 20-70 C for weeks, never start this from a phone"),
     (41100, 41140, "smart energy source / electricity price control - misconfigured means "
                    "constant additional heat"),

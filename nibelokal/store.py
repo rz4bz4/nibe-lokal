@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS readings (
     text    TEXT
 );
 CREATE INDEX IF NOT EXISTS readings_addr_ts ON readings (address, ts);
+-- prune() deletes by time alone; without this it full-scans the table once a
+-- day while holding the write lock, which on a Pi with millions of rows is
+-- long enough to make concurrent writes time out.
+CREATE INDEX IF NOT EXISTS readings_ts ON readings (ts);
 
 CREATE TABLE IF NOT EXISTS writes (
     ts        INTEGER NOT NULL,
@@ -41,17 +45,23 @@ class Store:
     def __init__(self, path: str, history_days: int = 400):
         self.path = path
         self.history_days = history_days
-        self._local = threading.local()
-        with self._conn() as c:
+        # One connection guarded by a lock, not one per thread.
+        # ThreadingHTTPServer starts a fresh thread per request, so a
+        # thread-local connection is really a connection per request that is
+        # never closed -- two file descriptors each. Measured: the server hit
+        # macOS's 256-descriptor limit after about 160 requests and started
+        # answering "unable to open database file". The writes here take
+        # milliseconds, so serialising them costs nothing worth having.
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(self.path, timeout=10, check_same_thread=False)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA busy_timeout=10000")
+        with self._lock, self._db as c:
             c.executescript(SCHEMA)
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = sqlite3.connect(self.path, timeout=10, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn = conn
-        return conn
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
 
     # -- writing ---------------------------------------------------------
 
@@ -70,11 +80,11 @@ class Store:
                 rows.append((ts, address, None, v))
         if not rows:
             return
-        with self._conn() as c:
+        with self._lock, self._db as c:
             c.executemany("INSERT INTO readings (ts, address, value, text) VALUES (?,?,?,?)", rows)
 
     def record_write(self, result: dict, source: str = "web") -> None:
-        with self._conn() as c:
+        with self._lock, self._db as c:
             c.execute(
                 "INSERT INTO writes (ts, address, title, before, requested, after, tier, source) "
                 "VALUES (?,?,?,?,?,?,?,?)",
@@ -85,7 +95,7 @@ class Store:
 
     def prune(self) -> int:
         cutoff = int(time.time()) - self.history_days * 86400
-        with self._conn() as c:
+        with self._lock, self._db as c:
             cur = c.execute("DELETE FROM readings WHERE ts < ?", (cutoff,))
             return cur.rowcount
 
@@ -95,7 +105,7 @@ class Store:
         """Downsampled series: [[unix_seconds, value], ...]."""
         since = int(time.time()) - hours * 3600
         width = max(60, hours * 3600 // max(1, buckets))
-        with self._conn() as c:
+        with self._lock, self._db as c:
             rows = c.execute(
                 "SELECT (ts / ?) * ? AS bucket, AVG(value) FROM readings "
                 "WHERE address = ? AND ts >= ? AND value IS NOT NULL "
@@ -105,7 +115,7 @@ class Store:
         return [[int(b), round(v, 2)] for b, v in rows if v is not None]
 
     def last_writes(self, limit: int = 50) -> list[dict]:
-        with self._conn() as c:
+        with self._lock, self._db as c:
             rows = c.execute(
                 "SELECT ts, address, title, before, requested, after, tier, source "
                 "FROM writes ORDER BY ts DESC LIMIT ?", (limit,)
@@ -114,7 +124,7 @@ class Store:
         return [dict(zip(keys, r)) for r in rows]
 
     def stats(self) -> dict:
-        with self._conn() as c:
+        with self._lock, self._db as c:
             n, first, last = c.execute(
                 "SELECT COUNT(*), MIN(ts), MAX(ts) FROM readings"
             ).fetchone()

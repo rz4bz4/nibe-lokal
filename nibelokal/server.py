@@ -26,6 +26,32 @@ from .store import Poller, Store
 log = logging.getLogger("nibelokal.server")
 
 
+def _flag(value) -> bool:
+    """Booleans off the wire. `"false"` is a string, and a truthy one -- taking
+    it at face value once turned "off: false" into switching hot water off."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _log_writes(store, writes) -> bool:
+    """Record what was written. Never let this decide the response.
+
+    By the time we get here the pump has already changed. A locked database or
+    a full disk must not turn a completed write into a 502 the caller will
+    retry -- the retry then trips the `expect` guard and reads as a bug.
+    """
+    try:
+        for w in writes:
+            store.record_write(w)
+        return True
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("write succeeded but could not be logged: %s", exc)
+        return False
+
+
 def _is_ip_literal(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
@@ -226,26 +252,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hotwater":
             result = pump.extra_hot_water(int(body.get("minutes", 180)),
-                                          bool(body.get("off", False)))
-            for w in result["writes"]:
-                store.record_write(w)
+                                          _flag(body.get("off")))
+            result["logged"] = _log_writes(store, result["writes"])
             return self._json(result)
 
         if path == "/api/ventilation":
             result = pump.ventilate(str(body.get("direction", "up")),
                                     int(body.get("hours", 3)),
                                     body.get("mode"))
-            for w in result["writes"]:
-                store.record_write(w)
+            result["logged"] = _log_writes(store, result["writes"])
             return self._json(result)
 
         if path == "/api/write":
+            if isinstance(body.get("changes"), list) and body["changes"]:
+                results = pump.write_all(body["changes"], _flag(body.get("confirm")))
+                logged = _log_writes(store, results)
+                return self._json({"changes": results, "logged": logged})
             if "address" not in body:
                 raise ValueError("address is required")
             result = pump.write(int(body["address"]), body.get("value"),
-                                bool(body.get("confirm", False)),
+                                _flag(body.get("confirm")),
                                 body.get("expect"))
-            store.record_write(result)
+            result["logged"] = _log_writes(store, [result])
             return self._json(result)
 
         if path == "/api/backup":

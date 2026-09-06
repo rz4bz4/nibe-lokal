@@ -316,7 +316,15 @@ class Registry:
 
     @classmethod
     def load(cls, model: str, csv_path: str | None = None) -> "Registry":
-        if csv_path and os.path.exists(csv_path):
+        if csv_path:
+            if not os.path.exists(csv_path):
+                # Falling back to the package map here would be the worst kind of
+                # quiet: the map decides which wire address a *write* goes to.
+                raise RuntimeError(
+                    "register_csv points at %r, which does not exist. Fix the path, "
+                    "or clear register_csv to use the map for `model` instead."
+                    % csv_path
+                )
             return cls.from_csv(csv_path)
         return cls.from_package(model)
 

@@ -143,11 +143,13 @@ class Pump:
             # Optimistic concurrency: a phone that has had the page open for a
             # day may be stepping from a value the display has since changed,
             # which moves the heat the opposite way from the button pressed.
-            if expect is not None and before is not None and not _same(before, expect):
+            if expect is not None and not _same(before, expect):
+                # Including the case where `before` could not be read at all:
+                # a conditional write whose condition is unknown is not one.
                 raise safety.Refused(
                     "%s har ändrats sedan du läste den (%s nu, %s då). Läs om och "
                     "försök igen så du vet vad du ändrar från."
-                    % (reg.title, before, expect)
+                    % (reg.title, "okänt" if before is None else before, expect)
                 )
             self.mb.write(reg.wire, words)
             after = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
@@ -165,6 +167,33 @@ class Pump:
             # settings are accepted and then ignored. Verified separately.
             "verified": after is not None,
         }
+
+    def write_all(self, changes: list[dict], confirmed: bool = False) -> list[dict]:
+        """Apply several writes as one unit.
+
+        The advisor's mild-weather advice is a curve change and an offset change
+        that cancel out in cold weather. Half of that pair is worse than neither,
+        so they are validated together first and applied under one lock.
+        """
+        for change in changes:
+            address = int(change["address"])
+            reg = self.registry.get(address)
+            if reg is None:
+                raise KeyError("register %d is not in the map" % address)
+            if not reg.writable:
+                raise safety.Refused("%s (%d) is read-only." % (reg.title, address))
+            safety.check(address, confirmed, self.allow_guarded)
+            value = reg.coerce(change.get("value"))
+            if not reg.mappings:
+                safety.clamp(reg, float(value))
+            reg.encode(value)
+
+        done = []
+        with self._lock:
+            for change in changes:
+                done.append(self.write(int(change["address"]), change.get("value"),
+                                       confirmed, change.get("expect")))
+        return done
 
     # -- everyday actions -------------------------------------------------
 
@@ -283,8 +312,12 @@ class Pump:
         }
         stamp = started.strftime("%Y%m%d-%H%M%S")
         path = os.path.join(directory, "nibe-%s.json" % stamp)
-        with open(path, "w", encoding="utf-8") as fh:
+        # Write then rename: a crash halfway through must not leave a truncated
+        # snapshot that looks like a real one and breaks `diff`.
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(snapshot, fh, indent=1, ensure_ascii=False)
+        os.replace(tmp, path)
 
         latest = os.path.join(directory, "latest.json")
         try:
