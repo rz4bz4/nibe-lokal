@@ -7,7 +7,8 @@ myUplink. Your settings and your history stay in files you own.
 It does four things:
 
 - **Shows the pump** — temperatures, hot water, ventilation, fan speed, degree
-  minutes, compressor hours, alarms. Installable on a phone home screen as a PWA.
+  minutes, compressor hours, alarms. Five tabs, built for a phone, installable
+  on the home screen as a PWA.
 - **Does the things you actually reach for a phone for** — extra hot water before
   a bath, more ventilation for a few hours that goes back on its own, and nudging
   the heat up or down a step.
@@ -16,8 +17,10 @@ It does four things:
   register change, with the reasoning shown. See "Heating advice" below. Every
   setting the pump exposes is also editable directly, grouped and explained in
   plain language rather than as raw register numbers.
-- **Backs up every setting** to a timestamped JSON file, and diffs two snapshots
-  so you can see what changed since June.
+- **Backs up every setting** to a timestamped JSON file — automatically, once a
+  day — and diffs two snapshots so you can see what changed since June. A backup
+  you have to remember to take is one you will not have when you need it, and you
+  need it right after changing something you should not have.
 
 It is deliberately boring: Python standard library plus one optional package for
 the register map. No framework, no build step, no container. It should still run
@@ -200,6 +203,9 @@ applied together, in one request that either does all of it or none.
 python3 -m nibelokal backup --note "before touching the heating curve"
 python3 -m nibelokal diff backup/nibe-20260601-090000.json backup/latest.json
 ```
+
+The app also takes one on its own every `auto_backup_hours` (24 by default), so
+there is always something to go back to.
 
 `backup` reads every register the pump answers on and writes
 `backup/nibe-<timestamp>.json` plus a `latest.json` symlink. `diff` compares two

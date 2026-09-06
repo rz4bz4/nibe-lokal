@@ -50,6 +50,11 @@ allow_any_host: false
 poll_seconds: 60      # NIBE allows 100 registers/s; 60 s is the community norm
 history_days: 400     # older readings are pruned daily
 
+# A full snapshot of every setting, taken automatically this often. A backup you
+# have to remember to take is one you will not have when you need it -- and you
+# need it right after changing something you should not have. 0 turns it off.
+auto_backup_hours: 24
+
 # false blocks every "guarded" write (heating curve, operating mode, hot water
 # temperatures, ...) outright, leaving only the everyday ones. Blocked registers
 # are never written regardless. See nibelokal/safety.py.

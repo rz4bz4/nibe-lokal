@@ -3,267 +3,465 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0f1720">
+<meta name="theme-color" content="#0b1119" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Värmepump">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
-<meta name="apple-mobile-web-app-title" content="Värmepump">
 <title>Värmepumpen</title>
 <style>
 :root{
-  --bg:#f6f7f9; --card:#fff; --ink:#131820; --muted:#657085; --line:#e3e7ee;
-  --accent:#1f6feb; --warm:#d9772b; --cool:#2b8cbe; --ok:#1a7f4b; --bad:#c0392b;
-  --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 12px rgba(16,24,40,.05);
+  --bg:#f7f8fa; --raise:#fff; --sunk:#eef0f4; --ink:#101720; --ink-2:#48546a;
+  --muted:#6b7789; --line:#e2e6ed; --line-2:#d3d9e3;
+  --accent:#1663d8; --accent-ink:#fff; --accent-soft:#e8f0fe;
+  --warm:#c2621c; --warm-soft:#fdf0e4; --cool:#1d7fa8; --ok:#127a48; --bad:#b3271e;
+  --sh-1:0 1px 2px rgba(14,22,36,.07);
+  --sh-2:0 2px 4px rgba(14,22,36,.05),0 8px 20px rgba(14,22,36,.06);
+  --sh-3:0 12px 32px rgba(14,22,36,.14);
+  --r:14px; --r-sm:10px;
+  --nav-h:calc(56px + env(safe-area-inset-bottom));
 }
 @media (prefers-color-scheme:dark){:root{
-  --bg:#0f1720; --card:#161f2b; --ink:#e8edf5; --muted:#94a1b6; --line:#25303f;
-  --accent:#4c8ef7; --warm:#e8944a; --cool:#4bb3e0; --ok:#3fbe7d; --bad:#e56a5a;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 6px 18px rgba(0,0,0,.28);
+  --bg:#0b1119; --raise:#141c27; --sunk:#0f1720; --ink:#e9eef6; --ink-2:#aab6c8;
+  --muted:#8794a8; --line:#212b39; --line-2:#2c3848;
+  --accent:#5c9bff; --accent-ink:#08111c; --accent-soft:#152540;
+  --warm:#e5964f; --warm-soft:#2a1f14; --cool:#54b6e2;
+  --ok:#3fc383; --bad:#f0705f;
+  --sh-1:0 1px 2px rgba(0,0,0,.4);
+  --sh-2:0 2px 4px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.35);
+  --sh-3:0 12px 32px rgba(0,0,0,.5);
 }}
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  -webkit-font-smoothing:antialiased}
-.wrap{max-width:720px;margin:0 auto;padding:16px 16px 48px}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:8px 0 18px}
-h1{font-size:20px;margin:0;letter-spacing:-.01em}
-.sub{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
-  padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
-.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
-  margin:0 0 12px;font-weight:600}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-.tile .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;
-  margin-bottom:6px;min-height:26px}
-.tile .v{font-size:26px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.tile .v small{font-size:14px;font-weight:500;color:var(--muted);margin-left:2px}
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  overscroll-behavior-y:contain}
+h1,h2,h3{margin:0;font-weight:640;letter-spacing:-.011em}
+
+/* ---------- chrome ---------- */
+.top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 94%,transparent);
+  backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);
+  border-bottom:1px solid transparent;transition:border-color .2s;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+.top.scrolled{border-bottom-color:var(--line)}
+.top .in{max-width:640px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.top h1{font-size:17px;flex:1}
+.status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+.dot.live{background:var(--ok);animation:breathe 2.6s ease-in-out infinite}
+.dot.stale{background:var(--bad)}
+@keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.82)}}
+.iconbtn{width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;padding:0;
+  border-radius:9px;border:1px solid transparent;background:transparent;color:var(--ink-2);
+  cursor:pointer;transition:background .15s,color .15s}
+.iconbtn:hover{background:var(--sunk);color:var(--ink)}
+.iconbtn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+
+.wrap{max-width:640px;margin:0 auto;padding:4px 16px calc(var(--nav-h) + 20px)}
+
+/* ---------- views ---------- */
+.view{display:none}
+.view.on{display:block;animation:viewIn .32s cubic-bezier(.22,.8,.3,1)}
+@keyframes viewIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.view>*{animation:riseIn .4s cubic-bezier(.22,.8,.3,1) backwards}
+.view>*:nth-child(1){animation-delay:.02s}
+.view>*:nth-child(2){animation-delay:.06s}
+.view>*:nth-child(3){animation-delay:.1s}
+.view>*:nth-child(4){animation-delay:.14s}
+.view>*:nth-child(n+5){animation-delay:.17s}
+@keyframes riseIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- bottom nav ---------- */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:40;height:var(--nav-h);
+  padding-bottom:env(safe-area-inset-bottom);
+  background:color-mix(in srgb,var(--raise) 97%,transparent);
+  backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-top:1px solid var(--line);display:flex;justify-content:center}
+nav .in{max-width:640px;width:100%;display:grid;grid-template-columns:repeat(5,1fr)}
+nav button{background:none;border:0;padding:6px 2px 4px;color:var(--muted);cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;
+  font-weight:550;letter-spacing:.01em;-webkit-tap-highlight-color:transparent;
+  transition:color .18s;position:relative}
+nav button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.65;
+  stroke-linecap:round;stroke-linejoin:round;transition:transform .28s cubic-bezier(.3,1.5,.5,1)}
+nav button[aria-selected=true]{color:var(--accent)}
+nav button[aria-selected=true] svg{transform:translateY(-1.5px) scale(1.09)}
+nav button:active svg{transform:scale(.9)}
+
+/* ---------- cards ---------- */
+.card{background:var(--raise);border:1px solid var(--line);border-radius:var(--r);
+  padding:16px;margin-bottom:12px;box-shadow:var(--sh-1)}
+.card>h2{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+  margin-bottom:13px;font-weight:660}
+.card .lead{color:var(--ink-2);font-size:13px;margin:-6px 0 13px;line-height:1.5}
+
+/* ---------- hero + tiles ---------- */
+.hero{background:var(--raise);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px 18px 16px;margin-bottom:12px;box-shadow:var(--sh-1)}
+.hero .big{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.hero .n{font-size:44px;font-weight:660;letter-spacing:-.03em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.hero .n .u{font-size:19px;font-weight:560;color:var(--muted);margin-left:4px;
+  letter-spacing:0}
+.hero .k{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  font-weight:640;margin-bottom:7px}
+.hero .side{flex:1;min-width:130px;text-align:right;color:var(--ink-2);font-size:13px;
+  line-height:1.65}
+.hero .side b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:9px}
+.tile{background:var(--raise);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 12px;box-shadow:var(--sh-1);transition:transform .2s,box-shadow .2s}
+.tile:hover{transform:translateY(-1px);box-shadow:var(--sh-2)}
+.tile .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  font-weight:640;margin-bottom:5px;line-height:1.3;height:13px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .v{font-size:21px;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  line-height:1.2}
+.tile .v .u{font-size:12.5px;font-weight:550;color:var(--muted);margin-left:3px;
+  letter-spacing:0}
 .tile.warm .v{color:var(--warm)} .tile.cool .v{color:var(--cool)}
-button{font:inherit;font-weight:550;border:1px solid var(--line);background:var(--card);
-  color:var(--ink);border-radius:11px;padding:13px 14px;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;transition:transform .06s,border-color .15s}
-button:active{transform:scale(.985)}
-button:disabled{opacity:.45;cursor:default}
-button.primary{background:var(--accent);border-color:transparent;color:#fff}
+.tile.live{border-color:var(--warm);background:var(--warm-soft)}
+.tile.live .v{color:var(--warm)}
+
+/* ---------- controls ---------- */
+button{font:inherit;font-weight:580;border:1px solid var(--line-2);background:var(--raise);
+  color:var(--ink);border-radius:var(--r-sm);padding:12px 15px;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .12s cubic-bezier(.3,1.4,.5,1),background .15s,border-color .15s,opacity .15s}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.45;cursor:default;transform:none}
+button.primary{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
 button.warm{background:var(--warm);border-color:transparent;color:#fff}
-.row{display:flex;gap:10px;flex-wrap:wrap}
-.row>*{flex:1 1 130px}
-label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
-select,input{font:inherit;width:100%;padding:11px 12px;border-radius:11px;
-  border:1px solid var(--line);background:var(--bg);color:var(--ink)}
-.note{color:var(--muted);font-size:12.5px;margin-top:11px}
-.msg{padding:11px 13px;border-radius:11px;margin-top:12px;font-size:13.5px;display:none;
-  border:1px solid transparent}
-.msg.on{display:block}
-.msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border-color:var(--ok);color:var(--ok)}
-.msg.bad{background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad);color:var(--bad)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;
-  background:var(--muted);vertical-align:middle}
-.dot.live{background:var(--ok)} .dot.stale{background:var(--bad)}
+button.ghost{background:transparent;border-color:var(--line)}
+.row{display:flex;gap:9px;flex-wrap:wrap}
+.row>*{flex:1 1 128px}
+.row .grow2{flex:2 1 180px}
+label{display:block;font-size:11.5px;color:var(--muted);margin:0 0 5px;font-weight:600;
+  letter-spacing:.02em}
+select,input{font:inherit;width:100%;padding:11px 12px;border-radius:var(--r-sm);
+  border:1px solid var(--line-2);background:var(--sunk);color:var(--ink);
+  appearance:none;-webkit-appearance:none}
+select{background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
+  linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 17px) 51%,calc(100% - 12px) 51%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+
+/* stepper */
+.stepper{display:flex;align-items:stretch;gap:10px}
+.stepper button{flex:0 0 62px;font-size:25px;font-weight:400;padding:0;line-height:1}
+.stepval{flex:1;text-align:center;border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:11px 8px;background:var(--sunk)}
+.stepval .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+  font-weight:640}
+.stepval .v{font-size:29px;font-weight:660;font-variant-numeric:tabular-nums;line-height:1.2;
+  transition:transform .25s cubic-bezier(.3,1.6,.5,1)}
+.stepval .v.bump{transform:scale(1.16)}
+
+/* ---------- notes, warnings, toast ---------- */
+.note{color:var(--muted);font-size:12.5px;margin-top:11px;line-height:1.55}
+.warn{border-left:2.5px solid var(--warm);background:var(--warm-soft);
+  padding:10px 12px;margin:9px 0;font-size:12.5px;border-radius:0 var(--r-sm) var(--r-sm) 0;
+  line-height:1.55;color:var(--ink-2)}
+.warn.quiet{border-left-color:var(--line-2);background:var(--sunk)}
+.alarm{background:color-mix(in srgb,var(--bad) 11%,var(--raise));border:1px solid var(--bad);
+  color:var(--bad);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;font-size:13.5px;
+  line-height:1.55;animation:pulseIn .5s ease}
+.alarm b{display:block;font-size:15px;margin-bottom:4px}
+@keyframes pulseIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+
+#toast{position:fixed;left:12px;right:12px;bottom:calc(var(--nav-h) + 12px);z-index:60;
+  display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.toast{max-width:600px;width:100%;padding:12px 15px;border-radius:var(--r-sm);
+  font-size:13.5px;line-height:1.5;box-shadow:var(--sh-3);
+  background:var(--raise);border:1px solid var(--line);color:var(--ink);
+  animation:toastIn .3s cubic-bezier(.22,.9,.3,1);pointer-events:auto}
+.toast.ok{border-color:var(--ok);color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--raise))}
+.toast.bad{border-color:var(--bad);color:var(--bad);background:color-mix(in srgb,var(--bad) 9%,var(--raise))}
+.toast.out{animation:toastOut .25s ease forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes toastOut{to{opacity:0;transform:translateY(8px) scale(.98)}}
+
+/* ---------- tables, lists ---------- */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
-td{padding:8px 4px;border-bottom:1px solid var(--line);vertical-align:top}
-td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+td{padding:9px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;
+  color:var(--ink-2);font-weight:550}
 tr:last-child td{border-bottom:0}
-.addr{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
-.chart{width:100%;height:150px;display:block;overflow:visible}
-.chart path{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-.chart .area{fill:color-mix(in srgb,var(--accent) 13%,transparent);stroke:none}
-.chart .ax{stroke:var(--line);stroke-width:1}
-.chart text{fill:var(--muted);font-size:10px}
-.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-.tabs button{flex:0 1 auto;padding:7px 12px;font-size:12.5px;border-radius:9px}
-.tabs button[aria-pressed=true]{background:var(--accent);color:#fff;border-color:transparent}
-details summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0}
-.hint{font-size:12px;color:var(--muted);margin-top:8px}
-.stepper{display:flex;align-items:stretch;gap:12px}
-.stepper button{flex:0 0 64px;font-size:26px;font-weight:400;line-height:1;padding:0}
-.stepval{flex:1;text-align:center;border:1px solid var(--line);border-radius:11px;
-  padding:10px 8px;background:var(--bg)}
-.stepval .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-.stepval .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
-.sugg{border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:10px;
-  background:var(--bg)}
-.sugg .h{font-weight:600;margin-bottom:4px;font-variant-numeric:tabular-nums}
-.sugg .w{color:var(--muted);font-size:13px;margin-bottom:11px}
-.setgroup{margin:16px 0 4px}
-.setgroup h3{font-size:13px;margin:0 0 3px;font-weight:650}
-.setgroup .intro{color:var(--muted);font-size:12.5px;margin:0 0 10px;line-height:1.5}
-.setrow{display:flex;align-items:center;gap:10px;padding:9px 0;
-  border-bottom:1px solid var(--line)}
-.setrow:last-child{border-bottom:0}
+.addr{color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums;margin-top:1px}
+
+/* ---------- settings editor ---------- */
+.setgroup{margin:0 0 20px}
+.setgroup:last-child{margin-bottom:0}
+.setgroup h3{font-size:13.5px;margin:0 0 3px}
+.setgroup .intro{color:var(--muted);font-size:12.5px;margin:0 0 9px;line-height:1.55}
+.setrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.setrow:last-of-type{border-bottom:0}
 .setrow .n{flex:1;min-width:0}
-.setrow .n b{font-weight:550;font-size:13.5px;display:block}
-.setrow .n .d{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
-.setrow .val{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;
-  font-size:14px}
-.setrow button{padding:7px 11px;font-size:12.5px;border-radius:9px;flex:0 0 auto}
-.setedit{display:flex;gap:8px;align-items:center;padding:4px 0 12px}
+.setrow .n b{font-weight:570;font-size:13.5px;display:block;line-height:1.35}
+.setrow .val{font-variant-numeric:tabular-nums;font-weight:640;white-space:nowrap;font-size:14px}
+.setrow button{padding:7px 12px;font-size:12.5px;border-radius:9px;flex:0 0 auto}
+.setedit{display:flex;gap:8px;align-items:center;padding:2px 0 12px;
+  animation:riseIn .25s cubic-bezier(.22,.9,.3,1)}
 .setedit input,.setedit select{flex:1;min-width:0}
 .setedit button{flex:0 0 auto}
-.setwhy{color:var(--muted);font-size:12.5px;padding:0 0 10px;line-height:1.5}
-.tag{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--warm);
-  border:1px solid var(--warm);border-radius:5px;padding:1px 5px;margin-left:6px;
-  vertical-align:middle}
-.alarm{background:color-mix(in srgb,var(--bad) 13%,transparent);border:1px solid var(--bad);
-  color:var(--bad);border-radius:12px;padding:14px;margin-bottom:14px;font-size:14px}
-.alarm b{display:block;font-size:15px;margin-bottom:3px}
-.warn{border-left:3px solid var(--warm);padding:8px 0 8px 11px;margin:9px 0;
-  font-size:13px;color:var(--ink)}
-footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.7}
+.setwhy{color:var(--muted);font-size:12.5px;padding:0 0 11px;line-height:1.55;
+  animation:riseIn .25s cubic-bezier(.22,.9,.3,1)}
+.tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--warm);
+  background:var(--warm-soft);border-radius:4px;padding:2px 5px;margin-left:6px;
+  vertical-align:1px;font-weight:700}
+
+/* ---------- chart ---------- */
+.chart{width:100%;height:168px;display:block;overflow:visible}
+.chart .ln{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .area{fill:url(#g);stroke:none}
+.chart .ax{stroke:var(--line);stroke-width:1}
+.chart text{fill:var(--muted);font-size:10px;font-weight:550}
+.chart .ln{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
+  animation:draw 1s cubic-bezier(.3,.8,.4,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chips button{flex:0 1 auto;padding:6px 12px;font-size:12.5px;border-radius:99px;
+  border-color:var(--line);background:var(--sunk);font-weight:560}
+.chips button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);
+  border-color:transparent}
+
+details summary{cursor:pointer;color:var(--ink-2);font-size:13px;padding:7px 0;font-weight:560;
+  list-style:none;display:flex;align-items:center;gap:7px}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"";width:6px;height:6px;border-right:1.7px solid currentColor;
+  border-bottom:1.7px solid currentColor;transform:rotate(-45deg);transition:transform .22s;
+  margin-left:2px}
+details[open] summary::before{transform:rotate(45deg)}
+.hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.55}
+.skel{background:linear-gradient(90deg,var(--sunk) 25%,var(--line) 37%,var(--sunk) 63%);
+  background-size:400% 100%;animation:shim 1.3s ease-in-out infinite;border-radius:6px;
+  height:13px;margin:7px 0}
+@keyframes shim{0%{background-position:100% 0}100%{background-position:-100% 0}}
+footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.75}
+footer a{color:var(--muted)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important}
+}
 </style>
 </head>
 <body>
+
+<header class="top" id="top"><div class="in">
+  <h1 id="viewTitle">Just nu</h1>
+  <div class="status"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
+  <button class="iconbtn" id="goSettings" title="Inställningar och backup" aria-label="Inställningar">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</div></header>
+
 <div class="wrap">
 
-<header>
-  <h1>Värmepumpen</h1>
-  <div class="sub"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
-</header>
+<!-- ===================== NU ===================== -->
+<section class="view on" id="v-now">
+  <div id="alarmBanner" hidden></div>
 
-<div id="alarmBanner" hidden></div>
-
-<div class="grid" id="tiles"></div>
-
-<div class="card">
-  <h2>Värme</h2>
-  <div id="heatState" class="hint" style="margin:0 0 12px">läser…</div>
-
-  <div class="stepper">
-    <button id="heatDown" aria-label="Sänk värmen">−</button>
-    <div class="stepval">
-      <div class="k">Värmeoffset</div>
-      <div class="v" id="offsetNow">–</div>
+  <div class="hero">
+    <div class="big">
+      <div>
+        <div class="k">Varmvatten</div>
+        <div class="n" id="heroHw">–</div>
+      </div>
+      <div class="side" id="heroSide"><div class="skel" style="width:80%;margin-left:auto"></div>
+        <div class="skel" style="width:60%;margin-left:auto"></div></div>
     </div>
-    <button id="heatUp" aria-label="Höj värmen">+</button>
-  </div>
-  <p class="note" id="offsetNote">Ett steg motsvarar ungefär en grad inomhus. Vänta innan du
-    justerar igen — huset svarar långsamt, och tre ändringar på en dag går inte att
-    utvärdera.</p>
-
-  <div class="row" style="margin-top:12px">
-    <button id="adviceOpen">Hjälp mig ställa in</button>
   </div>
 
-  <div id="adviceBox" hidden style="margin-top:14px">
+  <div class="grid" id="tiles"></div>
+
+  <div class="card" style="margin-top:12px">
+    <h2>Alla avlästa värden</h2>
+    <table id="all"></table>
+  </div>
+</section>
+
+<!-- ===================== VÄRME ===================== -->
+<section class="view" id="v-heat">
+  <div class="card">
+    <h2>Justera värmen</h2>
+    <div id="heatLine" class="lead" style="margin:-4px 0 12px"></div>
+    <div class="stepper">
+      <button id="heatDown" aria-label="Sänk värmen">−</button>
+      <div class="stepval"><div class="k">Värmeoffset</div><div class="v" id="offsetNow">–</div></div>
+      <button id="heatUp" aria-label="Höj värmen">+</button>
+    </div>
+    <p class="note" id="offsetNote">Plus ger varmare hus, minus svalare.</p>
+    <div id="heatFlags"></div>
+  </div>
+
+  <div class="card" id="curveCard" hidden>
+    <h2>Din värmekurva</h2>
+    <div id="curveBody"></div>
+  </div>
+
+  <div class="card">
+    <h2>Hjälp mig ställa in</h2>
+    <p class="lead">Två frågor. Svaret blir en konkret ändring med motivering — inte en gissning.</p>
     <label>Hur känns det?</label>
-    <div class="tabs" id="feelingTabs">
+    <div class="chips" id="feelingTabs">
       <button data-feeling="warmer" aria-pressed="true">För kallt</button>
       <button data-feeling="colder">För varmt</button>
     </div>
     <label style="margin-top:10px">När då?</label>
-    <div class="tabs" id="whenTabs">
+    <div class="chips" id="whenTabs">
       <button data-when="always" aria-pressed="true">I alla väder</button>
       <button data-when="cold_outside">Bara när det är kallt ute</button>
       <button data-when="mild_outside">Bara i milt väder</button>
     </div>
-    <div class="row" style="margin-top:10px">
+    <div class="row" style="margin-top:4px">
       <button class="primary" id="adviceGo">Ge mig ett förslag</button>
     </div>
     <div id="adviceOut" style="margin-top:12px"></div>
   </div>
+</section>
 
-  <details id="settingsBox" style="margin-top:12px">
-    <summary>Alla inställningar</summary>
-    <div id="settings"><p class="hint">läser…</p></div>
-  </details>
-  <div class="msg" id="heatMsg"></div>
-</div>
-
-<div class="card">
-  <h2>Extra varmvatten</h2>
-  <div class="row">
-    <div style="flex:2 1 160px">
-      <label for="hwMin">Hur länge</label>
-      <select id="hwMin">
-        <option value="60">1 timme</option>
-        <option value="120">2 timmar</option>
-        <option value="180" selected>3 timmar — ett badkar</option>
-        <option value="240">4 timmar</option>
-        <option value="360">6 timmar</option>
-      </select>
+<!-- ===================== VATTEN ===================== -->
+<section class="view" id="v-water">
+  <div class="card">
+    <h2>Extra varmvatten</h2>
+    <p class="lead">Kostar el medan det pågår. Pumpen går tillbaka själv när tiden runnit ut.</p>
+    <div class="row">
+      <div class="grow2">
+        <label for="hwMin">Hur länge</label>
+        <select id="hwMin">
+          <option value="60">1 timme</option>
+          <option value="120">2 timmar</option>
+          <option value="180" selected>3 timmar — ett badkar</option>
+          <option value="240">4 timmar</option>
+          <option value="360">6 timmar</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:flex-end"><button class="warm" id="hwOn">Starta</button></div>
+      <div style="display:flex;align-items:flex-end"><button class="ghost" id="hwOff">Avbryt</button></div>
     </div>
-    <div style="display:flex;align-items:flex-end"><button class="warm" id="hwOn">Starta</button></div>
-    <div style="display:flex;align-items:flex-end"><button id="hwOff">Avbryt</button></div>
+    <div id="hwLive"></div>
   </div>
-  <p class="note">Kostar el medan det pågår. Starta när någon faktiskt ska bada — pumpen går
-    tillbaka till normal drift av sig själv när tiden runnit ut.</p>
-  <div class="msg" id="hwMsg"></div>
-</div>
+  <div class="card">
+    <h2>Varmvatteninställningar</h2>
+    <div id="setWater"><div class="skel" style="width:60%"></div><div class="skel" style="width:75%"></div></div>
+  </div>
+</section>
 
-<div class="card">
-  <h2>Ventilation</h2>
-  <div class="row">
-    <div style="flex:3 1 200px">
-      <label for="ventMode">Läge</label>
-      <select id="ventMode"><option>läser lägen…</option></select>
+<!-- ===================== LUFT ===================== -->
+<section class="view" id="v-air">
+  <div class="card">
+    <h2>Ventilation</h2>
+    <p class="lead" id="fanNote">Lägena är inte ordnade lågt till högt — procenten i listan är det som gäller,
+      inte numret.</p>
+    <div class="row">
+      <div class="grow2">
+        <label for="ventMode">Läge</label>
+        <select id="ventMode"><option>läser lägen…</option></select>
+      </div>
+      <div>
+        <label for="ventH">Återgång efter</label>
+        <select id="ventH">
+          <option value="1">1 timme</option><option value="2">2 timmar</option>
+          <option value="3" selected>3 timmar</option><option value="4">4 timmar</option>
+          <option value="6">6 timmar</option><option value="12">12 timmar</option>
+          <option value="24">24 timmar</option>
+        </select>
+      </div>
     </div>
-    <div style="flex:2 1 140px">
-      <label for="ventH">Återgång efter</label>
-      <select id="ventH">
-        <option value="1">1 timme</option>
-        <option value="2">2 timmar</option>
-        <option value="3" selected>3 timmar</option>
-        <option value="4">4 timmar</option>
-        <option value="6">6 timmar</option>
-        <option value="12">12 timmar</option>
-        <option value="24">24 timmar</option>
-      </select>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="ventSet">Sätt läge</button>
+      <button class="ghost" id="ventNorm">Tillbaka till normal</button>
     </div>
+    <div id="ventLive"></div>
   </div>
-  <div class="row" style="margin-top:10px">
-    <button class="primary" id="ventSet">Sätt läge</button>
-    <button id="ventNorm">Tillbaka till normal</button>
+</section>
+
+<!-- ===================== HISTORIK ===================== -->
+<section class="view" id="v-hist">
+  <div class="card">
+    <h2>Historik</h2>
+    <div class="chips" id="histTabs"></div>
+    <svg class="chart" id="chart" preserveAspectRatio="none">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent)" stop-opacity=".22"/>
+        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+      </linearGradient></defs>
+    </svg>
+    <div class="chips" style="margin:12px 0 0">
+      <button data-h="6">6 h</button><button data-h="24" aria-pressed="true">24 h</button>
+      <button data-h="168">7 dygn</button><button data-h="720">30 dygn</button>
+    </div>
+    <p class="hint">Appen sparar ett värde per avläsning i en fil du äger, så länge du vill.
+      Det är historiken myUplink tar betalt för.</p>
   </div>
-  <p class="note" id="fanNote">Procenten läses ur pumpen — lägena är inte ordnade lågt till
-    högt, så siffran i listan är det som gäller, inte numret.</p>
-  <div class="msg" id="ventMsg"></div>
+</section>
+
+<!-- ===================== INSTÄLLNINGAR ===================== -->
+<section class="view" id="v-set">
+  <div class="card">
+    <h2>Backup av inställningarna</h2>
+    <div id="backupState" class="lead">läser…</div>
+    <div class="row"><button id="doBackup">Ta backup nu</button></div>
+    <details style="margin-top:6px"><summary>Tidigare backuper</summary>
+      <table id="backups"></table>
+      <p class="hint">Jämför två och se exakt vad som ändrats:
+        <code>python3 -m nibelokal diff gammal.json ny.json</code></p>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Alla inställningar</h2>
+    <p class="lead">Pumpens egna inställningar, grupperade och förklarade. Skyddade ändringar
+      frågar innan de görs.</p>
+    <div id="settings"><div class="skel" style="width:70%"></div><div class="skel" style="width:50%"></div>
+      <div class="skel" style="width:65%"></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Ändringslogg</h2>
+    <p class="lead">Vad appen har skrivit till pumpen, och vad värdet var innan.</p>
+    <table id="wlog"></table>
+  </div>
+
+  <footer>
+    nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
+    ingen molntjänst, ingen prenumeration<br>
+    <span id="mapNote"></span>
+  </footer>
+</section>
+
 </div>
 
-<div class="card">
-  <h2>Historik</h2>
-  <div class="tabs" id="histTabs"></div>
-  <svg class="chart" id="chart" preserveAspectRatio="none"></svg>
-  <div class="row" style="margin-top:10px">
-    <button data-h="6">6 h</button><button data-h="24" aria-pressed="true">24 h</button>
-    <button data-h="168">7 d</button><button data-h="720">30 d</button>
-  </div>
-</div>
+<div id="toast"></div>
 
-<div class="card">
-  <h2>Alla värden</h2>
-  <table id="all"></table>
-</div>
-
-<div class="card">
-  <h2>Backup</h2>
-  <div class="row">
-    <button id="doBackup">Ta backup nu</button>
-  </div>
-  <p class="note" id="backupNote">Läser varje register pumpen svarar på och sparar en tidsstämplad
-    JSON-fil. Jämför två med <code>python3 -m nibelokal diff gammal.json ny.json</code>.</p>
-  <details style="margin-top:10px"><summary>Tidigare backuper</summary>
-    <table id="backups"></table></details>
-  <div class="msg" id="bkMsg"></div>
-</div>
-
-<footer>
-  nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
-  ingen molntjänst, ingen prenumeration
-</footer>
-</div>
+<nav><div class="in">
+  <button data-view="now" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Just nu</button>
+  <button data-view="heat"><svg viewBox="0 0 24 24"><path d="M14 14.76V4a2 2 0 1 0-4 0v10.76a4 4 0 1 0 4 0z"/></svg>Värme</button>
+  <button data-view="water"><svg viewBox="0 0 24 24"><path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/></svg>Vatten</button>
+  <button data-view="air"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 16h13a3 3 0 1 1-3 3"/><path d="M3 12h17"/></svg>Luft</button>
+  <button data-view="hist"><svg viewBox="0 0 24 24"><path d="M3 18l5-6 4 3 5-8 4 5"/></svg>Historik</button>
+</div></nav>
 
 <script>
 const $ = s => document.querySelector(s);
-let token = savedToken();
-function savedToken() {
-  const fromUrl = new URLSearchParams(location.search).get('token');
+const $$ = s => [...document.querySelectorAll(s)];
+
+/* ---------------- token + api ---------------- */
+let token = (() => {
+  const u = new URLSearchParams(location.search).get('token');
   try {
-    if (fromUrl) localStorage.setItem('nibe_token', fromUrl);
-    return fromUrl || localStorage.getItem('nibe_token') || '';
-  } catch (e) { return fromUrl || ''; }
-}
+    if (u) localStorage.setItem('nibe_token', u);
+    return u || localStorage.getItem('nibe_token') || '';
+  } catch (e) { return u || ''; }
+})();
 
 async function api(path, opts = {}) {
   const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
@@ -271,7 +469,7 @@ async function api(path, opts = {}) {
   const res = await fetch(path, Object.assign({}, opts, {headers}));
   const body = await res.json().catch(() => ({error: 'svaret gick inte att tolka'}));
   if (res.status === 401) {
-    // An installed home-screen app has its own storage, so the ?token= from the
+    // An installed home-screen app has its own storage, so a ?token= from the
     // browser is not there. Ask once rather than showing a dead dashboard.
     const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
     if (given) {
@@ -283,102 +481,146 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
   return body;
 }
+const post = (p, b) => api(p, {method: 'POST', body: JSON.stringify(b || {})});
 
-function say(el, text, ok = true) {
-  el.textContent = text;
-  el.className = 'msg on ' + (ok ? 'ok' : 'bad');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.className = 'msg'; }, 9000);
-}
-
-// Which registers get a big tile, and what to call them in plain Swedish.
-const TILES = [
-  [30009, 'Varmvatten topp', 'warm'],
-  [30010, 'Varmvatten laddning', 'warm'],
-  [30002, 'Utetemperatur', 'cool'],
-  [30020, 'Frånluft', ''],
-  [30006, 'Framledning', 'warm'],
-  [31047, 'Kompressor', ''],
-  [40012, 'Gradminuter', ''],
-  [32134, 'Frånluftsfläkt', ''],
-  [40057, 'Varmvattenläge', ''],
-  [40105, 'Ventilationsläge', ''],
-  [31028, 'Elpatron just nu', ''],
-  [31976, 'Larm', ''],
-];
-let latest = [];
-
-function fmt(v, unit) {
-  if (v === null || v === undefined) return '–';
-  if (typeof v === 'number') {
-    // Temperatures always get one decimal, so 27.0 and 27.1 line up in a row
-    // of tiles instead of reading as "27" next to "27.1".
-    const s = (unit === '\u00b0C' || !Number.isInteger(v)) ? v.toFixed(1) : String(v);
-    return esc(s) + (unit ? '<small>' + esc(unit) + '</small>' : '');
-  }
-  return esc(String(v));
-}
-
-// Register titles come from the map, but a CSV exported from someone's own pump
-// is user-supplied text that ends up in innerHTML. Escape it.
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function renderTiles() {
-  const by = Object.fromEntries(latest.map(r => [r.address, r]));
-  const boosts = renderBoosts()
-    .map(([label, value]) => `<div class="tile warm"><div class="k">${label}</div>
-                              <div class="v">${value}</div></div>`).join('');
-  $('#tiles').innerHTML = boosts + (TILES
-    .filter(([a]) => by[a] && by[a].value !== null && by[a].value !== undefined)
-    .map(([a, label, cls]) => {
-      const r = by[a];
-      return `<div class="tile ${cls}"><div class="k">${label}</div>
-              <div class="v">${fmt(r.value, r.unit)}</div></div>`;
-    }).join('') || '<div class="tile"><div class="k">Inga värden ännu</div><div class="v">–</div></div>');
+function toast(text, ok = true, ms = 7000) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (ok ? 'ok' : 'bad');
+  el.textContent = text;
+  $('#toast').appendChild(el);
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 260);
+  }, ms);
 }
 
-function renderAlarm() {
-  const by = Object.fromEntries(latest.map(r => [r.address, r]));
-  const alarm = by[31976] && by[31976].value;
-  const el = $('#alarmBanner');
-  if (!alarm) { el.hidden = true; el.innerHTML = ''; return; }
-  el.hidden = false;
-  el.className = 'alarm';
-  el.innerHTML = `<b>Pumpen larmar (kod ${esc(String(alarm))})</b>
-    Slå upp koden på pumpens display — den visar larmtexten och vad som ska göras.
-    Ett larm kan betyda att pumpen slutat värma, så vänta inte på att det går över.`;
-}
+/* ---------------- navigation ---------------- */
+const TITLES = {now:'Just nu', heat:'Värme', water:'Varmvatten', air:'Ventilation',
+                hist:'Historik', set:'Inställningar'};
+const ONSHOW = {};
+let current = 'now';
 
-function renderBoosts() {
-  const by = Object.fromEntries(latest.map(r => [r.address, r]));
-  const out = [];
-  const hwMin = by[40226] && by[40226].value;
-  if (hwMin) out.push(['Extra varmvatten', `${hwMin}<small>min kvar</small>`]);
-  const mode = by[40105] && by[40105].value;
-  if (mode) {
-    const pct = fanSpeeds && fanSpeeds[mode] !== undefined ? fanSpeeds[mode] : null;
-    out.push(['Ventilationsboost', pct === null ? `läge ${mode}` : `${pct}<small>%</small>`]);
+function show(name) {
+  if (!TITLES[name]) return;
+  current = name;
+  $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + name));
+  $$('nav button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === name));
+  $('#viewTitle').textContent = TITLES[name];
+  window.scrollTo({top: 0, behavior: 'instant'});
+  try { history.replaceState(null, '', '#' + name); } catch (e) {}
+  if (ONSHOW[name]) ONSHOW[name]();
+}
+$$('nav button').forEach(b => b.onclick = () => show(b.dataset.view));
+$('#goSettings').onclick = () => show('set');
+addEventListener('hashchange', () => show(location.hash.slice(1) || 'now'));
+addEventListener('scroll', () => $('#top').classList.toggle('scrolled', scrollY > 4),
+                 {passive: true});
+
+/* ---------------- status ---------------- */
+const TILES = [
+  [30010, 'Laddning', 'warm'], [30002, 'Ute', 'cool'], [30020, 'Frånluft', ''],
+  [30006, 'Framledning', 'warm'], [30008, 'Retur', ''], [31047, 'Kompressor', ''],
+  [40012, 'Gradminuter', ''], [32134, 'Fläkt', ''], [40057, 'VV-läge', ''],
+  [40105, 'Ventilation', ''], [31028, 'Elpatron', ''], [31088, 'Drifttid', ''],
+];
+let latest = [], byAddr = {}, fanSpeeds = null;
+
+// The register map's titles are English installer shorthand. Where settings.py
+// has already given a register a plain-Swedish name, use that instead.
+const SWEDISH = {
+  30002:'Utetemperatur', 30006:'Framledning', 30008:'Returledning',
+  30009:'Varmvatten, topp', 30010:'Varmvatten, laddning', 30020:'Frånluft',
+  30117:'Rumstemperatur', 31018:'Beräknad framledning', 31026:'Drifttid, tillskott',
+  31028:'Elpatron just nu', 31047:'Kompressorfrekvens', 31079:'Extra varmvatten, status',
+  31088:'Drifttid, kompressor', 31092:'Drifttid, varmvatten', 31535:'Kompressorstarter',
+  31975:'Fläktvarvtal', 31976:'Larmnummer', 32134:'Frånluftsfläkt',
+  40012:'Gradminuter', 40057:'Varmvattenkomfort', 40067:'Periodisk höjning, intervall',
+  40105:'Ventilationsläge', 40110:'Frånluftsfläkt, normal',
+  40226:'Extra varmvatten, minuter kvar',
+};
+const namn = r => SWEDISH[r.address] || r.title;
+
+function fmt(v, unit) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') {
+    const s = (unit === '°C' || !Number.isInteger(v)) ? v.toFixed(1) : String(v);
+    return esc(s) + (unit ? '<span class="u">' + esc(unit) + '</span>' : '');
   }
-  return out;
-}
-
-function renderAll() {
-  $('#all').innerHTML = latest.map(r =>
-    `<tr><td>${esc(r.title)}<div class="addr">${r.address}</div></td>
-     <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
-  ).join('');
+  return esc(String(v));
 }
 
 function freshness(ts, err) {
   const dot = $('#dot'), out = $('#freshness');
   if (err) { dot.className = 'dot stale'; out.textContent = 'pumpen svarar inte'; return; }
-  if (!ts) { dot.className = 'dot'; out.textContent = 'väntar på första avläsningen'; return; }
+  if (!ts) { dot.className = 'dot'; out.textContent = 'väntar'; return; }
   const age = Math.round(Date.now() / 1000 - ts);
   dot.className = 'dot ' + (age < 180 ? 'live' : 'stale');
-  out.textContent = age < 90 ? 'nyss avläst' : 'avläst för ' + Math.round(age / 60) + ' min sedan';
+  out.textContent = age < 90 ? 'live' : Math.round(age / 60) + ' min sedan';
+}
+
+function boosts() {
+  const out = [];
+  const hw = byAddr[40226] && byAddr[40226].value;
+  if (hw) out.push(['Extra varmvatten', hw + '<span class="u">min kvar</span>']);
+  const mode = byAddr[40105] && byAddr[40105].value;
+  if (mode) {
+    const pct = fanSpeeds && fanSpeeds[mode] !== undefined ? fanSpeeds[mode] : null;
+    out.push(['Ventilationsboost',
+              pct === null ? 'läge ' + mode : pct + '<span class="u">%</span>']);
+  }
+  return out;
+}
+
+function renderNow() {
+  byAddr = Object.fromEntries(latest.map(r => [r.address, r]));
+
+  const top = byAddr[30009];
+  $('#heroHw').innerHTML = top ? fmt(top.value, top.unit) : '–';
+  const bits = [];
+  const put = (a, label) => {
+    const r = byAddr[a];
+    if (r && r.value !== null && r.value !== undefined)
+      bits.push(label + ' <b>' + fmt(r.value, r.unit) + '</b>');
+  };
+  put(30002, 'Ute'); put(30006, 'Framledning'); put(31976, 'Larm');
+  $('#heroSide').innerHTML = bits.join('<br>') || '&nbsp;';
+
+  const alarm = byAddr[31976] && byAddr[31976].value;
+  const ab = $('#alarmBanner');
+  if (alarm) {
+    ab.hidden = false; ab.className = 'alarm';
+    ab.innerHTML = `<b>Pumpen larmar (kod ${esc(String(alarm))})</b>
+      Slå upp koden på pumpens display — den visar larmtexten och vad som ska göras.
+      Ett larm kan betyda att pumpen slutat värma, så vänta inte på att det går över.`;
+  } else { ab.hidden = true; ab.innerHTML = ''; }
+
+  const live = boosts().map(([k, v]) =>
+    `<div class="tile live"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  $('#tiles').innerHTML = live + TILES
+    .filter(([a]) => byAddr[a] && byAddr[a].value !== null && byAddr[a].value !== undefined)
+    .map(([a, label, cls]) => {
+      const r = byAddr[a];
+      return `<div class="tile ${cls}"><div class="k">${label}</div>
+              <div class="v">${fmt(r.value, r.unit)}</div></div>`;
+    }).join('');
+
+  $('#all').innerHTML = latest.map(r =>
+    `<tr><td>${esc(namn(r))}<div class="addr">${r.address} · ${esc(r.title)}</div></td>
+     <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
+  ).join('');
+
+  const hwLive = byAddr[40226] && byAddr[40226].value;
+  $('#hwLive').innerHTML = hwLive
+    ? `<div class="warn">Extra varmvatten pågår — ${hwLive} minuter kvar.</div>` : '';
+  const vm = byAddr[40105] && byAddr[40105].value;
+  $('#ventLive').innerHTML = vm
+    ? `<div class="warn">Ventilationsläge ${vm}${fanSpeeds && fanSpeeds[vm] !== undefined
+        ? ' (' + fanSpeeds[vm] + ' %)' : ''} är aktivt. Pumpen går tillbaka själv.</div>` : '';
 }
 
 async function refresh() {
@@ -386,402 +628,437 @@ async function refresh() {
     const d = await api('/api/status');
     latest = d.registers;
     freshness(d.polled_at, d.poll_error);
-    renderAlarm(); renderTiles(); renderAll();
-    if (!$('#histTabs').children.length) buildTabs();
+    renderNow();
+    if (!$('#histTabs').children.length) buildHistTabs();
+    if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
   } catch (e) {
     $('#dot').className = 'dot stale';
-    $('#freshness').textContent = e.message.slice(0, 60);
+    $('#freshness').textContent = 'fel';
+    if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
   }
 }
 
-// -- history ---------------------------------------------------------------
-
-let histAddr = 30009, histHours = 24;
-
-function buildTabs() {
-  const wanted = [[30009,'Varmvatten'],[30002,'Ute'],[30020,'Frånluft'],
-                  [30006,'Framledning'],[40012,'Gradminuter'],[32134,'Fläkt'],
-                  [31047,'Kompressor']];
-  const have = new Set(latest.filter(r => !r.error).map(r => r.address));
-  $('#histTabs').innerHTML = wanted.filter(([a]) => have.has(a))
-    .map(([a, n]) => `<button data-a="${a}" aria-pressed="${a === histAddr}">${n}</button>`).join('');
-  $('#histTabs').querySelectorAll('button').forEach(b => b.onclick = () => {
-    histAddr = +b.dataset.a;
-    $('#histTabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
-    drawHistory();
-  });
-  drawHistory();
-}
-
-async function drawHistory() {
-  const svg = $('#chart');
-  let pts = [];
-  try { pts = (await api(`/api/history?address=${histAddr}&hours=${histHours}`)).points; }
-  catch (e) { /* fall through to the empty state */ }
-
-  if (pts.length < 2) {
-    svg.innerHTML = `<text x="12" y="76">Ingen historik ännu — appen sparar ett värde per avläsning.</text>`;
-    return;
-  }
-  const W = 600, H = 150, P = 26;
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  let y0 = Math.min(...ys), y1 = Math.max(...ys);
-  if (y1 - y0 < 0.5) { y0 -= 0.5; y1 += 0.5; }
-  const pad = (y1 - y0) * 0.12; y0 -= pad; y1 += pad;
-  const X = t => P + (t - x0) / (x1 - x0 || 1) * (W - P - 8);
-  const Y = v => H - 18 - (v - y0) / (y1 - y0 || 1) * (H - 30);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
-  const area = line + ` L${X(x1).toFixed(1)} ${H - 18} L${X(x0).toFixed(1)} ${H - 18} Z`;
-  const fmtT = t => {
-    const d = new Date(t * 1000);
-    return histHours > 48 ? `${d.getDate()}/${d.getMonth() + 1}`
-                          : `${d.getHours()}`.padStart(2, '0') + ':00';
-  };
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML =
-    `<path class="area" d="${area}"/><path d="${line}"/>
-     <line class="ax" x1="${P}" y1="${H - 18}" x2="${W - 8}" y2="${H - 18}"/>
-     <text x="2" y="14">${y1.toFixed(1)}</text><text x="2" y="${H - 22}">${y0.toFixed(1)}</text>
-     <text x="${P}" y="${H - 5}">${fmtT(x0)}</text>
-     <text x="${W - 40}" y="${H - 5}">${fmtT(x1)}</text>`;
-}
-
-document.querySelectorAll('[data-h]').forEach(b => b.onclick = () => {
-  histHours = +b.dataset.h;
-  document.querySelectorAll('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
-  drawHistory();
-});
-
-// -- heating ---------------------------------------------------------------
-
+/* ---------------- heating ---------------- */
 let heat = null;
 
 async function loadHeating() {
-  try {
-    heat = await api('/api/heating');
-  } catch (e) {
-    $('#heatState').textContent = 'kunde inte läsa värmeinställningarna: ' + e.message;
-    return;
+  try { heat = await api('/api/heating'); }
+  catch (e) { $('#heatState').innerHTML = `<div class="warn">${esc(e.message)}</div>`; return; }
+
+  const el = $('#offsetNow');
+  const next = heat.offset === null ? '–' : (heat.offset > 0 ? '+' : '') + heat.offset;
+  if (el.textContent !== next) {
+    el.textContent = next;
+    el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 260);
   }
-  $('#offsetNow').textContent = heat.offset === null ? '–'
-    : (heat.offset > 0 ? '+' : '') + heat.offset;
 
   const bits = [];
   if (heat.uses_own_curve) bits.push('egen kurva');
   else if (heat.curve !== null) bits.push('kurva ' + heat.curve);
   if (heat.outdoor !== null) bits.push('ute ' + heat.outdoor.toFixed(1) + ' °C');
-  if (heat.supply !== null) bits.push('framledning ' + heat.supply.toFixed(1) + ' °C');
-  if (heat.degree_minutes !== null) bits.push(heat.degree_minutes + ' gradminuter');
-  if (heat.wait) {
-    $('#offsetNote').textContent = `Ett steg motsvarar ungefär en grad inomhus. ` +
-      `Vänta ${heat.wait} innan du justerar igen — huset svarar långsamt, och tre ` +
-      `ändringar på en dag går inte att utvärdera.`;
-  }
-  $('#heatState').innerHTML = esc(bits.join(' · ')) +
-    (heat.observations || []).filter(o => o.length > 90)
-      .map(o => `<div class="warn" style="border-left-color:var(--muted)">${esc(o)}</div>`).join('') +
-    (heat.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
+  if (heat.calculated_supply !== null && heat.calculated_supply !== undefined)
+    bits.push('kurvan begär ' + heat.calculated_supply.toFixed(1) + ' °C');
+  if (heat.degree_minutes !== null) bits.push(Math.round(heat.degree_minutes) + ' gradminuter');
+  $('#heatLine').textContent = bits.join(' · ');
 
+  // Warnings first and always visible; the longer background notes are folded
+  // away. Five expanded text blocks above the button is not a heating control.
+  const warns = heat.warnings || [];
+  const notes = (heat.observations || []).filter(o => o.length > 90);
+  $('#heatFlags').innerHTML =
+    warns.slice(0, 2).map(w => `<div class="warn">${esc(w)}</div>`).join('') +
+    ((warns.length > 2 || notes.length)
+      ? `<details><summary>Mer om din anläggning</summary>${
+          warns.slice(2).map(w => `<div class="warn">${esc(w)}</div>`).join('')}${
+          notes.map(o => `<div class="warn quiet">${esc(o)}</div>`).join('')}</details>`
+      : '');
+
+  renderCurve();
+
+  $('#offsetNote').textContent =
+    'Plus ger varmare hus, minus svalare — uppmätt på din pump. Utslaget syns tydligare i ' +
+    'kyla än i milt väder, och nedåt tar det stopp vid min framledning' +
+    (heat.min_supply != null ? ' (' + heat.min_supply + ' °C).' : '.') +
+    ' Vänta ' + (heat.wait || 'ett dygn') + ' innan du justerar igen.';
+}
+
+const CURVE_OUT = [-30, -20, -10, 0, 10, 20, 30];
+
+function renderCurve() {
+  const card = $('#curveCard');
+  const pts = (heat && heat.own_curve) || [];
+  if (!heat || !heat.uses_own_curve || !pts.filter(p => p !== null).length) {
+    card.hidden = true; return;
+  }
+  card.hidden = false;
+  const vals = pts.map(p => (p === null ? null : Number(p)));
+  const known = vals.filter(v => v !== null);
+  const lo = Math.min(...known), hi = Math.max(...known);
+  const W = 600, H = 120, P = 34;
+  const X = i => P + i / (CURVE_OUT.length - 1) * (W - P - 16);
+  const Y = v => H - 24 - (v - lo) / ((hi - lo) || 1) * (H - 44);
+  const path = vals.map((v, i) => v === null ? '' :
+    ((i === 0 || vals[i - 1] === null ? 'M' : 'L') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)))
+    .join(' ').trim();
+  const dots = vals.map((v, i) => v === null ? '' :
+    `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3"
+      fill="var(--accent)"/>`).join('');
+  const labels = CURVE_OUT.map((t, i) => (i % 2 === 0)
+    ? `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${t > 0 ? '+' : ''}${t}</text>`
+    : '').join('');
+
+  card.querySelector('#curveBody').innerHTML = `
+    <p class="lead" style="margin:-4px 0 10px">Kurvan står på 0, alltså egen kurva: pumpen
+      följer dina punkter i stället för en numrerad kurva. Vänster är kallt ute, höger varmt.</p>
+    <svg class="chart" style="height:132px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path class="ln" style="--len:0;animation:none" d="${path}"/>${dots}
+      <line class="ax" x1="${P}" y1="${H - 24}" x2="${W - 16}" y2="${H - 24}"/>
+      <text x="2" y="14">${hi} °C</text><text x="2" y="${H - 28}">${lo} °C</text>
+      ${labels}
+    </svg>
+    <table style="margin-top:8px">${vals.map((v, i) => v === null ? '' :
+      `<tr><td>P${i + 1} — ${CURVE_OUT[i] > 0 ? '+' : ''}${CURVE_OUT[i]} °C ute</td>
+       <td>${v} °C fram</td></tr>`).join('')}</table>
+    <p class="hint">Ändra punkterna under Inställningar → Värmekurvan.</p>`;
 }
 
 async function nudgeOffset(step, button) {
-  // Re-read first: this page may have been open for days, and the display or
-  // another phone may have moved the offset since. Stepping from a stale value
-  // can move the heat the opposite way from the button that was pressed.
-  await loadHeating();
+  await loadHeating();                       // the display may have moved it since
   if (!heat || heat.offset === null) return;
   const to = heat.offset + step;
-  if (!confirm(`Ändra värmeoffset från ${heat.offset} till ${to}?\n\n` +
-               `Ungefär ${Math.abs(step)} grad ${step > 0 ? 'varmare' : 'svalare'} inomhus. ` +
-               `Huset svarar långsamt — utvärdera om ${heat.wait || 'ett dygn'}, ` +
-               `inte om en timme.`)) return;
+  const dir = step > 0 ? 'varmare' : 'svalare';
+  if (!confirm(`Värmeoffset ${heat.offset} → ${to}\n\n` +
+               `Plus = varmare, minus = svalare. Det här gör huset ${dir}, ungefär en grad ` +
+               `som tumregel — mindre i milt väder, mer i kyla.\n\n` +
+               `Huset svarar långsamt: utvärdera om ${heat.wait || 'ett dygn'}, inte om en timme.`))
+    return;
   await act(button,
     () => post('/api/write', {address: 40031, value: to, expect: heat.offset, confirm: true}),
-    $('#heatMsg'),
     r => `Värmeoffset ${r.before} → ${r.after}. Känn efter om ${heat.wait || 'ett dygn'}.`);
   await loadHeating();
 }
+$('#heatUp').onclick = e => nudgeOffset(1, e.currentTarget);
+$('#heatDown').onclick = e => nudgeOffset(-1, e.currentTarget);
 
-$('#heatUp').onclick = e => nudgeOffset(1, e.target);
-$('#heatDown').onclick = e => nudgeOffset(-1, e.target);
-
-$('#adviceOpen').onclick = e => {
-  const box = $('#adviceBox');
-  box.hidden = !box.hidden;
-  e.target.textContent = box.hidden ? 'Hjälp mig ställa in' : 'Stäng';
-};
-
-function pickable(container, attr) {
-  $(container).querySelectorAll('button').forEach(b => b.onclick = () => {
-    $(container).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
-  });
-  return () => $(container).querySelector('[aria-pressed=true]').dataset[attr];
+/* ---------------- advice ---------------- */
+function picker(sel, attr) {
+  $$(sel + ' button').forEach(b => b.onclick = () =>
+    $$(sel + ' button').forEach(x => x.setAttribute('aria-pressed', x === b)));
+  return () => $(sel + ' [aria-pressed=true]').dataset[attr];
 }
-const feeling = pickable('#feelingTabs', 'feeling');
-const when = pickable('#whenTabs', 'when');
+const feeling = picker('#feelingTabs', 'feeling');
+const when = picker('#whenTabs', 'when');
 
 $('#adviceGo').onclick = async e => {
-  const out = $('#adviceOut');
-  e.target.disabled = true;
-  out.innerHTML = '<div class="hint">tänker…</div>';
+  const btn = e.currentTarget, out = $('#adviceOut');
+  btn.disabled = true;
+  out.innerHTML = '<div class="skel" style="width:60%"></div><div class="skel" style="width:80%"></div>';
   try {
     const a = await api(`/api/advice?feeling=${feeling()}&when=${when()}`);
     let html = (a.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
-    if (a.blocked) {
-      html += `<div class="warn">${esc(a.blocked)}</div>`;
-    } else if (!a.suggestions.length) {
-      html += '<div class="hint">Inget förslag den här gången.</div>';
-    } else {
-      // Suggestions that share a group only make sense applied together --
-      // half of a mild-weather pair makes cold weather worse.
-      const groups = [];
-      a.suggestions.forEach((sg, i) => {
-        const key = sg.group || ('single' + i);
-        let g = groups.find(x => x.key === key);
-        if (!g) groups.push(g = {key: key, items: []});
-        g.items.push(Object.assign({index: i}, sg));
-      });
-      html += groups.map((g, gi) => {
-        const body = g.items.map(sg => {
-          const arrow = `${sg.current} → ${sg.proposed}${sg.unit ? ' ' + sg.unit : ''}`;
-          return `<div class="h">${esc(sg.title)}: ${esc(arrow)}</div>
-                  <div class="w">${esc(sg.why)}</div>`;
-        }).join('');
-        const label = g.items.length > 1 ? 'Genomför båda' : 'Genomför';
-        return `<div class="sugg">${body}
-          <button class="primary" data-group="${gi}">${label}</button></div>`;
-      }).join('');
-      html += `<p class="hint">Gör en justering i taget och vänta ${esc(a.wait || 'ett dygn')} ` +
-              `innan nästa — huset svarar långsamt, och två ändringar samtidigt går inte ` +
-              `att utvärdera.</p>`;
+    const groups = [];
+    (a.suggestions || []).forEach((sg, i) => {
+      const key = sg.group || ('one' + i);
+      let g = groups.find(x => x.key === key);
+      if (!g) groups.push(g = {key, items: []});
+      g.items.push(sg);
+    });
+    if (a.blocked) html += `<div class="warn">${esc(a.blocked)}</div>`;
+    else if (!groups.length) html += '<p class="hint">Inget förslag den här gången.</p>';
+    else {
+      html += groups.map((g, gi) => `<div class="card" style="margin:0 0 10px;box-shadow:none;
+        background:var(--sunk)">` + g.items.map(sg =>
+          `<div style="font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:3px">
+            ${esc(sg.title)}: ${esc(sg.current + ' → ' + sg.proposed + (sg.unit ? ' ' + sg.unit : ''))}</div>
+           <div style="color:var(--muted);font-size:12.5px;margin-bottom:10px">${esc(sg.why)}</div>`
+        ).join('') +
+        `<button class="primary" data-group="${gi}" style="width:100%">
+          ${g.items.length > 1 ? 'Genomför båda' : 'Genomför'}</button></div>`).join('');
+      html += `<p class="hint">En justering i taget, och vänta ${esc(a.wait || 'ett dygn')}
+        innan nästa — två ändringar samtidigt går inte att utvärdera.</p>`;
     }
     out.innerHTML = html;
-    out.querySelectorAll('[data-group]').forEach(btn => btn.onclick = async ev => {
-      const items = groups[+ev.target.dataset.group].items;
+    out.querySelectorAll('[data-group]').forEach(b => b.onclick = async ev => {
+      const items = groups[+ev.currentTarget.dataset.group].items;
       const lines = items.map(s => `${s.title}: ${s.current} → ${s.proposed}`).join('\n');
       if (!confirm(`${lines}\n\n${items[0].why}`)) return;
-      // One request for the whole group: half of a paired change is worse
-      // than neither, so the server validates all of it before writing any.
-      await act(ev.target,
-        () => post('/api/write', {
-          confirm: true,
-          changes: items.map(s => ({address: s.address, value: s.proposed,
-                                    expect: s.current})),
-        }),
-        $('#heatMsg'),
-        r => r.changes.map(c => `${c.title}: ${c.before} → ${c.after}`).join('. ') +
-             `. Utvärdera om ${a.wait || 'ett dygn'}.`);
+      await act(ev.currentTarget,
+        () => post('/api/write', {confirm: true,
+          changes: items.map(s => ({address: s.address, value: s.proposed, expect: s.current}))}),
+        r => {
+          const done = (r.changes || []).map(c => `${c.title}: ${c.before} → ${c.after}`).join('. ');
+          if (r.partial) {
+            return 'Bara en del gick igenom: ' + (r.error || '') +
+                   (r.rolled_back && r.rolled_back.length
+                     ? ' Återställde: ' + r.rolled_back.join(', ') + '.' : '');
+          }
+          return done + `. Utvärdera om ${a.wait || 'ett dygn'}.`;
+        },
+        r => !r.partial);
       await loadHeating();
     });
   } catch (err) {
     out.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
-  } finally {
-    e.target.disabled = false;
-  }
+  } finally { btn.disabled = false; }
 };
 
-// -- all settings ----------------------------------------------------------
-
-let settingsLoaded = false;
-
-async function loadSettings() {
-  const box = $('#settings');
-  box.innerHTML = '<p class="hint">läser…</p>';
-  let groups;
-  try {
-    groups = (await api('/api/settings')).groups;
-  } catch (e) {
-    box.innerHTML = `<div class="warn">${esc(e.message)}</div>`;
-    return;
-  }
-  settingsLoaded = true;
-  box.innerHTML = groups.map(g => `
-    <div class="setgroup">
-      <h3>${esc(g.title)}</h3>
-      ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
-      ${g.rows.map(r => {
-        const val = typeof r.value === 'number' && !Number.isInteger(r.value)
-          ? r.value.toFixed(1) : r.value;
-        const range = (r.min !== null && r.max !== null)
-          ? `${r.address} · ${r.min}–${r.max}${r.unit ? ' ' + r.unit : ''}`
-          : String(r.address);
-        return `<div class="setrow" data-addr="${r.address}">
-          <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
-            ? '<span class="tag">skyddad</span>' : ''}</b>
-            <span class="d">${esc(range)}</span></div>
-          <div class="val">${esc(String(val))}${r.unit ? ' ' + esc(r.unit) : ''}</div>
-          <button data-edit="${r.address}">Ändra</button>
-        </div>
-        <div class="setedit" data-panel="${r.address}" hidden></div>
-        <div class="setwhy" data-why="${r.address}" hidden>${esc(r.why)}</div>`;
-      }).join('')}
-    </div>`).join('');
-
-  const byAddr = {};
-  groups.forEach(g => g.rows.forEach(r => { byAddr[r.address] = r; }));
-
-  box.querySelectorAll('[data-edit]').forEach(btn => btn.onclick = () => {
-    const addr = btn.dataset.edit;
-    const row = byAddr[addr];
-    const panel = box.querySelector(`[data-panel="${addr}"]`);
-    const why = box.querySelector(`[data-why="${addr}"]`);
-    if (!panel.hidden) {
-      panel.hidden = why.hidden = true;
-      panel.innerHTML = '';
-      btn.textContent = 'Ändra';
-      return;
-    }
-    why.hidden = false;
-    panel.hidden = false;
-    btn.textContent = 'Avbryt';
-    const field = row.options
-      ? `<select id="sv-${addr}">${row.options.map(([k, label]) =>
-          `<option value="${esc(k)}"${String(row.value) === label ? ' selected' : ''}>${esc(label)}</option>`
-        ).join('')}</select>`
-      : `<input id="sv-${addr}" type="number" inputmode="decimal" step="any"
-           value="${esc(String(row.value))}"
-           ${row.min !== null ? `min="${row.min}"` : ''}
-           ${row.max !== null ? `max="${row.max}"` : ''}>`;
-    panel.innerHTML = field + `<button class="primary" data-save="${addr}">Spara</button>`;
-    panel.querySelector('[data-save]').onclick = async ev => {
-      const raw = $('#sv-' + addr).value;
-      const value = row.options ? Number(raw) : Number(raw);
-      if (Number.isNaN(value)) { say($('#heatMsg'), 'Ogiltigt värde.', false); return; }
-      if (value === Number(row.value)) { say($('#heatMsg'), 'Samma värde som förut.', true); return; }
-      const shown = row.options
-        ? (row.options.find(([k]) => Number(k) === value) || [null, raw])[1]
-        : value;
-      // Curve 0 is not "one flatter than 1": it swaps the pump onto the own-curve
-      // points entirely. The advisor refuses to suggest crossing that line, so the
-      // manual editor should at least not let you do it by accident.
-      let extra = '';
-      if (Number(addr) === 40027) {
-        if (value === 0 && Number(row.value) !== 0) {
-          extra = '\n\nOBS: 0 är inte en flackare kurva. Det byter pumpen till egen ' +
-                  'kurva, alltså punkterna P1–P7, och kurvnumret slutar gälla.';
-        } else if (Number(row.value) === 0 && value !== 0) {
-          extra = '\n\nOBS: du kör egen kurva idag. Sätter du ett kurvnummer slutar ' +
-                  'pumpen använda dina egna punkter P1–P7. De ligger kvar, men styr ' +
-                  'inget förrän du sätter tillbaka 0.';
-        }
-      }
-      if (!confirm(`${row.label}\n${row.value} → ${shown}${row.unit ? ' ' + row.unit : ''}\n\n` +
-                   `${row.why}${extra}\n\nRegister ${addr}. Vill du ändra?`)) return;
-      await act(ev.target,
-        () => post('/api/write',
-                   {address: Number(addr), value: value, expect: row.value, confirm: true}),
-        $('#heatMsg'),
-        r => `${row.label}: ${r.before} → ${r.after}.`);
-      await loadSettings();
-      await loadHeating();
-    };
-  });
-}
-
-$('#settingsBox').addEventListener('toggle', e => {
-  if (e.target.open) loadSettings();
-});
-
-// -- actions ---------------------------------------------------------------
-
-async function act(button, fn, msgEl, describe) {
+/* ---------------- actions ---------------- */
+async function act(button, fn, describe, okTest) {
   button.disabled = true;
   const label = button.textContent;
   button.textContent = '…';
   try {
-    say(msgEl, describe(await fn()), true);
+    const r = await fn();
+    const ok = okTest ? okTest(r) : true;
+    toast(describe(r), ok);
     await refresh();
   } catch (e) {
-    say(msgEl, e.message, false);
-  } finally {
-    button.disabled = false; button.textContent = label;
-  }
+    toast(e.message, false, 11000);
+  } finally { button.disabled = false; button.textContent = label; }
 }
-const post = (p, b) => api(p, {method: 'POST', body: JSON.stringify(b || {})});
 
-$('#hwOn').onclick = e => act(e.target,
+$('#hwOn').onclick = e => act(e.currentTarget,
   () => post('/api/hotwater', {minutes: +$('#hwMin').value}),
-  $('#hwMsg'), r => `Extra varmvatten igång i ${r.minutes} minuter.`);
-
-$('#hwOff').onclick = e => act(e.target,
-  () => post('/api/hotwater', {off: true}),
-  $('#hwMsg'), () => 'Extra varmvatten avbrutet.');
-
-let fanSpeeds = null;
+  r => `Extra varmvatten igång i ${r.minutes} minuter.`);
+$('#hwOff').onclick = e => act(e.currentTarget,
+  () => post('/api/hotwater', {off: true}), () => 'Extra varmvatten avbrutet.');
 
 async function loadFanModes() {
-  try {
-    fanSpeeds = (await api('/api/fan')).speeds;
-  } catch (e) { return; }
-  const normal = fanSpeeds['0'];
-  const sel = $('#ventMode');
-  const opts = Object.keys(fanSpeeds).filter(m => m !== '0').map(m => {
+  try { fanSpeeds = (await api('/api/fan')).speeds; } catch (e) { return; }
+  const normal = fanSpeeds['0'], sel = $('#ventMode');
+  sel.innerHTML = Object.keys(fanSpeeds).filter(m => m !== '0').map(m => {
     const p = fanSpeeds[m];
     if (p === null || p === undefined) return '';
-    let rel = '';
-    if (normal !== null && normal !== undefined) {
-      rel = p > normal ? ' — mer luft' : (p < normal ? ' — MINDRE luft' : ' — som normalt');
-    }
+    const rel = (normal === null || normal === undefined) ? ''
+      : (p > normal ? ' — mer luft' : (p < normal ? ' — MINDRE luft' : ' — som normalt'));
     return `<option value="${m}">Läge ${m}: ${p} %${rel}</option>`;
-  }).join('');
-  sel.innerHTML = opts || '<option value="">inga lägen kunde läsas</option>';
-  // Preselect the lowest mode that is actually more air than normal.
+  }).join('') || '<option value="">inga lägen kunde läsas</option>';
   const higher = Object.keys(fanSpeeds).filter(m => m !== '0' &&
-    fanSpeeds[m] !== null && normal !== null && fanSpeeds[m] > normal);
+    fanSpeeds[m] !== null && normal != null && fanSpeeds[m] > normal);
   if (higher.length) sel.value = higher.sort((a, b) => fanSpeeds[a] - fanSpeeds[b])[0];
-  if (normal !== null && normal !== undefined) {
-    $('#fanNote').textContent = `Normalt är ${normal} %. Procenten läses ur pumpen — ` +
-      `lägena är inte ordnade lågt till högt, så siffran i listan är det som gäller, inte numret.`;
+  if (normal != null) {
+    $('#fanNote').textContent = `Normalt är ${normal} %. Lägena är inte ordnade lågt till högt — ` +
+      `procenten i listan är det som gäller, inte numret.`;
   }
 }
 
 $('#ventSet').onclick = e => {
   const mode = $('#ventMode').value;
   if (mode === '') return;
-  const p = fanSpeeds ? fanSpeeds[mode] : null;
-  const normal = fanSpeeds ? fanSpeeds['0'] : null;
-  if (p !== null && normal !== null && p < normal &&
-      !confirm(`Läge ${mode} är ${p} %, vilket är MINDRE luft än normalt (${normal} %).\n\n` +
-               `På en frånluftspump är ventilationen värmekällan — låg fläkt betyder ` +
-               `mindre värme och risk för fukt. Är det verkligen vad du vill?`)) return;
-  return act(e.target,
+  const p = fanSpeeds ? fanSpeeds[mode] : null, normal = fanSpeeds ? fanSpeeds['0'] : null;
+  if (p != null && normal != null && p < normal &&
+      !confirm(`Läge ${mode} är ${p} %, alltså MINDRE luft än normalt (${normal} %).\n\n` +
+               `På en frånluftspump är ventilationen värmekällan — låg fläkt betyder mindre ` +
+               `värme och risk för fukt. Är det verkligen vad du vill?`)) return;
+  return act(e.currentTarget,
     () => post('/api/ventilation', {mode: +mode, hours: +$('#ventH').value}),
-    $('#ventMsg'),
-    r => `Läge ${r.mode} — ${r.percent} % mot normalt ${r.normal_percent} %. ` +
-         `Tillbaka om ${r.hours} h.`);
+    r => `Läge ${r.mode} — ${r.percent} % mot normalt ${r.normal_percent} %. Tillbaka om ${r.hours} h.`);
 };
-
-$('#ventNorm').onclick = e => act(e.target,
+$('#ventNorm').onclick = e => act(e.currentTarget,
   () => post('/api/ventilation', {direction: 'normal'}),
-  $('#ventMsg'), r => `Tillbaka till normal ventilation (${r.normal_percent} %).`);
+  r => `Tillbaka till normal ventilation (${r.normal_percent} %).`);
 
-$('#doBackup').onclick = e => act(e.target,
-  () => post('/api/backup', {note: 'från appen'}),
-  $('#bkMsg'), r => `Backup sparad som ${r.name}.`);
+/* ---------------- settings editor ---------------- */
+const WATER_GROUP = 'hotwater';
+
+async function loadSettings() {
+  let groups;
+  try { groups = (await api('/api/settings')).groups; }
+  catch (e) {
+    $('#settings').innerHTML = `<div class="warn">${esc(e.message)}</div>`;
+    return;
+  }
+  const rows = {};
+  groups.forEach(g => g.rows.forEach(r => { rows[r.address] = r; }));
+
+  const render = g => `<div class="setgroup"><h3>${esc(g.title)}</h3>
+    ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
+    ${g.rows.map(r => {
+      const val = typeof r.value === 'number' && !Number.isInteger(r.value)
+        ? r.value.toFixed(1) : r.value;
+      const range = (r.min !== null && r.max !== null)
+        ? `${r.address} · ${r.min}–${r.max}${r.unit ? ' ' + r.unit : ''}` : String(r.address);
+      return `<div class="setrow">
+        <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
+          ? '<span class="tag">skyddad</span>' : ''}</b>
+          <span class="addr">${esc(range)}</span></div>
+        <div class="val">${esc(String(val))}${r.unit ? ' ' + esc(r.unit) : ''}</div>
+        <button data-edit="${r.address}">Ändra</button></div>
+      <div data-panel="${r.address}" hidden></div>`;
+    }).join('')}</div>`;
+
+  // Hot water settings live on the water tab, where you look for them.
+  $('#settings').innerHTML = groups.filter(g => g.key !== WATER_GROUP).map(render).join('');
+  const water = groups.find(g => g.key === WATER_GROUP);
+  $('#setWater').innerHTML = water ? render(water) : '<p class="hint">Inga lästes.</p>';
+
+  $$('[data-edit]').forEach(btn => btn.onclick = () => {
+    const addr = btn.dataset.edit, row = rows[addr];
+    const panel = document.querySelector(`[data-panel="${addr}"]`);
+    if (!panel.hidden) {
+      panel.hidden = true; panel.innerHTML = ''; btn.textContent = 'Ändra'; return;
+    }
+    panel.hidden = false; btn.textContent = 'Avbryt';
+    const field = row.options
+      ? `<select id="sv-${addr}">${row.options.map(([k, l]) =>
+          `<option value="${esc(k)}"${String(row.value) === l ? ' selected' : ''}>${esc(l)}</option>`
+        ).join('')}</select>`
+      : `<input id="sv-${addr}" type="number" inputmode="decimal" step="any"
+           value="${esc(String(row.value))}"
+           ${row.min !== null ? `min="${row.min}"` : ''} ${row.max !== null ? `max="${row.max}"` : ''}>`;
+    panel.innerHTML = `<div class="setwhy">${esc(row.why)}</div>
+      <div class="setedit">${field}<button class="primary" data-save="${addr}">Spara</button></div>`;
+    panel.querySelector('[data-save]').onclick = async ev => {
+      const value = Number($('#sv-' + addr).value);
+      if (Number.isNaN(value)) { toast('Ogiltigt värde.', false); return; }
+      if (value === Number(row.value)) { toast('Samma värde som förut.'); return; }
+      const shown = row.options
+        ? (row.options.find(([k]) => Number(k) === value) || [null, value])[1] : value;
+      let extra = '';
+      if (Number(addr) === 40027) {
+        if (value === 0 && Number(row.value) !== 0)
+          extra = '\n\nOBS: 0 är inte en flackare kurva. Det byter pumpen till egen kurva, ' +
+                  'alltså punkterna P1–P7, och kurvnumret slutar gälla.';
+        else if (Number(row.value) === 0 && value !== 0)
+          extra = '\n\nOBS: du kör egen kurva idag. Sätter du ett kurvnummer slutar pumpen ' +
+                  'använda dina egna punkter P1–P7. De ligger kvar men styr inget.';
+      }
+      if (!confirm(`${row.label}\n${row.value} → ${shown}${row.unit ? ' ' + row.unit : ''}\n\n` +
+                   `${row.why}${extra}\n\nRegister ${addr}. Vill du ändra?`)) return;
+      await act(ev.currentTarget,
+        () => post('/api/write',
+          {address: Number(addr), value, expect: row.value, confirm: true}),
+        r => `${row.label}: ${r.before} → ${r.after}.`);
+      await loadSettings(); await loadHeating();
+    };
+  });
+}
 
 async function loadBackups() {
-  try {
-    const d = await api('/api/backups');
-    $('#backups').innerHTML = d.backups.slice(0, 20).map(b =>
-      `<tr><td>${esc(b.name)}</td><td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`
-    ).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
-  } catch (e) { /* the panel is optional */ }
+  let d;
+  try { d = await api('/api/backups'); }
+  catch (e) { $('#backupState').textContent = e.message; return; }
+
+  $('#backups').innerHTML = d.backups.slice(0, 20).map(b => {
+    const t = new Date(b.taken_at * 1000);
+    return `<tr><td>${esc(b.name)}<div class="addr">${t.toLocaleString('sv-SE')}</div></td>
+            <td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`;
+  }).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
+
+  const n = d.backups.length;
+  const auto = d.auto
+    ? `Appen tar en automatiskt var ${d.auto_every_hours} timme${d.auto_every_hours == 1 ? '' : 'r'}.`
+    : 'Automatisk backup är avstängd i config.yaml.';
+  if (!n) {
+    $('#backupState').innerHTML =
+      `<div class="warn">Ingen backup ännu. Ta en innan du ändrar något — det är den
+       som gör en felställd kurva möjlig att ångra.</div>${esc(auto)}`;
+    return;
+  }
+  const h = d.age_hours;
+  const when = h < 1 ? 'för mindre än en timme sedan'
+    : (h < 48 ? `för ${Math.round(h)} timmar sedan` : `för ${Math.round(h / 24)} dygn sedan`);
+  const stale = h > (d.auto_every_hours || 24) * 2;
+  $('#backupState').innerHTML =
+    (stale ? `<div class="warn">Senaste backupen togs ${esc(when)} — äldre än väntat.</div>` : '') +
+    `${n} backup${n === 1 ? '' : 'er'} sparade, den senaste ${esc(when)}. ${esc(auto)}`;
 }
 
-$('#backups').closest('details').addEventListener('toggle', e => {
-  if (e.target.open) loadBackups();
+async function loadLog() {
+  try {
+    const rows = await api('/api/log?limit=25');
+    $('#wlog').innerHTML = rows.length ? rows.map(r => {
+      const d = new Date(r.ts * 1000);
+      const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const day = `${d.getDate()}/${d.getMonth() + 1}`;
+      return `<tr><td>${esc(r.title || r.address)}<div class="addr">${day} ${t}</div></td>
+              <td>${esc(String(r.before))} → ${esc(String(r.after))}</td></tr>`;
+    }).join('') : '<tr><td>Inget skrivet ännu</td><td></td></tr>';
+  } catch (e) { /* optional */ }
+}
+
+$('#doBackup').onclick = e => act(e.currentTarget,
+  () => post('/api/backup', {note: 'från appen'}),
+  r => `Backup sparad som ${r.name}.`);
+// loadBackups also runs when the view opens; this keeps the list fresh after one.
+$('#backups').closest('details').addEventListener('toggle', ev => {
+  if (ev.target.open) loadBackups();
 });
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+/* ---------------- history ---------------- */
+let histAddr = 30009, histHours = 24;
+
+function buildHistTabs() {
+  const want = [[30009,'Varmvatten'],[30002,'Ute'],[30020,'Frånluft'],[30006,'Framledning'],
+                [40012,'Gradminuter'],[32134,'Fläkt'],[31047,'Kompressor']];
+  const have = new Set(latest.filter(r => !r.error).map(r => r.address));
+  $('#histTabs').innerHTML = want.filter(([a]) => have.has(a))
+    .map(([a, n]) => `<button data-a="${a}" aria-pressed="${a === histAddr}">${n}</button>`).join('');
+  $$('#histTabs button').forEach(b => b.onclick = () => {
+    histAddr = +b.dataset.a;
+    $$('#histTabs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    drawHistory();
+  });
 }
+
+async function drawHistory() {
+  const svg = $('#chart');
+  let pts = [];
+  try { pts = (await api(`/api/history?address=${histAddr}&hours=${histHours}`)).points; }
+  catch (e) { /* empty state below */ }
+
+  const defs = svg.querySelector('defs').outerHTML;
+  if (pts.length < 2) {
+    svg.setAttribute('viewBox', '0 0 600 168');
+    svg.innerHTML = defs + `<text x="14" y="86">Ingen historik för den här perioden ännu.</text>`;
+    return;
+  }
+  const W = 600, H = 168, P = 30;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 0.5) { y0 -= 0.5; y1 += 0.5; }
+  const pad = (y1 - y0) * 0.14; y0 -= pad; y1 += pad;
+  const X = t => P + (t - x0) / (x1 - x0 || 1) * (W - P - 10);
+  const Y = v => H - 22 - (v - y0) / (y1 - y0 || 1) * (H - 38);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+  const area = line + ` L${X(x1).toFixed(1)} ${H - 22} L${X(x0).toFixed(1)} ${H - 22} Z`;
+  const ft = t => {
+    const d = new Date(t * 1000);
+    return histHours > 48 ? `${d.getDate()}/${d.getMonth() + 1}`
+                          : String(d.getHours()).padStart(2, '0') + ':00';
+  };
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = defs +
+    `<path class="area" d="${area}"/><path class="ln" d="${line}"/>
+     <line class="ax" x1="${P}" y1="${H - 22}" x2="${W - 10}" y2="${H - 22}"/>
+     <text x="2" y="15">${y1.toFixed(1)}</text><text x="2" y="${H - 26}">${y0.toFixed(1)}</text>
+     <text x="${P}" y="${H - 6}">${ft(x0)}</text>
+     <text x="${W - 46}" y="${H - 6}">${ft(x1)}</text>`;
+  const path = svg.querySelector('.ln');
+  try { path.style.setProperty('--len', path.getTotalLength()); } catch (e) {}
+}
+$$('[data-h]').forEach(b => b.onclick = () => {
+  histHours = +b.dataset.h;
+  $$('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  drawHistory();
+});
+
+/* ---------------- lifecycle ---------------- */
+ONSHOW.heat = loadHeating;
+ONSHOW.air = () => { if (!fanSpeeds) loadFanModes(); };
+ONSHOW.hist = drawHistory;
+ONSHOW.set = () => { loadSettings(); loadLog(); loadBackups(); };
+ONSHOW.water = () => { if (!$('#setWater').querySelector('.setrow')) loadSettings(); };
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 refresh();
 loadHeating();
 loadFanModes();
+show(location.hash.slice(1) || 'now');
 setInterval(refresh, 30000);
-setInterval(drawHistory, 300000);
+setInterval(() => { if (current === 'hist') drawHistory(); }, 300000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { refresh(); loadHeating(); }
 });

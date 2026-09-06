@@ -1,82 +1,165 @@
-"""Klickar sig genom UI:t i en riktig webblasare. Andrar INGENTING pa pumpen."""
+"""Klickar sig genom hela UI:t i en riktig webblasare.
+
+Laser och oppnar bara - ingenting skrivs till varmepumpen. Korr mot en igang
+varande `serve`:
+
+    pip install playwright && playwright install chromium
+    python3 -m nibelokal serve &
+    python3 tests/ui_smoke.py
+"""
+import os
 import sys
+
 from playwright.sync_api import sync_playwright
 
-URL = "http://localhost:8377/"
+URL = os.environ.get("NIBE_UI", "http://localhost:8377/")
+VIEWPORTS = [("telefon", 390, 844), ("dator", 1280, 900)]
 fel = []
 
-with sync_playwright() as pw:
-    b = pw.chromium.launch()
-    page = b.new_page()
-    errs = []
-    page.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
-    page.on("pageerror", lambda e: errs.append("pageerror: %s" % e))
+
+def check(ok, msg):
+    print(("  ok    " if ok else "  FEL   ") + msg)
+    if not ok:
+        fel.append(msg)
+
+
+def run(page, label, width):
+    print("\n=== %s (%dpx) ===" % (label, width))
     page.goto(URL, wait_until="networkidle")
     page.wait_for_timeout(2500)
 
-    # 1. kakel
-    n = page.locator(".tile").count()
-    print("kakel: %d" % n)
-    if n < 5:
-        fel.append("for fa kakel")
+    # -- nav och vyer -------------------------------------------------
+    tabs = page.locator("nav button")
+    check(tabs.count() == 5, "fem flikar i navigeringen (%d)" % tabs.count())
+    for name, heading in [("now", "Just nu"), ("heat", "Värme"), ("water", "Varmvatten"),
+                          ("air", "Ventilation"), ("hist", "Historik")]:
+        page.locator('nav button[data-view="%s"]' % name).click()
+        page.wait_for_timeout(900)
+        vis = page.locator("#v-" + name).is_visible()
+        title = page.locator("#viewTitle").inner_text()
+        check(vis and title == heading, "fliken %s visar %r" % (name, title))
 
-    # 2. varmekortet
+    # bara en vy at gangen
+    synliga = [v for v in ["now", "heat", "water", "air", "hist", "set"]
+               if page.locator("#v-" + v).is_visible()]
+    check(len(synliga) == 1, "exakt en vy synlig (%s)" % synliga)
+
+    # -- just nu ------------------------------------------------------
+    page.locator('nav button[data-view="now"]').click()
+    page.wait_for_timeout(700)
+    hero = page.locator("#heroHw").inner_text()
+    check(hero not in ("", "-", "–"), "varmvattentemperatur i hero: %r" % hero)
+    n = page.locator("#tiles .tile").count()
+    check(n >= 6, "minst sex kakel (%d)" % n)
+    rows = page.locator("#all tr").count()
+    check(rows >= 15, "alla varden listade (%d rader)" % rows)
+
+    # -- varme --------------------------------------------------------
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(1800)
     off = page.locator("#offsetNow").inner_text()
-    print("offset visas: %r" % off)
-    if off == "-" or off == "":
-        fel.append("offset lastes inte")
+    check(off not in ("", "–"), "offset last: %r" % off)
+    note = page.locator("#offsetNote").inner_text()
+    check("varmare" in note and "svalare" in note,
+          "offsettexten forklarar riktningen")
+    line = page.locator("#heatLine").inner_text()
+    check(len(line) > 15, "varmelaget sammanfattat: %r" % line[:70])
+    flags = page.locator("#heatFlags").inner_text()
+    check(len(flags) > 20, "varningar visas (%d tecken)" % len(flags))
+    # the long background notes must be folded away, not stacked above the button.
+    # Count only what is actually on screen -- what sits inside <details> is in
+    # the DOM but not in the way.
+    open_warns = page.locator("#heatFlags > .warn").count()
+    folded = page.locator("#heatFlags details .warn").count()
+    check(open_warns <= 2, "hogst tva varningar utfallda (%d utfallda, %d bortvikta)"
+          % (open_warns, folded))
+    if folded:
+        check(not page.locator("#heatFlags details").first.get_attribute("open"),
+              "resten ar hopfalld fran start")
+    if page.locator("#curveCard").is_visible():
+        pts = page.locator("#curveBody tr").count()
+        check(pts >= 5, "egen kurva ritad med %d punkter" % pts)
 
-    # 3. ventilationslagen
-    opts = page.locator("#ventMode option").all_inner_texts()
-    print("ventilationslagen: %s" % opts)
-    if not any("%" in o for o in opts):
-        fel.append("ventilationslagen saknar procent")
-
-    # 4. alla installningar
-    page.locator("#settingsBox summary").click()
-    page.wait_for_timeout(3000)
-    rows = page.locator(".setrow").count()
-    groups = page.locator(".setgroup h3").all_inner_texts()
-    print("installningar: %d rader i %s" % (rows, groups))
-    if rows < 20:
-        fel.append("for fa installningsrader (%d)" % rows)
-
-    # 5. oppna en redigerare (utan att spara)
-    page.locator('[data-edit="40185"]').click()
-    page.wait_for_timeout(400)
-    vis = page.locator('[data-panel="40185"]').is_visible()
-    val = page.locator("#sv-40185").input_value() if vis else None
-    print("redigerare for varmestopp oppnas: %s, varde %r" % (vis, val))
-    if not vis or not val:
-        fel.append("redigeraren oppnades inte")
-
-    # 6. radgivaren
-    page.locator("#adviceOpen").click()
-    page.wait_for_timeout(300)
-    page.locator('[data-when="cold_outside"]').click()
+    page.locator('#whenTabs [data-when="cold_outside"]').click()
     page.locator("#adviceGo").click()
-    page.wait_for_timeout(4000)
-    sugg = page.locator(".sugg .h").all_inner_texts()
-    print("radgivaren: %s" % sugg)
-    if not sugg:
-        fel.append("radgivaren gav inget forslag")
+    page.wait_for_timeout(4500)
+    sugg = page.locator("#adviceOut [data-group]").count()
+    blocked = page.locator("#adviceOut .warn").count()
+    check(sugg > 0 or blocked > 0, "radgivaren svarar (forslag %d, varning %d)" % (sugg, blocked))
 
-    # 7. historikflikar
-    tabs = page.locator("#histTabs button").all_inner_texts()
-    print("historikflikar: %s" % tabs)
+    # -- vatten -------------------------------------------------------
+    page.locator('nav button[data-view="water"]').click()
+    page.wait_for_timeout(2500)
+    opts = page.locator("#hwMin option").count()
+    check(opts >= 4, "varmvattentider i listan (%d)" % opts)
+    vrows = page.locator("#setWater .setrow").count()
+    check(vrows >= 3, "varmvatteninstallningar pa vattenfliken (%d)" % vrows)
 
-    # 8. service worker
-    sw = page.evaluate("() => 'serviceWorker' in navigator")
-    print("service worker stods: %s" % sw)
+    # -- luft ---------------------------------------------------------
+    page.locator('nav button[data-view="air"]').click()
+    page.wait_for_timeout(1500)
+    modes = page.locator("#ventMode option").all_inner_texts()
+    check(any("%" in m for m in modes), "ventilationslagen visar procent: %s" % modes)
 
+    # -- historik -----------------------------------------------------
+    page.locator('nav button[data-view="hist"]').click()
+    page.wait_for_timeout(2500)
+    chips = page.locator("#histTabs button").count()
+    check(chips >= 3, "historikflikar (%d)" % chips)
+    page.locator('[data-h="6"]').click()
+    page.wait_for_timeout(2000)
+    has_path = page.locator("#chart path.ln").count() > 0
+    has_text = "Ingen historik" in (page.locator("#chart").text_content() or "")
+    check(has_path or has_text, "grafen ritar kurva eller tomt lage")
+
+    # -- installningar ------------------------------------------------
+    page.locator("#goSettings").click()
+    page.wait_for_timeout(3500)
+    srows = page.locator("#settings .setrow").count()
+    groups = page.locator("#settings .setgroup h3").all_inner_texts()
+    check(srows >= 20, "installningsrader (%d i %s)" % (srows, groups))
+
+    page.locator('#settings [data-edit="40185"]').click()
+    page.wait_for_timeout(500)
+    val = page.locator("#sv-40185").input_value()
+    why = page.locator('[data-panel="40185"] .setwhy').inner_text()
+    check(val != "" and len(why) > 20, "redigeraren oppnas med varde %r och forklaring" % val)
+    page.locator('#settings [data-edit="40185"]').click()   # stang
+    page.wait_for_timeout(300)
+    check(not page.locator("#sv-40185").is_visible(), "redigeraren gar att stanga")
+
+    bstate = page.locator("#backupState").inner_text()
+    check("backup" in bstate.lower(), "backupstatus visas: %r" % bstate[:60])
+
+    log_rows = page.locator("#wlog tr").count()
+    check(log_rows >= 1, "andringsloggen visas (%d rader)" % log_rows)
+
+    # -- inget vagrat vid horisontell scroll --------------------------
+    over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+    check(over <= 1, "ingen horisontell scroll (%dpx over)" % over)
+
+
+with sync_playwright() as pw:
+    b = pw.chromium.launch()
+    for label, w, h in VIEWPORTS:
+        page = b.new_page(viewport={"width": w, "height": h})
+        errs = []
+        page.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errs.append("pageerror: %s" % e))
+        run(page, label, w)
+        real = [e for e in errs if "favicon" not in e.lower()]
+        check(not real, "inga konsolfel" + (": " + "; ".join(real[:3]) if real else ""))
+        page.close()
+
+    # morkt lage renderar
+    page = b.new_page(color_scheme="dark", viewport={"width": 390, "height": 844})
+    page.goto(URL, wait_until="networkidle")
+    page.wait_for_timeout(1800)
+    bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+    print("\n=== morkt lage ===")
+    check(bg not in ("rgba(0, 0, 0, 0)", "rgb(255, 255, 255)"), "mork bakgrund: %s" % bg)
+    page.close()
     b.close()
 
-real = [e for e in errs if "favicon" not in e.lower()]
-if real:
-    print("\nKONSOLFEL:")
-    for e in real[:10]:
-        print("  " + e[:160])
-    fel.append("%d konsolfel" % len(real))
-
-print("\n" + ("ALLT OK" if not fel else "FEL: " + "; ".join(fel)))
+print("\n" + ("ALLT OK" if not fel else "%d FEL:\n  - %s" % (len(fel), "\n  - ".join(fel))))
 sys.exit(1 if fel else 0)

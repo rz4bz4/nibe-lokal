@@ -8,6 +8,7 @@ which is why old rows are pruned to `history_days`.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -136,7 +137,8 @@ class Poller(threading.Thread):
 
     daemon = True
 
-    def __init__(self, pump, store: Store, addresses: list[int], seconds: int = 60):
+    def __init__(self, pump, store: Store, addresses: list[int], seconds: int = 60,
+                 backup_dir: str | None = None, backup_hours: float = 24.0):
         super().__init__(name="nibe-poller")
         self.pump = pump
         self.store = store
@@ -145,6 +147,9 @@ class Poller(threading.Thread):
         self.latest: dict[int, dict] = {}
         self.last_ok: float | None = None
         self.last_error: str | None = None
+        self.backup_dir = backup_dir
+        self.backup_hours = backup_hours
+        self.last_backup: str | None = None
         self._stop = threading.Event()
         self._pruned = 0.0
 
@@ -172,4 +177,37 @@ class Poller(threading.Thread):
                     self._pruned = time.time()
                 except Exception:                          # noqa: BLE001
                     pass
+            self._maybe_backup()
             self._stop.wait(backoff)
+
+    # -- automatic snapshots ---------------------------------------------
+
+    def _maybe_backup(self) -> None:
+        """Snapshot every setting once a day, without being asked.
+
+        A backup you have to remember to take is a backup you do not have when
+        you need it -- and the moment you need it is right after changing
+        something you should not have. Settings move rarely, so a daily JSON
+        costs a few hundred kilobytes a year and makes every change reversible.
+        """
+        if not self.backup_dir or self.last_error:
+            return
+        try:
+            newest = self._newest_backup()
+            if newest is not None and time.time() - newest < self.backup_hours * 3600:
+                return
+            path = self.pump.backup(self.backup_dir, "automatisk daglig backup")
+            self.last_backup = os.path.basename(path)
+            log.info("automatic backup written: %s", path)
+        except Exception as exc:                           # noqa: BLE001
+            # Never let a failed backup stop the polling.
+            log.warning("automatic backup failed: %s", exc)
+
+    def _newest_backup(self) -> float | None:
+        try:
+            times = [os.path.getmtime(os.path.join(self.backup_dir, n))
+                     for n in os.listdir(self.backup_dir)
+                     if n.startswith("nibe-") and n.endswith(".json")]
+        except OSError:
+            return None
+        return max(times) if times else None

@@ -311,9 +311,10 @@ def advise(pump, feeling: str, when: str, store=None,
             current=offset,
             proposed=offset + direction,
             why="Huset känns %s i alla väder, och då är det hela kurvan som ligger "
-                "fel — inte dess lutning. Offset flyttar hela kurvan. Ett steg "
-                "motsvarar ungefär %g grad inomhus."
-                % ("för kallt" if direction > 0 else "för varmt", DEGREES_PER_OFFSET_STEP),
+                "fel — inte dess lutning. Offset flyttar hela kurvan. Tumregeln är "
+                "att ett steg motsvarar ungefär en grad inomhus, men utslaget syns "
+                "tydligare i kyla än i milt väder."
+                % ("för kallt" if direction > 0 else "för varmt"),
         ))
         return advice
 
@@ -324,20 +325,29 @@ def advise(pump, feeling: str, when: str, store=None,
         ceiling = state["max_supply"]
         floor = state["min_supply"]
         hit_ceiling = hit_floor = False
+        # What the curve asks for in the weather being complained about. A point
+        # is worth moving when moving it changes THIS number -- the point's own
+        # value against min/max says nothing, because the pump interpolates.
+        weather = state.get("outdoor")
+        if weather is None:
+            weather = -10.0 if cold_end else 8.0
+        elif cold_end:
+            weather = min(weather - 1.0, -5.0)
         for i in idx:
             current = state["own_curve"][i]
             if current is None:
                 continue
             proposed = current + direction * em["point_step"]
-            # A curve point above max supply is a setting the pump will not act
-            # on: the supply temperature is capped elsewhere. Suggesting it would
-            # look like it worked and change nothing.
-            if ceiling is not None and proposed > ceiling:
-                hit_ceiling = True
-                continue
-            if floor is not None and proposed < floor:
-                hit_floor = True
-                continue
+            after = curve_at([proposed if j == i else p
+                              for j, p in enumerate(state["own_curve"])], weather)
+            before = curve_at(state["own_curve"], weather)
+            if after is not None and before is not None:
+                if ceiling is not None and min(after, before) >= ceiling:
+                    hit_ceiling = True
+                    continue
+                if floor is not None and max(after, before) <= floor:
+                    hit_floor = True
+                    continue
             advice.suggestions.append(Suggestion(
                 address=R_OWN_CURVE[i],
                 title="Egen kurva, punkt P%d (%+d °C ute)" % (i + 1, OWN_CURVE_OUTDOOR[i]),
@@ -355,22 +365,21 @@ def advise(pump, feeling: str, when: str, store=None,
             ))
         if hit_ceiling:
             advice.warnings.append(
-                "En punkt ligger redan mot max framledning (%s °C, register 40039). "
-                "Att höja den längre gör ingenting förrän taket höjs — och hur högt "
-                "taket får ligga beror på vad ditt värmesystem tål, inte på något "
-                "appen bör gissa." % _fmt(ceiling)
+                "Kurvan ligger redan mot max framledning (%s °C, register 40039) i "
+                "det vädret. Att höja den längre gör ingenting förrän taket höjs — "
+                "och hur högt det får ligga beror på vad ditt värmesystem tål, inte "
+                "på något appen bör gissa." % _fmt(ceiling)
             )
         if hit_floor:
             extra = ""
             if emitter_kind in ("floor", "mixed"):
-                extra = (" Med golvvärme är min framledning satt för att golvet "
-                         "inte ska kännas kallt — sänk den försiktigt, och inte "
-                         "under vad golvbeläggningen tål.")
+                extra = (" Med golvvärme är min framledning satt för att golvet inte "
+                         "ska kännas kallt — sänk den försiktigt, och inte under vad "
+                         "golvbeläggningen tål.")
             advice.warnings.append(
-                "En punkt ligger redan på eller under min framledning (%s °C, "
-                "register 40035). I det vädret går pumpen på golvet, så punkten "
-                "styr ingenting — det är min framledning som avgör. Vill du ha "
-                "svalare där är det 40035 som ska ner.%s" % (_fmt(floor), extra)
+                "Kurvan ligger redan på min framledning (%s °C, register 40035) i det "
+                "vädret, så pumpen går på golvet och punkten styr ingenting. Vill du "
+                "ha svalare där är det 40035 som ska ner.%s" % (_fmt(floor), extra)
             )
         if not advice.suggestions and not advice.blocked:
             if all(state["own_curve"][i] is None for i in idx):
@@ -442,6 +451,30 @@ def advise(pump, feeling: str, when: str, store=None,
         ))
 
     return advice
+
+
+def curve_at(points: list, outdoor: float) -> float | None:
+    """Supply temperature the own curve asks for at a given outdoor temperature.
+
+    Linear between the two bracketing points, flat outside the ends. This is
+    what actually governs the house -- judging a point against min/max supply
+    on its own says "this point does nothing" about a point that is half of the
+    interpolation currently in force.
+    """
+    known = [(t, p) for t, p in zip(OWN_CURVE_OUTDOOR, points) if p is not None]
+    if not known:
+        return None
+    if outdoor <= known[0][0]:
+        return float(known[0][1])
+    if outdoor >= known[-1][0]:
+        return float(known[-1][1])
+    for (t0, p0), (t1, p1) in zip(known, known[1:]):
+        if t0 <= outdoor <= t1:
+            if t1 == t0:
+                return float(p0)
+            k = (outdoor - t0) / (t1 - t0)
+            return float(p0) + k * (float(p1) - float(p0))
+    return float(known[-1][1])
 
 
 def _points_for(when: str, outdoor) -> list[int]:

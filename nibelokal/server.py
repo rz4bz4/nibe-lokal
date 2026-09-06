@@ -242,8 +242,14 @@ class Handler(BaseHTTPRequestHandler):
                         full = os.path.join(directory, name)
                         files.append({"name": name, "bytes": os.path.getsize(full),
                                       "taken_at": os.path.getmtime(full)})
-            return self._json({"directory": directory, "backups": files,
-                               "history": store.stats()})
+            newest = max((f["taken_at"] for f in files), default=None)
+            return self._json({
+                "directory": directory, "backups": files, "history": store.stats(),
+                "newest": newest,
+                "age_hours": None if newest is None else (time.time() - newest) / 3600,
+                "auto": bool(poller.backup_dir),
+                "auto_every_hours": poller.backup_hours,
+            })
 
         return self._json({"error": "not found"}, 404)
 
@@ -316,7 +322,10 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
 
     store = Store(resolve(cfg, "database", base) or os.path.join(base, "nibe.db"),
                   cfg["history_days"])
-    poller = Poller(pump, store, DASHBOARD, cfg["poll_seconds"])
+    backup_dir = resolve(cfg, "backup_dir", base) or os.path.join(base, "backup")
+    poller = Poller(pump, store, DASHBOARD, cfg["poll_seconds"],
+                    backup_dir if cfg.get("auto_backup_hours") else None,
+                    float(cfg.get("auto_backup_hours") or 24))
     poller.start()
 
     # A Host header that is not one of these means someone resolved a name of
@@ -345,7 +354,7 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         "poller": poller,
         "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
         "emitters": cfg.get("emitters") or "radiators",
-        "backup_dir": resolve(cfg, "backup_dir", base) or os.path.join(base, "backup"),
+        "backup_dir": backup_dir,
         "web_root": os.path.join(base, "web"),
     }
 
@@ -358,6 +367,8 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     if not Handler.ctx["token"]:
         print("  auth         : none - anyone on your LAN can change settings.")
         print("                 Set auth_token in config.yaml to require a token.")
+    if poller.backup_dir:
+        print("  auto backup  : every %g h into %s" % (poller.backup_hours, backup_dir))
     if allowed:
         print("  accepts Host : any IP address, plus %s" % ", ".join(sorted(allowed)))
         print("                 add other names with allowed_hosts in config.yaml")

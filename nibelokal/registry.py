@@ -126,10 +126,15 @@ class Register:
     def coerce(self, value):
         """Normalise an incoming value to the number this register takes.
 
+        A missing value is a bad request, not a server error -- without this it
+        surfaced as a TypeError and a 502 with a stack trace in the log.
+
         For an enum register both the label ("Large") and the key (2) are
         accepted, and anything that is not one of its keys is rejected -- the
         map's min/max cannot be relied on to catch that.
         """
+        if value is None:
+            raise ValueError("%s: a value is required" % self.title)
         if self.mappings:
             if isinstance(value, str) and not value.strip().lstrip("-").isdigit():
                 for k, v in self.mappings.items():

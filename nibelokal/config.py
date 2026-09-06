@@ -20,6 +20,8 @@ DEFAULTS = {
     "allow_any_host": False,    # only if something else already checks Host
     "poll_seconds": 60,         # NIBE's own guidance is not to poll harder
     "history_days": 400,
+    # Hours between automatic full-settings snapshots. 0 turns them off.
+    "auto_backup_hours": 24,
     "allow_guarded_writes": True,
     # floor | radiators | mixed -- shapes the heating advice, nothing else
     "emitters": "radiators",
@@ -29,7 +31,7 @@ DEFAULTS = {
 }
 
 INT_KEYS = {"port", "unit", "listen_port", "poll_seconds", "history_days"}
-FLOAT_KEYS = {"timeout"}
+FLOAT_KEYS = {"timeout", "auto_backup_hours"}
 BOOL_KEYS = {"allow_guarded_writes", "allow_any_host"}
 
 

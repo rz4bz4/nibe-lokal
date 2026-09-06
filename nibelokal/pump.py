@@ -143,7 +143,9 @@ class Pump:
             # Optimistic concurrency: a phone that has had the page open for a
             # day may be stepping from a value the display has since changed,
             # which moves the heat the opposite way from the button pressed.
-            if expect is not None and not _same(before, expect):
+            if expect is not None and not _same(before, reg.coerce(expect)
+                                                if reg.mappings and not isinstance(expect, str)
+                                                else expect):
                 # Including the case where `before` could not be read at all:
                 # a conditional write whose condition is unknown is not one.
                 raise safety.Refused(
@@ -168,13 +170,19 @@ class Pump:
             "verified": after is not None,
         }
 
-    def write_all(self, changes: list[dict], confirmed: bool = False) -> list[dict]:
+    def write_all(self, changes: list[dict], confirmed: bool = False) -> dict:
         """Apply several writes as one unit.
 
         The advisor's mild-weather advice is a curve change and an offset change
-        that cancel out in cold weather. Half of that pair is worse than neither,
-        so they are validated together first and applied under one lock.
+        that cancel out in cold weather. Half of that pair is worse than neither.
+
+        So: validate everything, then read every `before` and check every
+        `expect` under one lock, then write. If a write still fails partway --
+        the pump can refuse one -- roll back what was already written and say so.
+        Reporting a half-applied pair as a plain error, which an earlier version
+        did, leaves the house in exactly the state this function exists to avoid.
         """
+        prepared = []
         for change in changes:
             address = int(change["address"])
             reg = self.registry.get(address)
@@ -187,13 +195,64 @@ class Pump:
             if not reg.mappings:
                 safety.clamp(reg, float(value))
             reg.encode(value)
+            prepared.append((reg, value, change.get("expect")))
 
-        done = []
         with self._lock:
-            for change in changes:
-                done.append(self.write(int(change["address"]), change.get("value"),
-                                       confirmed, change.get("expect")))
-        return done
+            # Every precondition first, so a stale `expect` on the last change
+            # cannot happen after the first one is already written.
+            befores = []
+            for reg, _value, expect in prepared:
+                before = None
+                try:
+                    before = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
+                except (ModbusError, ModbusOffline):
+                    pass
+                if expect is not None and not _same(before, reg.coerce(expect)
+                                                   if reg.mappings else expect):
+                    raise safety.Refused(
+                        "%s har ändrats sedan du läste den (%s nu, %s då). Läs om och "
+                        "försök igen så du vet vad du ändrar från."
+                        % (reg.title, "okänt" if before is None else before, expect)
+                    )
+                befores.append(before)
+
+            done: list[dict] = []
+            for i, (reg, value, _expect) in enumerate(prepared):
+                try:
+                    self.mb.write(reg.wire, reg.encode(value))
+                    after = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
+                except Exception as exc:                   # noqa: BLE001
+                    rolled, failed_back = self._rollback(prepared[:i], befores[:i])
+                    return {
+                        "changes": done,
+                        "partial": True,
+                        "rolled_back": rolled,
+                        "rollback_failed": failed_back,
+                        "error": "%s: %s" % (reg.title, exc),
+                    }
+                done.append({
+                    "address": reg.address, "title": reg.title, "requested": value,
+                    "before": befores[i], "after": after, "unit": reg.unit,
+                    "tier": safety.tier(reg.address), "verified": after is not None,
+                })
+                log.info("write %d (%s): %r -> %r", reg.address, reg.title,
+                         befores[i], after)
+        return {"changes": done, "partial": False}
+
+    def _rollback(self, applied, befores) -> tuple[list[str], list[str]]:
+        """Put back what was already written. Best effort, reported honestly."""
+        rolled, failed = [], []
+        for (reg, _value, _expect), before in zip(reversed(applied), reversed(befores)):
+            if before is None:
+                failed.append("%s (visste inte tidigare värde)" % reg.title)
+                continue
+            try:
+                self.mb.write(reg.wire, reg.encode(before))
+                rolled.append("%s tillbaka till %s" % (reg.title, before))
+            except Exception as exc:                       # noqa: BLE001
+                failed.append("%s: %s" % (reg.title, exc))
+                log.error("rollback failed for %d: %s", reg.address, exc)
+        return rolled, failed
 
     # -- everyday actions -------------------------------------------------
 
