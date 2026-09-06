@@ -12,10 +12,12 @@ unit: 1            # Modbus slave id. Try 1; if nothing answers, try 0.
 
 # --- the register map -----------------------------------------------------
 
-# Used when register_csv is empty. Models the `nibe` package knows:
+# Used when register_csv is empty. S-series models the `nibe` package knows --
+# these are the ones with built-in Modbus TCP:
 #   S735 S735C S1155 S1255 S1156 S1256 S320 S325 S330 S332 S2125
-#   SMO20 SMO40 SMOS40 VVM225 VVM320 VVM325 VVM310 VVM500 VVMS320 VVMS325 VVMS500
-#   F1145 F1155 F1245 F1255 F1345 F1355 F370 F470 F730 F750
+#   SMO20 SMO40 SMOS40 VVMS320 VVMS325 VVMS500
+# The F-series maps are in the package too, but those pumps need a MODBUS 40
+# accessory over RS485 rather than the TCP this app speaks.
 model: "S735"
 
 # Better: export the register list from the pump itself (menu 7.5.9 ->
@@ -32,6 +34,12 @@ listen_port: 8377
 # token here. Anyone who can reach the port can change settings. Send it as an
 # X-Auth-Token header, or once as ?token=... which the browser then remembers.
 auth_token: ""
+
+# The app only answers requests whose Host header is localhost, the bind
+# address, or this machine's own name -- that is what stops a foreign web page
+# (or a rebound DNS name) from reaching the pump through your browser. Add any
+# other name you reach it by, space or comma separated: "varme.lan pi.local"
+allowed_hosts: ""
 
 # --- history and safety ---------------------------------------------------
 

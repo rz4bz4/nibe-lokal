@@ -59,24 +59,27 @@ class ModbusOffline(Exception):
 
 
 class _Budget:
-    """Sliding-window rate limiter, registers per second."""
+    """Sliding-window rate limiter, registers per second.
+
+    Its own lock, and it re-checks after sleeping: a single pass would sleep
+    just long enough for the oldest event to age out and then spend regardless,
+    which lets a poller and a backup running at once sail past the limit.
+    """
 
     def __init__(self, limit: int = MAX_REGS_PER_SECOND):
         self.limit = limit
         self._events: list[tuple[float, int]] = []
+        self._lock = threading.Lock()
 
     def spend(self, n: int) -> None:
-        now = time.monotonic()
-        self._events = [(t, c) for t, c in self._events if now - t < 1.0]
-        used = sum(c for _, c in self._events)
-        if used + n > self.limit:
-            oldest = self._events[0][0] if self._events else now
-            sleep = max(0.0, 1.0 - (now - oldest))
-            if sleep:
-                time.sleep(sleep)
-            now = time.monotonic()
-            self._events = [(t, c) for t, c in self._events if now - t < 1.0]
-        self._events.append((now, n))
+        with self._lock:
+            while True:
+                now = time.monotonic()
+                self._events = [(t, c) for t, c in self._events if now - t < 1.0]
+                if sum(c for _, c in self._events) + n <= self.limit or not self._events:
+                    self._events.append((now, n))
+                    return
+                time.sleep(max(0.01, 1.0 - (now - self._events[0][0])))
 
 
 class ModbusTCP:
@@ -91,6 +94,9 @@ class ModbusTCP:
         self._tid = 0
         self._lock = threading.RLock()
         self._budget = _Budget()
+        # Once the pump has answered, a failure to connect is a dropped session,
+        # not "Modbus is switched off" -- the advice differs, so say the right one.
+        self._seen_pump = False
 
     # -- connection ------------------------------------------------------
 
@@ -100,6 +106,12 @@ class ModbusTCP:
         try:
             s = socket.create_connection((self.host, self.port), timeout=self.timeout)
         except OSError as exc:
+            if self._seen_pump:
+                raise ModbusOffline(
+                    "Lost contact with the heat pump at %s:%d (%s). It answered earlier, "
+                    "so this is a dropped session or a network hiccup rather than a "
+                    "setting." % (self.host, self.port, exc)
+                ) from exc
             raise ModbusOffline(
                 "Cannot reach the heat pump at %s:%d (%s). Most common cause: Modbus "
                 "TCP is not enabled. Turn it on from the pump's display, menu 7.5.9 "
@@ -134,18 +146,33 @@ class ModbusTCP:
 
     def _transact(self, pdu: bytes, cost: int, context: str) -> bytes:
         """Send one PDU, return the response PDU. Retries once on a dropped socket."""
-        self._budget.spend(cost)
         with self._lock:
+            # Spent inside the lock so the budget tracks what actually goes on
+            # the wire, not what got queued.
+            self._budget.spend(cost)
             last: Exception | None = None
             for attempt in (1, 2):
-                sock = self._connect()
+                try:
+                    sock = self._connect()
+                except ModbusOffline as exc:
+                    last = exc
+                    if attempt == 2 or not self._seen_pump:
+                        raise
+                    time.sleep(0.25)
+                    continue
                 self._tid = (self._tid + 1) % 0x10000
-                header = struct.pack(">HHHB", self._tid, 0, len(pdu) + 1, self.unit)
+                sent_tid = self._tid
+                header = struct.pack(">HHHB", sent_tid, 0, len(pdu) + 1, self.unit)
                 try:
                     sock.sendall(header + pdu)
                     head = self._recv_exactly(sock, 7)
-                    _tid, _proto, length, _unit = struct.unpack(">HHHB", head)
+                    tid, proto, length, unit = struct.unpack(">HHHB", head)
+                    if proto != 0 or length < 2 or length > 260:
+                        raise ModbusOffline("Malformed Modbus header from the pump.")
                     body = self._recv_exactly(sock, length - 1)
+                    # A stale answer must never be handed back as this one's.
+                    if tid != sent_tid or (body[0] & 0x7F) != pdu[0]:
+                        raise ModbusOffline("Out-of-step Modbus response; resynchronising.")
                 except (OSError, ModbusOffline) as exc:
                     last = exc
                     self._drop()
@@ -155,6 +182,7 @@ class ModbusTCP:
                         ) from exc
                     time.sleep(0.25)
                     continue
+                self._seen_pump = True
                 if body[0] & 0x80:
                     raise ModbusError(body[1], context)
                 return body

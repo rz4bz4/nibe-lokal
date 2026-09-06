@@ -23,6 +23,21 @@ from dataclasses import dataclass, field
 
 log = logging.getLogger("nibelokal.registry")
 
+# The full span of each type. encode() refuses anything outside it rather than
+# masking, because a masked write is a wrong value the pump happily accepts.
+LIMITS = {
+    "s8": (-0x80, 0x7F),
+    "u8": (0, 0xFF),
+    "s16": (-0x8000, 0x7FFF),
+    "u16": (0, 0xFFFF),
+    "s32": (-0x80000000, 0x7FFFFFFF),
+    "u32": (0, 0xFFFFFFFF),
+}
+
+# NIBE's own CSV export codes the variable size as a digit. Same mapping the
+# nibe package's convert_csv.py uses.
+CSV_SIZES = {"1": "s8", "2": "s16", "3": "s32", "4": "u8", "5": "u16", "6": "u32"}
+
 # Sentinels the pump uses for "no value" (matches the nibe package's convention).
 INVALID = {
     "u8": 0xFF,
@@ -108,19 +123,46 @@ class Register:
             return self.mappings.get(str(int(raw)), value)
         return value
 
-    def encode(self, value) -> list[int]:
-        """Real value -> raw 16-bit words, ready for FC16."""
-        if self.mappings and isinstance(value, str):
-            for k, v in self.mappings.items():
-                if v.lower() == value.lower():
-                    value = int(k)
-                    break
-            else:
+    def coerce(self, value):
+        """Normalise an incoming value to the number this register takes.
+
+        For an enum register both the label ("Large") and the key (2) are
+        accepted, and anything that is not one of its keys is rejected -- the
+        map's min/max cannot be relied on to catch that.
+        """
+        if self.mappings:
+            if isinstance(value, str) and not value.strip().lstrip("-").isdigit():
+                for k, v in self.mappings.items():
+                    if v.lower() == value.strip().lower():
+                        return int(k)
                 raise ValueError(
                     "%r is not a valid value for %s. Allowed: %s"
                     % (value, self.title, ", ".join(sorted(self.mappings.values())))
                 )
+            key = int(float(value))
+            if str(key) not in self.mappings:
+                raise ValueError(
+                    "%s is not a valid value for %s. Allowed: %s"
+                    % (key, self.title,
+                       ", ".join("%s (%s)" % (k, v) for k, v in sorted(self.mappings.items())))
+                )
+            return key
+        return float(value)
+
+    def encode(self, value) -> list[int]:
+        """Real value -> raw 16-bit words, ready for FC16.
+
+        Refuses values the type cannot hold. Masking instead would turn -1
+        minutes of extra hot water into 65535 -- a write the pump accepts and
+        then runs for six weeks.
+        """
         raw = int(round(float(value) * (self.factor if self.factor else 1)))
+        lo, hi = LIMITS.get(self.size, (-0x8000, 0x7FFF))
+        if not lo <= raw <= hi:
+            raise ValueError(
+                "%s: %s does not fit in a %s register (allowed %s..%s before scaling)"
+                % (self.title, value, self.size, lo / (self.factor or 1), hi / (self.factor or 1))
+            )
         if self.count == 2:
             raw &= 0xFFFFFFFF
             return [raw & 0xFFFF, (raw >> 16) & 0xFFFF]
@@ -209,7 +251,16 @@ class Registry:
     def from_csv(cls, path: str) -> "Registry":
         """Parse a CSV exported from the pump itself (menu 7.5.9)."""
         regs: dict[int, Register] = {}
-        with open(path, encoding="utf-8-sig", newline="") as fh:
+        # The pump writes these in latin-1 (the degree sign gives it away);
+        # ModbusManager and some tools re-save them as UTF-8.
+        for encoding in ("utf-8-sig", "latin-1"):
+            try:
+                with open(path, encoding=encoding, newline="") as probe:
+                    probe.read()
+                break
+            except UnicodeDecodeError:
+                continue
+        with open(path, encoding=encoding, newline="") as fh:
             sample = fh.read(4096)
             fh.seek(0)
             try:
@@ -228,20 +279,35 @@ class Registry:
                 num = pick("register", "id", "register number")
                 if not num.lstrip("-").isdigit():
                     continue
-                rtype = pick("register type", "type").lower()
-                base = 40001 if "hold" in rtype else 30001
+                # NIBE's own export names this "Register type" with values like
+                # MODBUS_HOLDING_REGISTER. Other exports (and ModbusManager)
+                # instead carry a "Mode" column of R / R/W. Accept both, and
+                # treat writability as the tell -- getting this wrong puts every
+                # register in the other address space, where it reads garbage.
+                rtype = pick("register type", "type", "registertype").lower()
+                mode = pick("mode", "r/w", "access").lower()
+                holding = "hold" in rtype or "w" in mode.replace("write", "w")
+                base = 40001 if holding else 30001
                 address = base + int(num)
                 size = pick("size of variable", "size", default="s16").lower()
+                # NIBE's export writes the size as a digit 1-6, not as "s16".
+                size = CSV_SIZES.get(size, size if size in LIMITS else "s16")
                 factor = pick("division factor", "factor", "divisor", default="1")
+                lo = _num(pick("min value", "min"))
+                hi = _num(pick("max value", "max"))
+                # The export uses min == max (usually 0) to mean "no range given".
+                # Kept as-is they would refuse every write of anything else.
+                if lo is not None and hi is not None and lo == hi:
+                    lo = hi = None
                 regs[address] = Register(
                     address=address,
                     title=pick("title", "name", default=str(address)),
-                    size=size if size in INVALID else "s16",
+                    size=size,
                     factor=int(float(factor)) if factor.replace(".", "").isdigit() else 1,
                     unit=pick("unit"),
-                    writable="hold" in rtype,
-                    min=_num(pick("min value", "min")),
-                    max=_num(pick("max value", "max")),
+                    writable=holding,
+                    min=lo,
+                    max=hi,
                     default=_num(pick("default value", "default")),
                 )
         if not regs:

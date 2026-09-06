@@ -47,7 +47,12 @@ python3 -m nibelokal serve       # http://localhost:8377/
 ```
 
 On a phone: open the address in Safari or Chrome and use *Add to Home Screen*.
-It then behaves like an app, offline shell and all.
+It then behaves like an app — the shell is cached by a service worker so it
+opens without a network, though of course it needs the network to reach the pump.
+
+```bash
+python3 -m unittest discover tests    # 29 tests, no pump required
+```
 
 To keep it running, use whatever your machine already has — `systemd`, `launchd`,
 `docker run --network host`, a `screen` session. There is nothing special about
@@ -83,6 +88,8 @@ three tiers:
 | **Blocked** | compressor frequency limits, heating medium pump mode, floor drying, AUX-over-Modbus, external sensor value injection, smart-price control | never written by this app |
 
 Anything not explicitly classified is treated as **guarded**, not as free.
+[docs/registers.md](docs/registers.md) lists every register in each tier and the
+reasoning behind it.
 
 Two things worth knowing before you change a setting from a phone:
 
@@ -130,6 +137,12 @@ every setting. Assume the same about this app:
 - Bind to `127.0.0.1` and put it behind something, or leave it on a LAN you trust.
 - Set `auth_token` in `config.yaml` to require a token
   (`X-Auth-Token` header, or `?token=` once, which the app remembers).
+- The app refuses requests whose `Host` header is not localhost, its bind
+  address or this machine's own name, and requires `Content-Type:
+  application/json` on writes. Together those stop a web page you happen to open
+  from POSTing to your heat pump through your own browser, and stop DNS
+  rebinding. If you front it with a proxy under another name, add that name to
+  `allowed_hosts`.
 - Set the **IP address restriction** in the pump's menu 7.5.9.
 - Do not expose port 8377 to the internet. Use a VPN or Tailscale if you want it
   from outside; a heat pump is not a thing to publish.

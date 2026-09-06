@@ -126,12 +126,13 @@ class Pump:
 
         safety.check(address, confirmed, self.allow_guarded)
 
+        # Order matters: normalise, then range-check the real value, THEN encode.
+        # Checking the encoded words instead reads a masked two's-complement
+        # integer -- -1 minutes arrives as 65535 and sails past every max.
+        value = reg.coerce(value)
+        if not reg.mappings:
+            safety.clamp(reg, float(value))
         words = reg.encode(value)
-        if not reg.mappings or not isinstance(value, str):
-            numeric = float(words[0] if reg.count == 1 else (words[0] | words[1] << 16))
-            if reg.factor not in (0, 1):
-                numeric = numeric / reg.factor
-            safety.clamp(reg, numeric)
 
         with self._lock:
             before = None
@@ -174,6 +175,11 @@ class Pump:
         return out
 
     def ventilate(self, direction: str = "up", hours: int = 3, mode: int | None = None) -> dict:
+        hours = int(hours)
+        if not 1 <= hours <= 24:
+            raise safety.Refused("The return time must be between 1 and 24 hours.")
+        if mode is not None and not 0 <= int(mode) <= 4:
+            raise safety.Refused("Ventilation mode must be 0..4.")
         speeds = self.fan_speeds()
         normal = speeds.get(0)
         if normal is None:
@@ -208,7 +214,17 @@ class Pump:
             "writes": results,
         }
 
+    #: Nobody needs more than a day of forced hot water from a phone, whatever
+    #: the register map does or does not say about the range.
+    MAX_EXTRA_HOT_WATER_MINUTES = 24 * 60
+
     def extra_hot_water(self, minutes: int = 180, off: bool = False) -> dict:
+        minutes = int(minutes)
+        if not off and not 1 <= minutes <= self.MAX_EXTRA_HOT_WATER_MINUTES:
+            raise safety.Refused(
+                "Extra hot water is limited to 1..%d minutes by this app."
+                % self.MAX_EXTRA_HOT_WATER_MINUTES
+            )
         if off:
             return {"off": True, "writes": [self.write(R_MORE_HW, 0),
                                             self.write(R_MORE_HW_MINUTES, 0)]}

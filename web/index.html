@@ -167,14 +167,30 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
 
 <script>
 const $ = s => document.querySelector(s);
-const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('nibe_token') || '';
-if (token) localStorage.setItem('nibe_token', token);
+let token = savedToken();
+function savedToken() {
+  const fromUrl = new URLSearchParams(location.search).get('token');
+  try {
+    if (fromUrl) localStorage.setItem('nibe_token', fromUrl);
+    return fromUrl || localStorage.getItem('nibe_token') || '';
+  } catch (e) { return fromUrl || ''; }
+}
 
 async function api(path, opts = {}) {
-  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+  const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
   if (token) headers['X-Auth-Token'] = token;
   const res = await fetch(path, Object.assign({}, opts, {headers}));
   const body = await res.json().catch(() => ({error: 'svaret gick inte att tolka'}));
+  if (res.status === 401) {
+    // An installed home-screen app has its own storage, so the ?token= from the
+    // browser is not there. Ask once rather than showing a dead dashboard.
+    const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
+    if (given) {
+      token = given.trim();
+      try { localStorage.setItem('nibe_token', token); } catch (e) {}
+      return api(path, opts);
+    }
+  }
   if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
   return body;
 }
@@ -206,10 +222,19 @@ let latest = [];
 function fmt(v, unit) {
   if (v === null || v === undefined) return '–';
   if (typeof v === 'number') {
-    const s = Number.isInteger(v) ? v : v.toFixed(1);
-    return s + (unit ? '<small>' + unit + '</small>' : '');
+    // Temperatures always get one decimal, so 27.0 and 27.1 line up in a row
+    // of tiles instead of reading as "27" next to "27.1".
+    const s = (unit === '\u00b0C' || !Number.isInteger(v)) ? v.toFixed(1) : String(v);
+    return esc(s) + (unit ? '<small>' + esc(unit) + '</small>' : '');
   }
-  return String(v);
+  return esc(String(v));
+}
+
+// Register titles come from the map, but a CSV exported from someone's own pump
+// is user-supplied text that ends up in innerHTML. Escape it.
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function renderTiles() {
@@ -225,7 +250,7 @@ function renderTiles() {
 
 function renderAll() {
   $('#all').innerHTML = latest.map(r =>
-    `<tr><td>${r.title}<div class="addr">${r.address}</div></td>
+    `<tr><td>${esc(r.title)}<div class="addr">${r.address}</div></td>
      <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
   ).join('');
 }
@@ -353,7 +378,7 @@ async function loadBackups() {
   try {
     const d = await api('/api/backups');
     $('#backups').innerHTML = d.backups.slice(0, 20).map(b =>
-      `<tr><td>${b.name}</td><td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`
+      `<tr><td>${esc(b.name)}</td><td>${(b.bytes / 1024).toFixed(0)} kB</td></tr>`
     ).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
   } catch (e) { /* the panel is optional */ }
 }
@@ -361,6 +386,10 @@ async function loadBackups() {
 document.querySelector('details').addEventListener('toggle', e => {
   if (e.target.open) loadBackups();
 });
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 
 refresh();
 setInterval(refresh, 30000);

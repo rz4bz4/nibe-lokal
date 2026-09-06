@@ -6,6 +6,7 @@ renting the same feature from a cloud.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -22,6 +23,14 @@ from .safety import Refused, tier
 from .store import Poller, Store
 
 log = logging.getLogger("nibelokal.server")
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -51,6 +60,30 @@ class Handler(BaseHTTPRequestHandler):
             given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
         return secrets.compare_digest(given, token)
 
+    def _same_origin(self) -> bool:
+        """Refuse requests a foreign web page made on the browser's behalf.
+
+        Modbus has no authentication and this app may run without a token, so
+        without this any page the household happens to open could POST
+        "operating mode = additional heat only" to the pump. Requiring a header
+        the browser will not send cross-origin without a preflight, plus a Host
+        check, closes both CSRF and DNS rebinding without a session model.
+        """
+        origin = self.headers.get("Origin")
+        if origin:
+            host = self.headers.get("Host") or ""
+            if origin.split("://")[-1] != host:
+                return False
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        allowed = self.ctx.get("allowed_hosts") or set()
+        if not allowed or host in allowed:
+            return True
+        # A bare IP address cannot be DNS-rebound -- rebinding needs a *name*
+        # whose resolution can be changed. Reaching the app at 192.168.1.5 or a
+        # Tailscale address is the normal case, so allow any literal address and
+        # keep the check for names.
+        return _is_ip_literal(host)
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
@@ -64,16 +97,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):                                     # noqa: N802
         route = urlparse(self.path)
-        if route.path.startswith("/api/"):
-            if not self._authorised():
-                return self._json({"error": "unauthorised"}, 401)
+        if not route.path.startswith("/api/"):
+            return self._static(route.path)
+        if not self._same_origin():
+            return self._json({"error": "cross-origin request refused"}, 403)
+        if not self._authorised():
+            return self._json({"error": "unauthorised"}, 401)
+        try:
             return self._api_get(route)
-        return self._static(route.path)
+        except Refused as exc:
+            return self._json({"error": str(exc), "refused": True}, 403)
+        except (KeyError, ValueError) as exc:
+            return self._json({"error": str(exc)}, 400)
+        except Exception as exc:                          # noqa: BLE001
+            # Without this the pump-is-unreachable message never reaches the
+            # browser: the connection just closes and the app says nothing useful.
+            log.warning("GET %s failed: %s", route.path, exc)
+            return self._json({"error": str(exc)}, 502)
 
     def do_POST(self):                                    # noqa: N802
         route = urlparse(self.path)
         if not route.path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
+        if not self._same_origin():
+            return self._json({"error": "cross-origin request refused"}, 403)
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+            return self._json({"error": "POST requires Content-Type: application/json"}, 415)
         if not self._authorised():
             return self._json({"error": "unauthorised"}, 401)
         try:
@@ -224,8 +273,28 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     poller = Poller(pump, store, DASHBOARD, cfg["poll_seconds"])
     poller.start()
 
+    # A Host header that is not one of these means someone resolved a name of
+    # their own to this address -- classic DNS rebinding. Add your own name here
+    # via `allowed_hosts` in config.yaml if you front this with a proxy.
+    allowed = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    if listen not in ("0.0.0.0", ""):
+        allowed.add(listen)
+    for extra in str(cfg.get("allowed_hosts") or "").replace(",", " ").split():
+        allowed.add(extra)
+    if cfg.get("allow_any_host"):
+        allowed = set()
+    else:
+        try:
+            import socket as _s
+            allowed.add(_s.gethostbyname(_s.gethostname()))
+            allowed.add(_s.gethostname())
+            allowed.add(_s.gethostname().split(".")[0] + ".local")
+        except OSError:
+            pass
+
     Handler.ctx = {
         "pump": pump,
+        "allowed_hosts": allowed,
         "store": store,
         "poller": poller,
         "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
@@ -242,6 +311,9 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     if not Handler.ctx["token"]:
         print("  auth         : none - anyone on your LAN can change settings.")
         print("                 Set auth_token in config.yaml to require a token.")
+    if allowed:
+        print("  accepts Host : any IP address, plus %s" % ", ".join(sorted(allowed)))
+        print("                 add other names with allowed_hosts in config.yaml")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

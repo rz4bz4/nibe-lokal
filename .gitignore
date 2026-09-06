@@ -6,3 +6,5 @@ backup/
 __pycache__/
 *.pyc
 .venv/
+serve.log
+*.log

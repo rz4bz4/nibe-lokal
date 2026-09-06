@@ -27,3 +27,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["nibelokal"]
+
+# The web app ships inside the package so `pip install` + `nibelokal serve`
+# finds it; without this the installed command serves a 500.
+[tool.setuptools.package-data]
+nibelokal = ["web/*"]
