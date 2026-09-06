@@ -87,6 +87,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 0}
   background:var(--bg)}
 .sugg .h{font-weight:600;margin-bottom:4px;font-variant-numeric:tabular-nums}
 .sugg .w{color:var(--muted);font-size:13px;margin-bottom:11px}
+.alarm{background:color-mix(in srgb,var(--bad) 13%,transparent);border:1px solid var(--bad);
+  color:var(--bad);border-radius:12px;padding:14px;margin-bottom:14px;font-size:14px}
+.alarm b{display:block;font-size:15px;margin-bottom:3px}
 .warn{border-left:3px solid var(--warm);padding:8px 0 8px 11px;margin:9px 0;
   font-size:13px;color:var(--ink)}
 footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.7}
@@ -99,6 +102,8 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
   <h1>Värmepumpen</h1>
   <div class="sub"><span class="dot" id="dot"></span><span id="freshness">ansluter…</span></div>
 </header>
+
+<div id="alarmBanner" hidden></div>
 
 <div class="grid" id="tiles"></div>
 
@@ -114,7 +119,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
     </div>
     <button id="heatUp" aria-label="Höj värmen">+</button>
   </div>
-  <p class="note">Ett steg motsvarar ungefär en grad inomhus. Vänta ett dygn innan du
+  <p class="note" id="offsetNote">Ett steg motsvarar ungefär en grad inomhus. Vänta innan du
     justerar igen — huset svarar långsamt, och tre ändringar på en dag går inte att
     utvärdera.</p>
 
@@ -172,7 +177,11 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
 <div class="card">
   <h2>Ventilation</h2>
   <div class="row">
-    <div style="flex:2 1 160px">
+    <div style="flex:3 1 200px">
+      <label for="ventMode">Läge</label>
+      <select id="ventMode"><option>läser lägen…</option></select>
+    </div>
+    <div style="flex:2 1 140px">
       <label for="ventH">Återgång efter</label>
       <select id="ventH">
         <option value="1">1 timme</option>
@@ -181,13 +190,16 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
         <option value="4">4 timmar</option>
         <option value="6">6 timmar</option>
         <option value="12">12 timmar</option>
+        <option value="24">24 timmar</option>
       </select>
     </div>
-    <div style="display:flex;align-items:flex-end"><button class="primary" id="ventUp">Mer luft</button></div>
-    <div style="display:flex;align-items:flex-end"><button id="ventNorm">Normal</button></div>
   </div>
-  <p class="note" id="fanNote">Lägena är inte ordnade lågt till högt i den här pumpen — appen läser
-    procenten ur pumpen och väljer rätt läge åt dig.</p>
+  <div class="row" style="margin-top:10px">
+    <button class="primary" id="ventSet">Sätt läge</button>
+    <button id="ventNorm">Tillbaka till normal</button>
+  </div>
+  <p class="note" id="fanNote">Procenten läses ur pumpen — lägena är inte ordnade lågt till
+    högt, så siffran i listan är det som gäller, inte numret.</p>
   <div class="msg" id="ventMsg"></div>
 </div>
 
@@ -298,13 +310,41 @@ function esc(s) {
 
 function renderTiles() {
   const by = Object.fromEntries(latest.map(r => [r.address, r]));
-  $('#tiles').innerHTML = TILES
+  const boosts = renderBoosts()
+    .map(([label, value]) => `<div class="tile warm"><div class="k">${label}</div>
+                              <div class="v">${value}</div></div>`).join('');
+  $('#tiles').innerHTML = boosts + (TILES
     .filter(([a]) => by[a] && by[a].value !== null && by[a].value !== undefined)
     .map(([a, label, cls]) => {
       const r = by[a];
       return `<div class="tile ${cls}"><div class="k">${label}</div>
               <div class="v">${fmt(r.value, r.unit)}</div></div>`;
-    }).join('') || '<div class="tile"><div class="k">Inga värden ännu</div><div class="v">–</div></div>';
+    }).join('') || '<div class="tile"><div class="k">Inga värden ännu</div><div class="v">–</div></div>');
+}
+
+function renderAlarm() {
+  const by = Object.fromEntries(latest.map(r => [r.address, r]));
+  const alarm = by[31976] && by[31976].value;
+  const el = $('#alarmBanner');
+  if (!alarm) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.className = 'alarm';
+  el.innerHTML = `<b>Pumpen larmar (kod ${esc(String(alarm))})</b>
+    Slå upp koden på pumpens display — den visar larmtexten och vad som ska göras.
+    Ett larm kan betyda att pumpen slutat värma, så vänta inte på att det går över.`;
+}
+
+function renderBoosts() {
+  const by = Object.fromEntries(latest.map(r => [r.address, r]));
+  const out = [];
+  const hwMin = by[40226] && by[40226].value;
+  if (hwMin) out.push(['Extra varmvatten', `${hwMin}<small>min kvar</small>`]);
+  const mode = by[40105] && by[40105].value;
+  if (mode) {
+    const pct = fanSpeeds && fanSpeeds[mode] !== undefined ? fanSpeeds[mode] : null;
+    out.push(['Ventilationsboost', pct === null ? `läge ${mode}` : `${pct}<small>%</small>`]);
+  }
+  return out;
 }
 
 function renderAll() {
@@ -328,7 +368,7 @@ async function refresh() {
     const d = await api('/api/status');
     latest = d.registers;
     freshness(d.polled_at, d.poll_error);
-    renderTiles(); renderAll();
+    renderAlarm(); renderTiles(); renderAll();
     if (!$('#histTabs').children.length) buildTabs();
   } catch (e) {
     $('#dot').className = 'dot stale';
@@ -415,7 +455,14 @@ async function loadHeating() {
   if (heat.outdoor !== null) bits.push('ute ' + heat.outdoor.toFixed(1) + ' °C');
   if (heat.supply !== null) bits.push('framledning ' + heat.supply.toFixed(1) + ' °C');
   if (heat.degree_minutes !== null) bits.push(heat.degree_minutes + ' gradminuter');
+  if (heat.wait) {
+    $('#offsetNote').textContent = `Ett steg motsvarar ungefär en grad inomhus. ` +
+      `Vänta ${heat.wait} innan du justerar igen — huset svarar långsamt, och tre ` +
+      `ändringar på en dag går inte att utvärdera.`;
+  }
   $('#heatState').innerHTML = esc(bits.join(' · ')) +
+    (heat.observations || []).filter(o => o.length > 90)
+      .map(o => `<div class="warn" style="border-left-color:var(--muted)">${esc(o)}</div>`).join('') +
     (heat.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
 
   const rows = [
@@ -435,15 +482,20 @@ async function loadHeating() {
 }
 
 async function nudgeOffset(step, button) {
+  // Re-read first: this page may have been open for days, and the display or
+  // another phone may have moved the offset since. Stepping from a stale value
+  // can move the heat the opposite way from the button that was pressed.
+  await loadHeating();
   if (!heat || heat.offset === null) return;
   const to = heat.offset + step;
   if (!confirm(`Ändra värmeoffset från ${heat.offset} till ${to}?\n\n` +
                `Ungefär ${Math.abs(step)} grad ${step > 0 ? 'varmare' : 'svalare'} inomhus. ` +
-               `Huset svarar långsamt — utvärdera i morgon, inte om en timme.`)) return;
+               `Huset svarar långsamt — utvärdera om ${heat.wait || 'ett dygn'}, ` +
+               `inte om en timme.`)) return;
   await act(button,
-    () => post('/api/write', {address: 40031, value: to, confirm: true}),
+    () => post('/api/write', {address: 40031, value: to, expect: heat.offset, confirm: true}),
     $('#heatMsg'),
-    r => `Värmeoffset ${r.before} → ${r.after}. Känn efter i morgon.`);
+    r => `Värmeoffset ${r.before} → ${r.after}. Känn efter om ${heat.wait || 'ett dygn'}.`);
   await loadHeating();
 }
 
@@ -477,25 +529,44 @@ $('#adviceGo').onclick = async e => {
     } else if (!a.suggestions.length) {
       html += '<div class="hint">Inget förslag den här gången.</div>';
     } else {
-      html += a.suggestions.map((s, i) => {
-        const arrow = `${s.current} → ${s.proposed}${s.unit ? ' ' + s.unit : ''}`;
-        return `<div class="sugg">
-          <div class="h">${esc(s.title)}: ${esc(arrow)}</div>
-          <div class="w">${esc(s.why)}</div>
-          <button class="primary" data-apply="${i}">Genomför</button>
-        </div>`;
+      // Suggestions that share a group only make sense applied together --
+      // half of a mild-weather pair makes cold weather worse.
+      const groups = [];
+      a.suggestions.forEach((sg, i) => {
+        const key = sg.group || ('single' + i);
+        let g = groups.find(x => x.key === key);
+        if (!g) groups.push(g = {key: key, items: []});
+        g.items.push(Object.assign({index: i}, sg));
+      });
+      html += groups.map((g, gi) => {
+        const body = g.items.map(sg => {
+          const arrow = `${sg.current} → ${sg.proposed}${sg.unit ? ' ' + sg.unit : ''}`;
+          return `<div class="h">${esc(sg.title)}: ${esc(arrow)}</div>
+                  <div class="w">${esc(sg.why)}</div>`;
+        }).join('');
+        const label = g.items.length > 1 ? 'Genomför båda' : 'Genomför';
+        return `<div class="sugg">${body}
+          <button class="primary" data-group="${gi}">${label}</button></div>`;
       }).join('');
-      html += '<p class="hint">Gör en ändring i taget och vänta ett dygn. Två knappar ' +
-              'som hör ihop ska tryckas båda — texten säger när.</p>';
+      html += `<p class="hint">Gör en justering i taget och vänta ${esc(a.wait || 'ett dygn')} ` +
+              `innan nästa — huset svarar långsamt, och två ändringar samtidigt går inte ` +
+              `att utvärdera.</p>`;
     }
     out.innerHTML = html;
-    out.querySelectorAll('[data-apply]').forEach(btn => btn.onclick = async ev => {
-      const s = a.suggestions[+ev.target.dataset.apply];
-      if (!confirm(`${s.title}: ${s.current} → ${s.proposed}?\n\n${s.why}`)) return;
-      await act(ev.target,
-        () => post('/api/write', {address: s.address, value: s.proposed, confirm: true}),
-        $('#heatMsg'),
-        r => `${r.title}: ${r.before} → ${r.after}. Utvärdera i morgon.`);
+    out.querySelectorAll('[data-group]').forEach(btn => btn.onclick = async ev => {
+      const items = groups[+ev.target.dataset.group].items;
+      const lines = items.map(s => `${s.title}: ${s.current} → ${s.proposed}`).join('\n');
+      if (!confirm(`${lines}\n\n${items[0].why}`)) return;
+      await act(ev.target, async () => {
+        const done = [];
+        for (const s of items) {
+          done.push(await post('/api/write',
+            {address: s.address, value: s.proposed, expect: s.current, confirm: true}));
+        }
+        return done;
+      }, $('#heatMsg'),
+        rs => rs.map(r => `${r.title}: ${r.before} → ${r.after}`).join('. ') +
+              `. Utvärdera om ${a.wait || 'ett dygn'}.`);
       await loadHeating();
     });
   } catch (err) {
@@ -530,14 +601,53 @@ $('#hwOff').onclick = e => act(e.target,
   () => post('/api/hotwater', {off: true}),
   $('#hwMsg'), () => 'Extra varmvatten avbrutet.');
 
-$('#ventUp').onclick = e => act(e.target,
-  () => post('/api/ventilation', {direction: 'up', hours: +$('#ventH').value}),
-  $('#ventMsg'),
-  r => `Läge ${r.mode} — ${r.percent}% mot normalt ${r.normal_percent}%. Tillbaka om ${r.hours} h.`);
+let fanSpeeds = null;
+
+async function loadFanModes() {
+  try {
+    fanSpeeds = (await api('/api/fan')).speeds;
+  } catch (e) { return; }
+  const normal = fanSpeeds['0'];
+  const sel = $('#ventMode');
+  const opts = Object.keys(fanSpeeds).filter(m => m !== '0').map(m => {
+    const p = fanSpeeds[m];
+    if (p === null || p === undefined) return '';
+    let rel = '';
+    if (normal !== null && normal !== undefined) {
+      rel = p > normal ? ' — mer luft' : (p < normal ? ' — MINDRE luft' : ' — som normalt');
+    }
+    return `<option value="${m}">Läge ${m}: ${p} %${rel}</option>`;
+  }).join('');
+  sel.innerHTML = opts || '<option value="">inga lägen kunde läsas</option>';
+  // Preselect the lowest mode that is actually more air than normal.
+  const higher = Object.keys(fanSpeeds).filter(m => m !== '0' &&
+    fanSpeeds[m] !== null && normal !== null && fanSpeeds[m] > normal);
+  if (higher.length) sel.value = higher.sort((a, b) => fanSpeeds[a] - fanSpeeds[b])[0];
+  if (normal !== null && normal !== undefined) {
+    $('#fanNote').textContent = `Normalt är ${normal} %. Procenten läses ur pumpen — ` +
+      `lägena är inte ordnade lågt till högt, så siffran i listan är det som gäller, inte numret.`;
+  }
+}
+
+$('#ventSet').onclick = e => {
+  const mode = $('#ventMode').value;
+  if (mode === '') return;
+  const p = fanSpeeds ? fanSpeeds[mode] : null;
+  const normal = fanSpeeds ? fanSpeeds['0'] : null;
+  if (p !== null && normal !== null && p < normal &&
+      !confirm(`Läge ${mode} är ${p} %, vilket är MINDRE luft än normalt (${normal} %).\n\n` +
+               `På en frånluftspump är ventilationen värmekällan — låg fläkt betyder ` +
+               `mindre värme och risk för fukt. Är det verkligen vad du vill?`)) return;
+  return act(e.target,
+    () => post('/api/ventilation', {mode: +mode, hours: +$('#ventH').value}),
+    $('#ventMsg'),
+    r => `Läge ${r.mode} — ${r.percent} % mot normalt ${r.normal_percent} %. ` +
+         `Tillbaka om ${r.hours} h.`);
+};
 
 $('#ventNorm').onclick = e => act(e.target,
   () => post('/api/ventilation', {direction: 'normal'}),
-  $('#ventMsg'), r => `Tillbaka till normal ventilation (${r.normal_percent}%).`);
+  $('#ventMsg'), r => `Tillbaka till normal ventilation (${r.normal_percent} %).`);
 
 $('#doBackup').onclick = e => act(e.target,
   () => post('/api/backup', {note: 'från appen'}),
@@ -552,7 +662,7 @@ async function loadBackups() {
   } catch (e) { /* the panel is optional */ }
 }
 
-document.querySelector('details').addEventListener('toggle', e => {
+$('#backups').closest('details').addEventListener('toggle', e => {
   if (e.target.open) loadBackups();
 });
 
@@ -562,9 +672,12 @@ if ('serviceWorker' in navigator) {
 
 refresh();
 loadHeating();
+loadFanModes();
 setInterval(refresh, 30000);
 setInterval(drawHistory, 300000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { refresh(); loadHeating(); }
+});
 </script>
 </body>
 </html>

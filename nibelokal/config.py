@@ -11,7 +11,7 @@ DEFAULTS = {
     "host": "",                 # the pump's IP address on your LAN
     "port": 502,
     "unit": 1,                  # Modbus slave id; try 1, then 0
-    "model": "S735",            # only used when register_csv is not set
+    "model": "",                # required unless register_csv is set
     "register_csv": "",         # CSV exported from the pump, menu 7.5.9
     "listen": "127.0.0.1",      # bind address for the web app
     "listen_port": 8377,
@@ -21,6 +21,8 @@ DEFAULTS = {
     "poll_seconds": 60,         # NIBE's own guidance is not to poll harder
     "history_days": 400,
     "allow_guarded_writes": True,
+    # floor | radiators | mixed -- shapes the heating advice, nothing else
+    "emitters": "radiators",
     "database": "nibe.db",
     "backup_dir": "backup",
     "timeout": 5.0,
@@ -78,6 +80,16 @@ def load(path: str = "config.yaml") -> dict:
         if env:
             cfg[k] = _coerce(k, env)
 
+    if not cfg["model"] and not cfg["register_csv"]:
+        raise SystemExit(
+            "No pump model configured.\n\n"
+            "Set `model` in config.yaml to your pump (S735, S1155, S1255, S320, "
+            "SMO40, ...),\nor better, export the register list from the pump itself "
+            "(menu 7.5.9 ->\n\"Export all registers\" onto a USB stick) and point "
+            "`register_csv` at the CSV.\n\n"
+            "There is no safe default: a mismatched register map does not fail, it "
+            "reads\nplausible nonsense."
+        )
     if not cfg["host"]:
         raise SystemExit(
             "No pump address configured.\n\n"

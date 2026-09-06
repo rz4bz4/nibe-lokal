@@ -18,7 +18,7 @@ unit: 1            # Modbus slave id. Try 1; if nothing answers, try 0.
 #   SMO20 SMO40 SMOS40 VVMS320 VVMS325 VVMS500
 # The F-series maps are in the package too, but those pumps need a MODBUS 40
 # accessory over RS485 rather than the TCP this app speaks.
-model: "S735"
+model: ""
 
 # Better: export the register list from the pump itself (menu 7.5.9 ->
 # "Export all registers" onto a USB stick) and point this at the CSV. It is the
@@ -50,6 +50,13 @@ history_days: 400     # older readings are pruned daily
 # temperatures, ...) outright, leaving only the everyday ones. Blocked registers
 # are never written regardless. See nibelokal/safety.py.
 allow_guarded_writes: true
+
+# What the heating water runs through. Only affects the advice: underfloor
+# heating answers in a day or two and wants low supply temperatures, radiators
+# answer in hours and want it hotter, and a house with both on one curve is
+# always a compromise the advice should name rather than hide.
+#   floor | radiators | mixed
+emitters: "radiators"
 
 database: "nibe.db"
 backup_dir: "backup"

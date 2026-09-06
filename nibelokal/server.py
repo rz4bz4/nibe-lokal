@@ -167,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         if path == "/api/heating":
-            return self._json(advisor.diagnose(pump, store))
+            return self._json(advisor.diagnose(pump, store, self.ctx["emitters"]))
 
         if path == "/api/advice":
             return self._json(advisor.advise(
@@ -175,6 +175,7 @@ class Handler(BaseHTTPRequestHandler):
                 q.get("feeling", ["warmer"])[0],
                 q.get("when", ["always"])[0],
                 store,
+                self.ctx["emitters"],
             ).as_dict())
 
         if path == "/api/fan":
@@ -242,7 +243,8 @@ class Handler(BaseHTTPRequestHandler):
             if "address" not in body:
                 raise ValueError("address is required")
             result = pump.write(int(body["address"]), body.get("value"),
-                                bool(body.get("confirm", False)))
+                                bool(body.get("confirm", False)),
+                                body.get("expect"))
             store.record_write(result)
             return self._json(result)
 
@@ -310,6 +312,7 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         "store": store,
         "poller": poller,
         "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
+        "emitters": cfg.get("emitters") or "radiators",
         "backup_dir": resolve(cfg, "backup_dir", base) or os.path.join(base, "backup"),
         "web_root": os.path.join(base, "web"),
     }

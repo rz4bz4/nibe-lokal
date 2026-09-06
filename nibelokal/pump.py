@@ -117,7 +117,7 @@ class Pump:
 
     # -- writing ---------------------------------------------------------
 
-    def write(self, address: int, value, confirmed: bool = False) -> dict:
+    def write(self, address: int, value, confirmed: bool = False, expect=None) -> dict:
         reg = self.registry.get(address)
         if reg is None:
             raise KeyError("register %d is not in the map" % address)
@@ -140,6 +140,15 @@ class Pump:
                 before = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
             except (ModbusError, ModbusOffline):
                 pass
+            # Optimistic concurrency: a phone that has had the page open for a
+            # day may be stepping from a value the display has since changed,
+            # which moves the heat the opposite way from the button pressed.
+            if expect is not None and before is not None and not _same(before, expect):
+                raise safety.Refused(
+                    "%s har ändrats sedan du läste den (%s nu, %s då). Läs om och "
+                    "försök igen så du vet vad du ändrar från."
+                    % (reg.title, before, expect)
+                )
             self.mb.write(reg.wire, words)
             after = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
 
@@ -309,6 +318,13 @@ def _blocks(regs: list[Register], gap: int = 3) -> list[list[Register]]:
     if current:
         out.append(current)
     return out
+
+
+def _same(a, b) -> bool:
+    try:
+        return abs(float(a) - float(b)) < 1e-9
+    except (TypeError, ValueError):
+        return str(a) == str(b)
 
 
 def _differs(value, default) -> bool:

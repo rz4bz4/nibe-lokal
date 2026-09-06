@@ -4,12 +4,16 @@ A small web app for a NIBE S-series heat pump that talks **directly to the pump
 over Modbus TCP on your own network**. No cloud account, no subscription, no
 myUplink. Your settings and your history stay in files you own.
 
-It does three things:
+It does four things:
 
 - **Shows the pump** — temperatures, hot water, ventilation, fan speed, degree
-  minutes, compressor hours. Installable on a phone home screen as a PWA.
-- **Does the two things you actually reach for a phone for** — extra hot water
-  before a bath, and more ventilation for a few hours that goes back on its own.
+  minutes, compressor hours, alarms. Installable on a phone home screen as a PWA.
+- **Does the things you actually reach for a phone for** — extra hot water before
+  a bath, more ventilation for a few hours that goes back on its own, and nudging
+  the heat up or down a step.
+- **Helps you get the heat curve right**, which is the part everyone gets wrong.
+  Two questions — is it too cold or too warm, and *when* — turn into one concrete
+  register change, with the reasoning shown. See "Heating advice" below.
 - **Backs up every setting** to a timestamped JSON file, and diffs two snapshots
   so you can see what changed since June.
 
@@ -121,6 +125,41 @@ Two things worth knowing before you change a setting from a phone:
 On an exhaust-air pump the ventilation *is* the heat source. A fan left at 0 %
 means no heat source, a frosting evaporator, and condensation in the house.
 
+## Heating advice
+
+Setting a heat curve by hand is genuinely awful: the feedback loop is a day long,
+four knobs look like they do the same thing, and the pump tells you nothing about
+which one is wrong. The app asks two questions instead.
+
+**Is the house too cold or too warm, and when?** That second question is the
+whole game:
+
+| When it's wrong | What's actually wrong | What the app suggests |
+|---|---|---|
+| In all weather | The curve sits too low or too high | Offset, one step (≈ 1 °C indoors) |
+| Only when it's cold out | The curve's slope | Curve +1, or the own-curve points that bracket the current outdoor temperature |
+| Only in mild weather | The mild end of the curve | A flatter curve **and** offset the other way, applied together |
+
+Turning the offset up in November is what makes the house too warm in March. That
+is the mistake the table above exists to prevent.
+
+It is not a model and makes no predictions. Alongside the rule it uses what the
+pump can say about itself, and several of those facts silently invalidate the
+obvious advice:
+
+- **No room sensor?** Then the room setpoint is writable but regulates nothing,
+  and the app says so instead of letting you turn a knob that does nothing.
+- **Curve set to 0** means own curve. Setting it to 1–15 throws your points away.
+  The app refuses to suggest crossing that line in either direction.
+- **Immersion heater running?** Raising the heat then buys more electric heat, not
+  more heat pump. The app refuses, and if the pump reports it is prioritising hot
+  water it says to come back in half an hour.
+- **A curve point already at max supply** is a setting the pump will not act on.
+  Suggesting it would look like it worked and change nothing.
+
+Every suggestion is one step, and the app says to wait a day before the next one.
+Suggestions that only make sense together are applied together, by one button.
+
 ## Backups
 
 ```bash
@@ -146,6 +185,24 @@ Do not poll harder than the pump allows: NIBE documents **max 100 registers per
 second and 20 registers per query**, and the app enforces both. Community reports
 suggest hammering it can wedge the pump's Modbus service until a reboot.
 
+## What myUplink does that this does not
+
+Worth knowing before you cancel the subscription:
+
+| | myUplink | Here |
+|---|---|---|
+| Alarm push notification | yes | shows a banner when you open the app; no push |
+| Weekly schedules | yes | no — but the pump's own display has them (menu 1.x) |
+| Holiday / away mode | yes | no |
+| History and graphs | yes, while you pay | yes, in a file you own, for as long as you like |
+| Remote access | yes | via VPN or Tailscale |
+| Firmware updates, NIBE support | yes | no — done from the pump's display |
+
+The alarm notification is the one that matters. A pump typically alarms on a
+winter night and stops heating; myUplink pushes to your phone, this shows you a
+red banner the next time you open it. If that gap matters to you, keep the
+subscription or wire the alarm register into whatever notifier you already run.
+
 ## Security
 
 Modbus has no authentication at all — anyone who can reach port 502 can change
@@ -167,7 +224,33 @@ every setting. Assume the same about this app:
 ## Configuration
 
 Every key in `config.example.yaml` can also be set as an environment variable
-with a `NIBE_` prefix (`NIBE_HOST`, `NIBE_LISTEN_PORT`, `NIBE_TOKEN`).
+with a `NIBE_` prefix: `NIBE_HOST`, `NIBE_LISTEN_PORT`, `NIBE_AUTH_TOKEN`,
+`NIBE_ALLOWED_HOSTS`, and so on.
+
+### Keeping it running
+
+There is nothing special about the process — any supervisor will do. A systemd
+unit, for a machine that already has the repo in `/opt/nibe-lokal`:
+
+```ini
+[Unit]
+Description=nibe-lokal
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m nibelokal -c /opt/nibe-lokal/config.yaml serve
+WorkingDirectory=/opt/nibe-lokal
+Restart=always
+RestartSec=10
+User=nibe
+
+[Install]
+WantedBy=multi-user.target
+```
+
+On macOS the same thing is a launchd plist with `RunAtLoad` and `KeepAlive` set
+to true, `ProgramArguments` pointing at the same command, and
+`WorkingDirectory` at the repo.
 
 ## Commands
 
