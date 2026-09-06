@@ -15,6 +15,9 @@ DEFAULTS = {
     "register_csv": "",         # CSV exported from the pump, menu 7.5.9
     "listen": "127.0.0.1",      # bind address for the web app
     "listen_port": 8377,
+    "auth_token": "",           # empty = no token required
+    "allowed_hosts": "",        # extra Host names to accept, space separated
+    "allow_any_host": False,    # only if something else already checks Host
     "poll_seconds": 60,         # NIBE's own guidance is not to poll harder
     "history_days": 400,
     "allow_guarded_writes": True,
@@ -25,7 +28,7 @@ DEFAULTS = {
 
 INT_KEYS = {"port", "unit", "listen_port", "poll_seconds", "history_days"}
 FLOAT_KEYS = {"timeout"}
-BOOL_KEYS = {"allow_guarded_writes"}
+BOOL_KEYS = {"allow_guarded_writes", "allow_any_host"}
 
 
 def _coerce(key: str, value):
@@ -61,8 +64,14 @@ def load(path: str = "config.yaml") -> dict:
                     k, v = line.split(":", 1)
                     loaded[k.strip()] = v.strip()
         for k, v in (loaded or {}).items():
-            if k in cfg and v not in (None, ""):
-                cfg[k] = _coerce(k, v)
+            if v in (None, ""):
+                continue
+            if k not in cfg:
+                # Better a loud warning than a setting that silently does nothing
+                # -- a mistyped allowed_hosts is a locked-out phone.
+                print("config: ignoring unknown key %r" % k)
+                continue
+            cfg[k] = _coerce(k, v)
 
     for k in cfg:
         env = os.environ.get("NIBE_" + k.upper())
