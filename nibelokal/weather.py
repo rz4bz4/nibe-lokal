@@ -46,6 +46,7 @@ Two things the live API does that are worth knowing:
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -182,6 +183,15 @@ class Weather:
         self._cached: dict | None = None
         self._fetched: float = 0.0
         self._expires: float = 0.0
+        # Failures are remembered too, and for the same reason homey.py and
+        # spot.py remember theirs: without this an SMHI that answers 429 -- or
+        # a coordinate pair outside the model area, which answers 404 every
+        # time and always will -- is asked again on every single page load,
+        # which is how a rate limit turns into a block. Shorter than the
+        # success TTL, because a failure is more likely to be temporary than a
+        # forecast is to change.
+        self._failure: dict | None = None
+        self._failure_at: float = 0.0
 
     @property
     def configured(self) -> bool:
@@ -192,6 +202,11 @@ class Weather:
         noise on every page load.
         """
         return self.lat is not None and self.lon is not None
+
+    @property
+    def failure_seconds(self) -> float:
+        """How long a failed fetch is remembered. See _failure above."""
+        return min(self.ttl, 300.0)
 
     def url(self) -> str:
         # %.6f, never repr(): the API 404s on a seventh decimal, and a float
@@ -217,8 +232,19 @@ class Weather:
                     "Ingen plats är inställd, så ingen prognos hämtas. "
                     "Sätt weather_lat och weather_lon i config.yaml."}
 
-        if self._cached is not None and now < self._expires:
-            return self._cached
+        # `now >= self._fetched` guards a backward clock step: on a machine
+        # whose clock jumps back (ntp after a power cut, a Pi with no RTC) an
+        # age computed forwards goes negative, which read as "extremely fresh"
+        # and froze the cache until the clock caught up again.
+        if (self._cached is not None and now < self._expires
+                and now >= self._fetched):
+            # A deep copy: the cache outlives the request, and a caller that
+            # edits an hourly row it was handed would corrupt the forecast for
+            # every later caller until the TTL runs out.
+            return copy.deepcopy(self._cached)
+        if (self._failure is not None
+                and 0 <= now - self._failure_at < self.failure_seconds):
+            return copy.deepcopy(self._failure)
 
         try:
             payload, max_age = self._fetch()
@@ -226,13 +252,13 @@ class Weather:
             error = _error_text(exc, self.lat, self.lon)
             log.warning("SMHI fetch failed: %s", exc)
             # A forecast from an hour ago is still a forecast.
-            if self._cached is not None and now - self._fetched < STALE_SECONDS:
+            if self._cached is not None and 0 <= now - self._fetched < STALE_SECONDS:
                 stale = dict(self._cached)
                 stale["stale"] = True
                 stale["note"] = ("Prognosen är från %s och kunde inte uppdateras: %s"
                                  % (_local_iso(self._fetched), error))
-                return stale
-            return {"ok": False, "error": error}
+                return self._remember_failure(now, stale)
+            return self._remember_failure(now, {"ok": False, "error": error})
 
         try:
             snap = _build(payload, now)
@@ -247,12 +273,19 @@ class Weather:
 
         self._cached = snap
         self._fetched = now
+        self._failure, self._failure_at = None, 0.0
         # Honour SMHI's own Cache-Control over a shorter configured TTL. Their
         # edge answers max-age=3600 because the model runs about hourly; asking
         # again inside that window returns the identical bytes and costs them
         # bandwidth for nothing.
         self._expires = now + max(self.ttl, max_age)
-        return snap
+        return copy.deepcopy(snap)
+
+    def _remember_failure(self, now: float, result: dict) -> dict:
+        """Keep a failed answer, so the next page load does not re-ask SMHI."""
+        self._failure = result
+        self._failure_at = now
+        return copy.deepcopy(result)
 
     def _fetch(self) -> tuple[dict, float]:
         req = urllib.request.Request(self.url(), headers={

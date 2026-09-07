@@ -29,26 +29,33 @@ def run(page, label, width):
     page.wait_for_timeout(2500)
 
     # -- nav och vyer -------------------------------------------------
-    tabs = page.locator("nav button")
-    check(tabs.count() == 5, "fem flikar i navigeringen (%d)" % tabs.count())
-    for name, heading in [("now", "Just nu"), ("heat", "Värme"), ("water", "Varmvatten"),
-                          ("air", "Ventilation"), ("hist", "Historik")]:
-        page.locator('nav button[data-view="%s"]' % name).click()
+    # Elpriset har en egen flik nar det ar konfigurerat och ar borta nar det
+    # inte ar det, sa antalet synliga flikar ar 4 eller 5. Ventilationen delar
+    # flik med varmvattnet. Fliknamnet och vyns rubrik ar samma ord.
+    tabs = [b for b in page.locator("nav button").all() if b.is_visible()]
+    check(len(tabs) in (4, 5), "fyra eller fem flikar i navigeringen (%d)" % len(tabs))
+    for name, heading in [("now", "Just nu"), ("heat", "Värme"), ("price", "Elpris"),
+                          ("water", "Vatten & luft"), ("hist", "Historik")]:
+        tab = page.locator('nav button[data-view="%s"]' % name)
+        if not tab.is_visible():
+            check(name == "price", "fliken %s ar dold" % name)
+            continue
+        tab.click()
         page.wait_for_timeout(900)
         vis = page.locator("#v-" + name).is_visible()
         title = page.locator("#viewTitle").inner_text()
         check(vis and title == heading, "fliken %s visar %r" % (name, title))
 
     # bara en vy at gangen
-    synliga = [v for v in ["now", "heat", "water", "air", "hist", "set"]
+    synliga = [v for v in ["now", "heat", "price", "water", "hist", "set"]
                if page.locator("#v-" + v).is_visible()]
     check(len(synliga) == 1, "exakt en vy synlig (%s)" % synliga)
 
     # -- just nu ------------------------------------------------------
     page.locator('nav button[data-view="now"]').click()
     page.wait_for_timeout(700)
-    hero = page.locator("#heroHw").inner_text()
-    check(hero not in ("", "-", "–"), "varmvattentemperatur i hero: %r" % hero)
+    hero = page.locator("#heroVal").inner_text()
+    check(hero not in ("", "-", "–"), "husets huvudsiffra i hero: %r" % hero)
     n = page.locator("#tiles .tile").count()
     check(n >= 6, "minst sex kakel (%d)" % n)
     rows = page.locator("#all tr").count()
@@ -76,9 +83,17 @@ def run(page, label, width):
     if folded:
         check(not page.locator("#heatFlags details").first.get_attribute("open"),
               "resten ar hopfalld fran start")
-    if page.locator("#curveCard").is_visible():
-        pts = page.locator("#curveBody tr").count()
+    # Egen kurva ligger bakom "Avancerat", hopfallt fran start.
+    if page.locator("#advCard").is_visible():
+        check(not page.locator("#advBox").evaluate("e => e.open"),
+              "avancerat ar hopfallt fran start")
+        page.locator("#advSum").click()
+        page.wait_for_timeout(600)
+        pts = page.locator("#advBody .ptrow[data-pt]").count()
         check(pts >= 5, "egen kurva ritad med %d punkter" % pts)
+        check(page.locator("#curveChart").count() == 1, "och som en bild")
+        page.locator("#advSum").click()
+        page.wait_for_timeout(300)
 
     page.locator('#whenTabs [data-when="cold_outside"]').click()
     page.locator("#adviceGo").click()
@@ -87,17 +102,13 @@ def run(page, label, width):
     blocked = page.locator("#adviceOut .warn").count()
     check(sugg > 0 or blocked > 0, "radgivaren svarar (forslag %d, varning %d)" % (sugg, blocked))
 
-    # -- vatten -------------------------------------------------------
+    # -- vatten och luft ----------------------------------------------
     page.locator('nav button[data-view="water"]').click()
     page.wait_for_timeout(2500)
     opts = page.locator("#hwMin option").count()
     check(opts >= 4, "varmvattentider i listan (%d)" % opts)
     vrows = page.locator("#setWater .setrow").count()
     check(vrows >= 3, "varmvatteninstallningar pa vattenfliken (%d)" % vrows)
-
-    # -- luft ---------------------------------------------------------
-    page.locator('nav button[data-view="air"]').click()
-    page.wait_for_timeout(1500)
     modes = page.locator("#ventMode option").all_inner_texts()
     check(any("%" in m for m in modes), "ventilationslagen visar procent: %s" % modes)
 
@@ -117,16 +128,20 @@ def run(page, label, width):
     page.wait_for_timeout(3500)
     srows = page.locator("#settings .setrow").count()
     groups = page.locator("#settings .setgroup h3").all_inner_texts()
-    check(srows >= 20, "installningsrader (%d i %s)" % (srows, groups))
+    # Varmekurvans punkter och granser bor under Varme -> Avancerat och raknas
+    # inte har langre.
+    check(srows >= 12, "installningsrader (%d i %s)" % (srows, groups))
+    check(page.locator('#settings [data-edit="40044"]').count() == 0,
+          "kurvpunkterna ligger inte kvar under Installningar")
 
-    page.locator('#settings [data-edit="40185"]').click()
+    page.locator('#settings [data-edit="40167"]').click()
     page.wait_for_timeout(500)
-    val = page.locator("#sv-40185").input_value()
-    why = page.locator('[data-panel="40185"] .setwhy').inner_text()
+    val = page.locator("#sv-40167").input_value()
+    why = page.locator('[data-panel="40167"] .setwhy').inner_text()
     check(val != "" and len(why) > 20, "redigeraren oppnas med varde %r och forklaring" % val)
-    page.locator('#settings [data-edit="40185"]').click()   # stang
+    page.locator('#settings [data-edit="40167"]').click()   # stang
     page.wait_for_timeout(300)
-    check(not page.locator("#sv-40185").is_visible(), "redigeraren gar att stanga")
+    check(not page.locator("#sv-40167").is_visible(), "redigeraren gar att stanga")
 
     bstate = page.locator("#backupState").inner_text()
     check("backup" in bstate.lower(), "backupstatus visas: %r" % bstate[:60])

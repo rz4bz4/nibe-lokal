@@ -95,8 +95,12 @@ CATEGORIES = {
         r"^(initiate inverter|force initiated inverter|force inverter init)$",
     "emergency mode additional heat":
         r", emergency mode$",
+    # "(SPA), heating influence" is Smart Price Adaption under an abbreviation,
+    # and matching only the spelt-out name left the whole of its menu -- the
+    # per-circuit activations and the influence knobs, 40845-40852 and 40903 --
+    # guarded while the switch above them was blocked.
     "smart price adaption":
-        r"^energy price \d|smart price adaption",
+        r"^energy price \d|smart price adaption|\(spa\)",
 }
 
 
@@ -272,11 +276,15 @@ class Tiers(unittest.TestCase):
         self.assertIn("floor drying", message.lower())
 
 
-def doc_blocked_addresses():
-    """Every address the Blocked table in docs/registers.md names.
+def doc_addresses(section):
+    """Every address the tables under one "## " heading in docs/registers.md name.
 
-    The table's first column holds things like "42741 + 42742" and
-    "41106-41140, 41173-41176", with en dashes. This reads both forms.
+    Only the first column is read, so prose in a "why" cell that mentions a
+    register does not count as listing it. That first column holds things like
+    "42741 + 42742" and "41106-41140, 41173-41176", with en dashes; this reads
+    both forms. Lines that are not table rows are ignored, which is what lets the
+    Blocked section carry paragraphs about registers it deliberately does not
+    block without those addresses being read back as claims.
     """
     path = os.path.join(REPO, "docs", "registers.md")
     with open(path, encoding="utf-8") as handle:
@@ -285,7 +293,7 @@ def doc_blocked_addresses():
     addresses = set()
     for line in lines:
         if line.startswith("## "):
-            in_table = line.strip() == "## Blocked"
+            in_table = line.strip() == section
             continue
         if not in_table or not line.startswith("|"):
             continue
@@ -297,6 +305,10 @@ def doc_blocked_addresses():
         cell = re.sub(r"\d{5}\s*[-–—]\s*\d{5}", " ", cell)
         addresses.update(int(n) for n in re.findall(r"\d{5}", cell))
     return addresses
+
+
+def doc_blocked_addresses():
+    return doc_addresses("## Blocked")
 
 
 def code_blocked_addresses():
@@ -331,6 +343,20 @@ class DocumentationMatchesTheCode(unittest.TestCase):
 
     def test_the_table_was_actually_found(self):
         self.assertGreater(len(doc_blocked_addresses()), 50)
+
+    def test_the_everyday_table_lists_exactly_the_everyday_dict(self):
+        self.assertEqual(set(safety.EVERYDAY), doc_addresses("## Everyday"))
+
+    def test_the_guarded_table_lists_exactly_the_guarded_dict(self):
+        """The looser half of the same drift.
+
+        A register missing from GUARDED still lands on guarded, because that is
+        what tier() does with anything it has not been told about -- so this one
+        cannot be caught by writing to the pump, only by reading both files. The
+        seven hot water temperatures 40059-40065 were listed as a range here and
+        as four addresses in the code for exactly that reason.
+        """
+        self.assertEqual(set(safety.GUARDED), doc_addresses("## Guarded"))
 
 
 if __name__ == "__main__":

@@ -64,6 +64,22 @@ class AlarmTestCase(unittest.TestCase):
         return Watcher(store or self.store, FakePump(), config or {},
                        notifier=self.notifier if notifier is None else notifier)
 
+    def silent_watcher(self, config=None, store=None):
+        """A watcher with no notifier at all, as an unconfigured install has.
+
+        Built the way the app builds it -- no credentials in the config, so
+        make_notifier() returns None -- rather than by passing one in.
+        """
+        w = Watcher(store or self.store, FakePump(), config or {})
+        self.assertIsNone(w.notifier)
+        return w
+
+    def fresh_watcher(self, name: str):
+        """A watcher on its own empty database, for one case of a loop."""
+        store = Store(os.path.join(self.dir.name, "%s.db" % name))
+        self.addCleanup(store.close)
+        return Watcher(store, FakePump(), {}, notifier=FakeNotifier())
+
     def reopen(self):
         """Close and reopen everything, as a restart would."""
         self.store.close()
@@ -148,14 +164,38 @@ class TestEdgeTriggering(AlarmTestCase):
         self.assertEqual(w.poll(reading(163)), [])
 
     def test_class_one_flag_without_a_number(self):
+        # 32196 carries mappings in the register map, so registry.Register.decode
+        # hands back the mapped string and not 0/1 -- confirmed against the real
+        # pump, where /api/register/32196 answers "No alarm". int("Alarm") used
+        # to raise inside _current_codes and the whole fallback was dead code;
+        # the test passed because it fed the register a 1.
         w = self.watcher()
-        events = w.poll(reading(0, class1=1))
+        events = w.poll(reading(0, class1="Alarm"))
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["code"], 0)
         self.assertFalse(events[0]["known"])
         self.assertIn("32196", events[0]["text"])
         # And it clears like any other.
-        self.assertEqual([e["kind"] for e in w.poll(reading(0, class1=0))], ["clear"])
+        self.assertEqual([e["kind"] for e in w.poll(reading(0, class1="No alarm"))],
+                         ["clear"])
+
+    def test_the_flag_is_read_in_every_form_a_register_map_produces(self):
+        # A CSV exported from the pump has no mappings, so the same register
+        # arrives as a bare 0/1 there. Both have to work.
+        for i, raised in enumerate((1, "1", True, "Alarm", "ALARM", "larm")):
+            w = self.fresh_watcher("raised%d" % i)
+            self.assertEqual([e["kind"] for e in w.poll(reading(0, class1=raised))],
+                             ["alarm"], raised)
+        for i, clear in enumerate((0, "0", False, "No alarm", "no alarm",
+                                   "Inget larm", "")):
+            w = self.fresh_watcher("clear%d" % i)
+            self.assertEqual(w.poll(reading(0, class1=clear)), [], clear)
+
+    def test_a_word_nobody_knows_is_not_turned_into_an_alarm(self):
+        # Inventing an alarm out of a word we do not recognise would wake
+        # somebody at three in the morning with no code behind it.
+        w = self.watcher()
+        self.assertEqual(w.poll(reading(0, class1="Ukendt tilstand")), [])
 
 
 class TestClearTransition(AlarmTestCase):
@@ -356,6 +396,279 @@ class TestPushoverRequest(AlarmTestCase):
         self.assertEqual(fields["token"], "t" * 30)
         self.assertEqual(fields["user"], "u" * 30)
         self.assertEqual(fields["message"], "meddelande")
+
+
+class TestNothingToSendIsNotAQueue(AlarmTestCase):
+    """The evening somebody finally pastes their Pushover keys into config.yaml.
+
+    An event recorded while no notifier existed was never going to be sent. It
+    used to be recorded as pending anyway, which meant _trim kept the twenty
+    newest of them for ever and the first poll after configuring notifications
+    delivered twenty months-old pushes at once -- half at priority 2, which
+    repeats every five minutes until acknowledged.
+    """
+
+    def _flap(self, watcher, cycles):
+        at = 1000.0
+        for _ in range(cycles):
+            watcher.poll(reading(163), at)
+            at += 60
+            watcher.poll(reading(0), at)
+            at += 60
+        return at
+
+    def test_events_recorded_without_a_notifier_are_never_pending(self):
+        w = self.silent_watcher()     # explicit None: no notifier at all
+        self._flap(w, 15)
+        with self.store._lock, self.store._db as c:             # noqa: SLF001
+            pending = c.execute(
+                "SELECT COUNT(*) FROM alarm_events WHERE sent = 0").fetchone()[0]
+            total = c.execute("SELECT COUNT(*) FROM alarm_events").fetchone()[0]
+        self.assertEqual(pending, 0)
+        self.assertEqual(total, 30, "the history is kept either way")
+
+    def test_configuring_notifications_later_sends_nothing_historical(self):
+        w = self.silent_watcher()
+        at = self._flap(w, 15)
+        later = Watcher(self.store, FakePump(), {}, notifier=self.notifier)
+        later.poll(reading(0), at)
+        self.assertEqual(self.notifier.sent, [],
+                         "twenty historical pushes, ten of them at priority 2")
+
+    def test_and_the_log_is_not_filled_with_giving_up_on_them(self):
+        w = self.silent_watcher()
+        with self.assertLogs("nibelokal.alarms", level="WARNING") as logged:
+            self._flap(w, 15)
+        self.assertFalse([line for line in logged.output if "gave up" in line],
+                         "nothing was ever meant to be sent")
+
+    def test_the_next_real_alarm_still_goes_out(self):
+        w = self.silent_watcher()
+        at = self._flap(w, 15)
+        later = Watcher(self.store, FakePump(), {}, notifier=self.notifier)
+        later.poll(reading(0), at)
+        later.poll(reading(163), at + 60)
+        self.assertEqual(len(self.notifier.sent), 1)
+
+
+class TestDebounce(AlarmTestCase):
+    """A sensor right on the edge raises and clears on alternate polls."""
+
+    def _flap(self, watcher, cycles, step=60.0, start=1000.0):
+        at = start
+        for _ in range(cycles):
+            watcher.poll(reading(163), at)
+            at += step
+            watcher.poll(reading(0), at)
+            at += step
+        return at
+
+    def test_a_flapping_alarm_is_bounded_not_two_pushes_a_minute(self):
+        w = self.watcher()
+        end = self._flap(w, 100)          # 200 transitions over 3 h 20
+        hours = (end - 1000.0) / 3600.0
+        self.assertLess(len(self.notifier.sent), 20 * hours,
+                        "the flap guard is not holding")
+        self.assertGreater(len(self.notifier.sent), 0, "and it is not silence")
+
+    def test_the_first_news_is_never_delayed(self):
+        w = self.watcher()
+        w.poll(reading(163), 1000.0)
+        self.assertEqual(len(self.notifier.sent), 1)
+
+    def test_what_is_held_back_is_counted_in_the_next_message(self):
+        w = self.watcher({"alarm_debounce_seconds": 900})
+        self._flap(w, 20, start=1000.0)
+        # Past the burst the transitions are held, not dropped; the next
+        # message after the window rolls over says how many it stands for.
+        w.poll(reading(163), 1000.0 + 4000)
+        texts = " ".join(s["message"] for s in self.notifier.sent)
+        self.assertIn("växlat", texts)
+
+    def test_the_current_state_is_what_finally_goes_out(self):
+        w = self.watcher({"alarm_debounce_seconds": 600})
+        self._flap(w, 10, start=1000.0)
+        w.poll(reading(163), 1000.0 + 5000)
+        self.assertIn("larmar", self.notifier.sent[-1]["title"].lower())
+
+    def test_debounce_survives_a_restart(self):
+        # A pump that flaps is also a pump somebody power-cycles to fix it.
+        w = self.watcher({"alarm_debounce_seconds": 900})
+        self._flap(w, 10, start=1000.0)
+        spent = len(self.notifier.sent)
+        store = self.reopen()
+        notifier = FakeNotifier()
+        w2 = Watcher(store, FakePump(), {"alarm_debounce_seconds": 900},
+                     notifier=notifier)
+        self._flap(w2, 5, start=1000.0 + 1200)
+        self.assertGreater(spent, 0)
+        self.assertLessEqual(len(notifier.sent), alarms.NOTIFY_BURST,
+                             "a restart handed the flap a fresh allowance")
+
+    def test_a_debounce_of_zero_is_the_old_behaviour(self):
+        w = self.watcher({"alarm_debounce_seconds": 0})
+        self._flap(w, 3)
+        self.assertEqual(len(self.notifier.sent), 6)
+
+
+class TestRejectedConfiguration(AlarmTestCase):
+    """A wrong token used to be a log line while the page said notify: true."""
+
+    def test_a_rejected_send_is_remembered_in_swedish(self):
+        w = self.watcher()
+        self.notifier.fail_with = alarms.SendFailed(
+            "pushover HTTP 400", permanent=True,
+            user_sv="Pushover avvisade notisen (HTTP 400).")
+        w.poll(reading(163))
+        self.assertIsNotNone(w.notify_error)
+        self.assertIn("Pushover", w.notify_error)
+
+    def test_a_rate_limit_is_not_permanent(self):
+        # 429 is Pushover's quota and their burst limit. Both lift by
+        # themselves; treating them as permanent gives up on notifications for
+        # good over a counter that resets at the start of the month.
+        exc = self._http_error(429)
+        self.assertFalse(exc.permanent)
+        self.assertIn("429", exc.user_sv)
+
+    def test_a_wrong_token_is_permanent_and_says_which_keys_to_check(self):
+        for code in (400, 401, 403):
+            exc = self._http_error(code)
+            self.assertTrue(exc.permanent, code)
+            self.assertIn("pushover_token", exc.user_sv, code)
+
+    def test_a_request_timeout_is_retried(self):
+        self.assertFalse(self._http_error(408).permanent)
+
+    def test_a_server_error_is_retried(self):
+        self.assertFalse(self._http_error(500).permanent)
+
+    def _http_error(self, code):
+        import urllib.error
+        notifier = alarms.PushoverNotifier("t" * 30, "u" * 30)
+
+        def fake_urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(notifier.url, code, "no", {}, None)
+
+        original = alarms.urllib.request.urlopen
+        alarms.urllib.request.urlopen = fake_urlopen
+        try:
+            with self.assertRaises(alarms.SendFailed) as caught:
+                notifier.send("t", "m", 0)
+        finally:
+            alarms.urllib.request.urlopen = original
+        return caught.exception
+
+    def test_a_failing_notifier_is_cheap_after_the_first_failure(self):
+        # This runs in the polling thread, and on macOS a DNS lookup with no
+        # route out is not bounded by urlopen's timeout at all. The pump poll
+        # is what must not be delayed.
+        attempts = []
+
+        class Slow:
+            name = "slow"
+
+            def send(self, *_a, **_k):
+                attempts.append(1)
+                raise alarms.SendFailed("wan down")
+
+        w = self.watcher(notifier=Slow())
+        at = 1000.0
+        for _ in range(10):
+            w.poll(reading(163 if len(attempts) % 2 == 0 else 0), at)
+            at += 60
+        self.assertLess(len(attempts), 10, "every poll paid the timeout again")
+        self.assertGreater(len(attempts), 0)
+
+    def test_the_backoff_lets_go_once_it_works_again(self):
+        w = self.watcher()
+        self.notifier.fail_with = alarms.SendFailed("network down")
+        w.poll(reading(163), 1000.0)
+        self.notifier.fail_with = None
+        # Past the longest backoff, the pending notification goes out.
+        w.poll(reading(163), 1000.0 + max(alarms.SEND_BACKOFF) + 1)
+        self.assertEqual(len(self.notifier.sent), 1)
+        self.assertEqual(w._send_failures, 0)                   # noqa: SLF001
+
+
+class TestTestNotification(AlarmTestCase):
+    """The only other way to find out a token is wrong is to miss a real alarm."""
+
+    def test_without_credentials_it_says_what_to_configure(self):
+        w = self.silent_watcher()
+        result = w.send_test_notification()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["notify"])
+        self.assertIn("pushover_token", result["error"])
+
+    def test_a_working_notifier_sends_one_push_at_priority_zero(self):
+        w = self.watcher()
+        result = w.send_test_notification()
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["sent"])
+        self.assertEqual(len(self.notifier.sent), 1)
+        self.assertEqual(self.notifier.sent[0]["priority"], 0,
+                         "a test that repeats until acknowledged is a test "
+                         "nobody runs twice")
+        self.assertIn("test", self.notifier.sent[0]["message"].lower())
+
+    def test_a_rejected_test_reports_the_reason_and_remembers_it(self):
+        w = self.watcher()
+        self.notifier.fail_with = alarms.SendFailed(
+            "pushover HTTP 400", permanent=True, user_sv="Fel token.")
+        result = w.send_test_notification()
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["notify"])
+        self.assertEqual(result["error"], "Fel token.")
+        self.assertEqual(w.notify_error, "Fel token.")
+
+    def test_a_successful_test_clears_an_earlier_rejection(self):
+        w = self.watcher()
+        w.notify_error = "Fel token."
+        w._blocked_until = 1e12                                 # noqa: SLF001
+        self.assertTrue(w.send_test_notification()["ok"])
+        self.assertIsNone(w.notify_error)
+        self.assertEqual(w._blocked_until, 0.0)                 # noqa: SLF001
+
+    def test_a_notifier_that_explodes_is_still_an_answer(self):
+        class Exploding:
+            name = "boom"
+
+            def send(self, *_a, **_k):
+                raise RuntimeError("kaboom")
+
+        result = self.watcher(notifier=Exploding()).send_test_notification()
+        self.assertFalse(result["ok"])
+        self.assertIn("kaboom", result["error"])
+
+
+class TestClearWithoutARaise(AlarmTestCase):
+    """"Larmet borta (105)" about an alarm nobody was told about."""
+
+    def test_a_clear_is_not_pushed_when_the_alarm_never_was(self):
+        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+                             if e["severity"] == "info"))
+        w = self.watcher({"alarm_min_severity": "alarm"})
+        w.poll(reading(info_code))
+        w.poll(reading(0))
+        self.assertEqual(self.notifier.sent, [],
+                         "a message with no referent, arriving exactly when "
+                         "the severity filter was doing its job")
+
+    def test_but_the_events_are_both_in_the_history(self):
+        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+                             if e["severity"] == "info"))
+        w = self.watcher({"alarm_min_severity": "alarm"})
+        w.poll(reading(info_code))
+        w.poll(reading(0))
+        self.assertEqual([row["kind"] for row in w.history(10)], ["clear", "alarm"])
+
+    def test_a_clear_still_goes_out_when_the_alarm_did(self):
+        w = self.watcher()
+        w.poll(reading(163))
+        w.poll(reading(0))
+        self.assertEqual(len(self.notifier.sent), 2)
+        self.assertIn("borta", self.notifier.sent[1]["title"].lower())
 
 
 if __name__ == "__main__":

@@ -29,11 +29,13 @@ output trustworthy rather than merely confident:
   occupancy signal. During the day the house is heated by the sun, the oven and
   the people in it, and none of that is in the history. At night it is heated by
   the pump. Only night samples are evidence about the curve.
-* **One point per night.** A 60-second poller produces 1440 samples a day that
+* **One point per night.** The history arrives already averaged into hourly
+  buckets (`store.autotune_history`), which is still eight rows a night that
   are all the same measurement: the house has a thermal time constant of hours
   to days, so consecutive samples carry almost no new information. Fitting on
-  raw samples produces standard errors that are wrong by an order of magnitude
-  and a module that is sure of everything. Each night collapses to one point.
+  them as if they were independent produces standard errors that are wrong by
+  an order of magnitude and a module that is sure of everything. Each night
+  collapses to one point, whatever resolution it arrived at.
 * **Advisory only.** This module never writes. It returns a proposal for a human
   to approve, one step at a time, with how long to wait before judging it.
 
@@ -142,10 +144,16 @@ SLOPE_MIN_C_PER_C = 0.03
 SLOPE_DOMINANCE = 0.5
 
 # NIBE documents one offset step as about 2.5 C of supply temperature and about
-# 1 C indoors, "depending on your heating system". docs/registers.md records
-# 1.5 C of supply per step measured on this pump. Both numbers are used: 2.5 to
-# size a curve-point move (the conservative direction -- it asks for a smaller
-# move), and 1 C indoors per offset step to decide whether a step is warranted.
+# 1 C indoors, "depending on your heating system". Both numbers below come from
+# there: 2.5 sizes a curve-point move (the conservative direction -- a larger
+# degrees-per-step asks for a smaller move), and 1 C indoors per offset step
+# decides whether a step is warranted at all.
+#
+# An earlier six-minute measurement on one pump suggested 1.5 C of supply per
+# step and is deliberately not used: the appendix in docs/registers.md records
+# that the run was stopped while the value was still ramping, which makes 1.5 a
+# lower bound rather than a measurement. Nothing here is calibrated to one
+# house -- strangers run this against their own pumps.
 SUPPLY_C_PER_INDOOR_C = 2.5
 INDOOR_C_PER_OFFSET_STEP = 1.0
 
@@ -166,7 +174,7 @@ _T95 = {1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31,
         9: 2.26, 10: 2.23, 11: 2.20, 12: 2.18, 13: 2.16, 14: 2.14, 15: 2.13,
         16: 2.12, 17: 2.11, 18: 2.10, 19: 2.09, 20: 2.09, 21: 2.08, 22: 2.07,
         23: 2.07, 24: 2.06, 25: 2.06, 26: 2.06, 27: 2.05, 28: 2.05, 29: 2.05,
-        30: 2.04}
+        30: 2.04, 40: 2.02, 60: 2.00, 120: 1.98}
 
 # Strings a pump uses for "the compressor is busy with something that is not
 # heating". Matched case-insensitively as substrings, because the wording
@@ -583,8 +591,8 @@ def _offset_answer(res, f, settings, em, wait_hours, slope_identifiable):
                    "vilket är precis vad ett fel som är lika stort i alla väder "
                    "behöver.%s" % ("upp" if step > 0 else "ner", more)),
         "expected_sv": ("Framledningen ändras ungefär 2,5 °C vid alla "
-                        "utetemperaturer (uppmätt 1,5 °C på just den här pumpen) "
-                        "och inomhus ungefär %s °C. Beräknad framledning "
+                        "utetemperaturer enligt NIBE:s dokumentation, och "
+                        "inomhus ungefär %s °C. Beräknad framledning "
                         "(31018) rampar under cirka fem minuter efter "
                         "ändringen — läser du av den direkt mäter du rampen, "
                         "inte inställningen. Döm om huset efter %d timmar med "
@@ -865,7 +873,13 @@ def _as_sample(row):
                       indoor=_num(row.get("indoor")),
                       supply=_num(row.get("supply")),
                       degree_minutes=_num(row.get("degree_minutes", row.get("dm"))),
-                      compressor=row.get("compressor"))
+                      # Every state the bucket contained, when the source knows
+                      # them (store.autotune_history does). An hour that made
+                      # hot water for forty minutes and then heated is not
+                      # evidence about the heating curve, and its last state
+                      # alone cannot say so.
+                      compressor=(row.get("compressor_states")
+                                  or row.get("compressor")))
     if isinstance(row, (list, tuple)) and len(row) >= 2:
         vals = list(row) + [None] * (6 - len(row))
         ts = _num(vals[0])
@@ -891,9 +905,17 @@ def _in_range(v, bounds) -> bool:
 
 
 def _is_not_heating(state) -> bool:
+    """True when the compressor spent any of this sample on something else.
+
+    A sequence -- every state seen inside an hourly bucket -- is true if any
+    one of its states was not heating, which is what makes a bucket that
+    contains a hot-water run stop counting as evidence about the curve.
+    """
     if isinstance(state, str):
         low = state.lower()
         return any(word in low for word in _NOT_HEATING)
+    if isinstance(state, (list, tuple, set, frozenset)):
+        return any(_is_not_heating(one) for one in state)
     return False
 
 
@@ -933,9 +955,26 @@ def _sd(values, mean) -> float:
 
 
 def _t95(dof) -> float:
+    """The two-sided 95 % t value for `dof` degrees of freedom.
+
+    Between tabulated rows, and above the last one, the value for the largest
+    tabulated dof at or below `dof` is used -- t falls as dof grows, so that is
+    always the conservative direction. Falling straight to 1.96 (the dof =
+    infinity value) the moment the table ran out was not: at 31 nights the true
+    value is 2.04, and using 1.96 there overstates the evidence by 4 %, which
+    is exactly the wrong way round for a module whose whole job is to refuse to
+    claim more than it knows.
+    """
+    try:
+        dof = int(dof)
+    except (TypeError, ValueError):
+        return float("inf")
     if dof <= 0:
         return float("inf")
-    return _T95.get(dof, 1.96)
+    if dof in _T95:
+        return _T95[dof]
+    below = [d for d in _T95 if d < dof]
+    return _T95[max(below)] if below else float("inf")
 
 
 def _clamp(v, lo, hi) -> float:

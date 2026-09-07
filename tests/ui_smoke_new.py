@@ -9,6 +9,15 @@ svarar pa allt appen fragar efter och kan stallas i tre lagen:
     off    -- ingen integration konfigurerad (features=false + ok:false).
               Da ska ingenting av det nya synas alls -- varken fel eller
               tomma rutor -- utom tipset under Installningar.
+    curve  -- agarens riktiga kurva: P1-P3 alla 45, P7 under min framledning,
+              offset -1. Flat kallande och en punkt under golvet ska synas i
+              bilden av kurvan.
+    unreach -- allt konfigurerat men ingen integration svarar (Homey 502,
+              SMHI/Tibber/larm ok:false). Kortet ska saga vad som ar fel.
+    slow   -- servern svarar, men langsamt. Skelettet ska sta kvar tills
+              svaret kommer, och ingenting far krascha under tiden.
+    heat502 -- /api/heating svarar 502. Varmefliken ska saga att pumpen inte
+              gar att lasa, inte sta kvar med streck.
 
 Kor allt (startar servern sjalv, tar skarmbilder i _shots/):
 
@@ -65,6 +74,9 @@ REGISTERS = [
     (31535, "Compressor starts", "", 9741),
     (31975, "Fan speed", "%", 30),
     (31976, "Alarm number", "", None),   # satts av lage
+    (32196, "Class 1 alarm", "", 0),     # pump.py lade till den i DASHBOARD
+    (31029, "Priority", "", "Heating"),  # och den har -- bada ska heta nagot
+                                         # svenskt i listan "Alla avlasta varden"
     (32134, "Exhaust air fan", "%", 30),
     (40012, "Degree minutes", "GM", -142),
     (40031, "Heat offset", "", 2),
@@ -83,6 +95,14 @@ SETTING_VALUES = {
     40203: 0, 40207: 21, 40211: 2,
     40020: -1, 40228: 0, 40229: 24, 40012: -142, 40182: 1,
 }
+# Uppmatt pa agarens egen S735. P1-P3 ar alla 45: kurvan ar platt fran -30 till
+# -10 fast taket ligger pa 58, och P7 (15) ligger under min framledning (26).
+OWNER_VALUES = {
+    40027: 0, 40031: -1, 40046: 45, 40045: 45, 40044: 45, 40043: 37, 40042: 33,
+    40041: 23, 40040: 15, 40047: -2, 40048: 3,
+    40035: 26, 40039: 58, 40185: 23,
+}
+
 SETTING_UNITS = {40031: "", 40035: "°C", 40039: "°C", 40185: "°C", 40103: "kW",
                  40207: "°C", 40229: "°C", 40012: "GM", 40094: "min", 40067: "dygn"}
 SETTING_OPTIONS = {
@@ -98,20 +118,23 @@ def hour_iso(dt: datetime) -> str:
     return dt.replace(minute=0, second=0, microsecond=0).astimezone().isoformat()
 
 
-def build_settings() -> list:
+def build_settings(mode: str = "full") -> list:
+    values = dict(SETTING_VALUES)
+    if mode == "curve":
+        values.update(OWNER_VALUES)
     out = []
     for g in nsettings.GROUPS:
         rows = []
         for address, label, why in g["registers"]:
-            if address not in SETTING_VALUES:
+            if address not in values:
                 continue
             rows.append({
                 "address": address,
                 "label": label,
                 "why": why,
-                "value": SETTING_VALUES[address],
+                "value": values[address],
                 "unit": SETTING_UNITS.get(address, "°C" if 40040 <= address <= 40048 else ""),
-                "min": 0 if address not in (40031, 40020, 40012) else -10,
+                "min": 0 if address not in (40031, 40020, 40012, 40047, 40048) else -10,
                 "max": 100 if address != 40012 else 3000,
                 "default": None,
                 "options": SETTING_OPTIONS.get(address),
@@ -136,7 +159,18 @@ def history(address: int, hours: int) -> list:
 # --------------------------------------------------------------------------
 # pahittad integrationsdata
 # --------------------------------------------------------------------------
+UNREACH = {
+    "indoor": "Homey svarade inte inom 5 sekunder (192.168.1.20).",
+    "weather": "SMHI svarade 503. Ingen prognos hamtad an.",
+    "spot": "Tibber svarade inte: namnuppslagningen misslyckades.",
+    "alarms": "Larmbevakningen kunde inte lasa larmregistret.",
+    "autotune": "Kalibreringen kunde inte lasa historiken.",
+}
+
+
 def indoor(mode: str) -> dict:
+    if mode == "unreach":
+        return {"ok": False, "error": UNREACH["indoor"]}
     if mode == "off":
         return {"ok": False, "error": "Homey är inte konfigurerad (homey_host saknas i config.yaml)."}
     sensors = [
@@ -164,6 +198,8 @@ def indoor(mode: str) -> dict:
 
 
 def weather(mode: str) -> dict:
+    if mode == "unreach":
+        return {"ok": False, "error": UNREACH["weather"]}
     if mode == "off":
         return {"ok": False, "error": "Ingen plats angiven — sätt weather_lat och weather_lon i config.yaml."}
     start = datetime.now().replace(minute=0, second=0, microsecond=0)
@@ -209,6 +245,10 @@ def weather(mode: str) -> dict:
 
 
 def spot(mode: str) -> dict:
+    if mode == "unreach":
+        return {"ok": False, "error": UNREACH["spot"],
+                "prices": {"ok": False, "error": UNREACH["spot"]},
+                "plan": {"ok": False, "error": "Utan priser finns ingen plan."}}
     if mode == "off":
         return {"prices": {"ok": False,
                            "error": "Ingen Tibber-token i config.yaml, så priserna kan inte hämtas."},
@@ -270,6 +310,8 @@ def spot(mode: str) -> dict:
 
 
 def alarms(mode: str) -> dict:
+    if mode == "unreach":
+        return {"ok": False, "error": UNREACH["alarms"]}
     if mode == "off":
         return {"ok": False, "error": "Larmbevakningen är inte påslagen i config.yaml."}
     hist = [
@@ -284,8 +326,15 @@ def alarms(mode: str) -> dict:
          "since": int(NOW - 86400 * 40)},
     ]
     if mode == "quiet":
+        # Nycklarna finns, men Pushover avvisade dem: "notiser på" och "notiserna
+        # når inte fram" är båda sanna samtidigt, och appen ska säga båda.
+        return {"active": [], "history": hist, "notify": True,
+                "notify_error": "Pushover avvisade token (401). Kontrollera "
+                                "pushover_token och pushover_user.",
+                "last_error": None}
+    if mode != "full":
         return {"active": [], "history": hist, "notify": False,
-                "last_error": "Pushover svarade 401 vid senaste försöket."}
+                "notify_error": None, "last_error": None}
     return {
         "active": [
             {"code": 175, "text": "Kompressorn blockerad av högt kondensortryck", "severity": "alarm",
@@ -296,11 +345,13 @@ def alarms(mode: str) -> dict:
              "action": "Kontrollera kabeln till rumsenheten. Värmen påverkas inte.",
              "known": True, "since": int(NOW - 3600 * 30)},
         ],
-        "history": hist, "notify": True, "last_error": None,
+        "history": hist, "notify": True, "notify_error": None, "last_error": None,
     }
 
 
 def autotune(mode: str) -> dict:
+    if mode == "unreach":
+        return {"ok": False, "error": UNREACH["autotune"]}
     if mode == "off":
         return {"ok": False, "error": "Kalibreringen är avstängd i config.yaml."}
     if mode == "quiet":
@@ -342,6 +393,9 @@ def autotune(mode: str) -> dict:
 # --------------------------------------------------------------------------
 class Stub(SimpleHTTPRequestHandler):
     mode = "full"
+    #: Sekunder att sova innan varje svar. "slow" satter den; da ska appen visa
+    #: skelett och inte krascha, i stallet for att blinka fram tomma kort.
+    delay = 0.0
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -350,6 +404,8 @@ class Stub(SimpleHTTPRequestHandler):
         pass
 
     def _json(self, obj, status=200):
+        if self.delay:
+            time.sleep(self.delay)
         body = json.dumps(obj).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -373,6 +429,11 @@ class Stub(SimpleHTTPRequestHandler):
         if route.path == "/api/ventilation":
             return self._json({"mode": body.get("mode", 0), "percent": 55,
                                "normal_percent": 30, "hours": body.get("hours", 3)})
+        if route.path == "/api/alarms/test":
+            if self.mode == "quiet":
+                return self._json({"ok": False, "sent": False, "notify": True,
+                                   "error": "Pushover avvisade token (401)."})
+            return self._json({"ok": True, "sent": True, "notify": True})
         if route.path == "/api/backup":
             return self._json({"name": "backup-stub.json"})
         return self._json({"error": "not found"}, 404)
@@ -383,6 +444,8 @@ class Stub(SimpleHTTPRequestHandler):
         if not path.startswith("/api/"):
             return super().do_GET()
         m = self.mode
+        # "unreach" ar konfigurerat men nabart av ingenting: features ar sanna,
+        # svaren ar ok:false. Det ar skillnaden mellan avstangt och trasigt.
         on = m not in ("off", "fallback")
 
         if path == "/api/status":
@@ -413,6 +476,29 @@ class Stub(SimpleHTTPRequestHandler):
                     for a, t, u, v in REGISTERS],
             })
         if path == "/api/heating":
+            if m == "heat502":
+                return self._json({"error": "Pumpen svarar inte pa 192.168.1.40:502 "
+                                            "(anslutningen nekades)."}, 502)
+            if m == "curve":
+                return self._json({
+                    "curve": 0, "offset": -1, "min_supply": 26, "max_supply": 58,
+                    "room_setpoint": 21, "room_temp": None, "outdoor": -4.2, "supply": 38.4,
+                    "return": 33.1, "degree_minutes": -142, "additional_heat_kw": 0.0,
+                    "calculated_supply": 45.0, "priority": "V\u00e4rme",
+                    "own_curve": [45, 45, 45, 37, 33, 23, 15],
+                    "has_room_sensor": False, "uses_own_curve": True,
+                    "emitters": "radiators", "emitters_name": "radiatorer",
+                    "wait": "ett dygn",
+                    "warnings": [
+                        "Ingen rumsgivare svarar (BT50). Rumsb\u00f6rv\u00e4rdet går att skriva men "
+                        "pumpen har inget att reglera mot.",
+                    ],
+                    "observations": [
+                        "Kurvan står på 0, vilket betyder egen kurva: pumpen f\u00f6ljer dina egna "
+                        "punkter (\u221230 \u00b0C ute \u2192 45 \u00b0C fram, \u221220 \u2192 45, \u221210 \u2192 45, 0 \u2192 37, "
+                        "+10 \u2192 33) i st\u00e4llet f\u00f6r en av de numrerade kurvorna.",
+                    ],
+                })
             return self._json({
                 "curve": 0, "offset": 2, "min_supply": 20, "max_supply": 55,
                 "room_setpoint": 21, "room_temp": None, "outdoor": -4.2, "supply": 38.4,
@@ -437,6 +523,25 @@ class Stub(SimpleHTTPRequestHandler):
                 ],
             })
         if path == "/api/advice":
+            if m == "curve" and q.get("when", ["always"])[0] == "cold_outside":
+                return self._json({
+                    "observations": [],
+                    "warnings": [],
+                    "suggestions": [
+                        {"address": 40044, "title": "Egen kurva, punkt P3 (\u221210 \u00b0C ute)",
+                         "current": 45, "proposed": 47, "unit": "\u00b0C", "group": "own_curve",
+                         "why": "Du k\u00f6r egen kurva, så det \u00e4r punkterna som formar den. P3 \u00e4r "
+                                "punkten f\u00f6r \u221210 \u00b0C ute, alltså den som g\u00e4ller n\u00e4r det \u00e4r kallt. "
+                                "2 grader framledning d\u00e4r \u00e4ndrar v\u00e4rmen i just det v\u00e4dret, utan "
+                                "att r\u00f6ra resten av kurvan.",
+                         "confirm_required": True},
+                        {"address": 40043, "title": "Egen kurva, punkt P4 (+0 \u00b0C ute)",
+                         "current": 37, "proposed": 39, "unit": "\u00b0C", "group": "own_curve",
+                         "why": "P4 \u00e4r den andra punkten som br\u00e4ckar dagens utetemperatur.",
+                         "confirm_required": True},
+                    ],
+                    "blocked": "", "wait": "ett dygn",
+                })
             return self._json({
                 "observations": [],
                 "warnings": ["Ingen rumsgivare, så förslaget bygger på kurvan och din egen känsla."],
@@ -448,7 +553,7 @@ class Stub(SimpleHTTPRequestHandler):
                 "blocked": "", "wait": "ett dygn",
             })
         if path == "/api/settings":
-            return self._json({"groups": build_settings()})
+            return self._json({"groups": build_settings(m)})
         if path == "/api/fan":
             return self._json({"speeds": {"0": 30, "1": 0, "2": 40, "3": 55, "4": 70}})
         if path == "/api/history":
@@ -471,6 +576,8 @@ class Stub(SimpleHTTPRequestHandler):
                 "auto": True, "auto_every_hours": 24,
             })
         if path == "/api/indoor":
+            if m == "unreach":
+                return self._json(indoor(m), 502)
             return self._json(indoor(m))
         if path == "/api/weather":
             return self._json(weather(m))
@@ -491,8 +598,8 @@ def free_port() -> int:
     return port
 
 
-def start(mode: str, port: int) -> ThreadingHTTPServer:
-    handler = type("StubMode", (Stub,), {"mode": mode})
+def start(mode: str, port: int, delay: float = 0.0) -> ThreadingHTTPServer:
+    handler = type("StubMode", (Stub,), {"mode": mode, "delay": delay})
     srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
@@ -510,8 +617,11 @@ def check(ok, msg):
         fel.append(msg)
 
 
-TABS = [("now", "Just nu"), ("heat", "Värme"), ("water", "Varmvatten"),
-        ("air", "Ventilation"), ("hist", "Historik")]
+# Flikens namn och vyns rubrik ar samma ord. Elpriset har en egen flik nar det
+# ar konfigurerat och ar borta nar det inte ar det, sa antalet flikar ar 4 eller
+# 5 -- inte alltid 5.
+TABS = [("now", "Just nu"), ("heat", "Värme"), ("price", "Elpris"),
+        ("water", "Vatten & luft"), ("hist", "Historik")]
 
 
 def shoot(page, out: pathlib.Path, name: str):
@@ -519,24 +629,60 @@ def shoot(page, out: pathlib.Path, name: str):
     page.screenshot(path=str(out / (name + ".png")), full_page=True)
 
 
+def visible_tabs(page):
+    return [b for b in page.locator("nav button").all() if b.is_visible()]
+
+
 def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     print("\n=== %s / %s ===" % (mode, label))
     page.goto(url, wait_until="networkidle")
-    page.wait_for_timeout(2200)
+    page.wait_for_timeout(2400)
 
-    check(page.locator("nav button").count() == 5, "fem flikar kvar i navigeringen")
+    want = 4 if mode in ("off", "fallback") else 5
+    check(len(visible_tabs(page)) == want,
+          "%d flikar i navigeringen (%d)" % (want, len(visible_tabs(page))))
 
     for name, heading in TABS:
-        page.locator('nav button[data-view="%s"]' % name).click()
+        tab = page.locator('nav button[data-view="%s"]' % name)
+        if not tab.is_visible():
+            check(name == "price" and mode in ("off", "fallback"),
+                  "fliken %s ar dold" % name)
+            continue
+        tab.click()
         page.wait_for_timeout(900)
         check(page.locator("#v-" + name).is_visible()
               and page.locator("#viewTitle").inner_text() == heading,
-              "fliken %s" % name)
+              "fliken %s heter samma sak som vyn" % name)
         shoot(page, out, "%s-%s-%s" % (mode, label, name))
 
     page.locator("#goSettings").click()
     page.wait_for_timeout(2500)
+    check(page.locator("#viewTitle").inner_text() == "Inställningar", "instaellningsvyn")
     shoot(page, out, "%s-%s-set" % (mode, label))
+
+    # -- avancerat: kurvan som bild, bakom en hopfalld lucka ---------------
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(1800)
+    check(page.locator("#advCard").is_visible(), "avancerat-kortet finns pa Varme")
+    check(not page.locator("#advBox").evaluate("e => e.open"),
+          "avancerat ar hopfallt fran start")
+    check(not page.locator("#advBody .ptrow").first.is_visible(),
+          "punkterna syns inte forran man oppnar")
+    page.locator("#advSum").click()
+    page.wait_for_timeout(700)
+    pts = page.locator('#advBody .ptrow[data-pt]').count()
+    check(pts == 7, "sju punkter i listan (%d)" % pts)
+    check(page.locator("#curveChart").count() == 1, "kurvan ritas som bild")
+    check(page.locator("#curveChart .lim").count() == 2,
+          "min och max framledning ritas som golv och tak")
+    adv = page.locator("#advBody").inner_text()
+    check("40044" in adv, "registernumret star kvar, men nedtonat")
+    check("minusgrader" in adv, "punkterna forklaras i vader, inte i register")
+    shoot(page, out, "%s-%s-avancerat" % (mode, label))
+    over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+    check(over <= 1, "ingen horisontell scroll med avancerat oppet (%d px)" % over)
+    page.locator("#advSum").click()
+    page.wait_for_timeout(300)
 
     page.locator('nav button[data-view="now"]').click()
     page.wait_for_timeout(700)
@@ -548,95 +694,156 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
             check(not vis(sel), "%s renderas inte alls" % sel)
         page.locator("#goSettings").click()
         page.wait_for_timeout(1200)
-        check(vis("#featHint"), "tipset om config.yaml finns under Inställningar")
+        check(vis("#featHint"), "tipset om config.yaml finns under Installningar")
         txt = page.locator("#featHintList").inner_text()
         check("homey_host" in txt and "tibber_token" in txt and "weather_lat" in txt,
               "tipset namnger nycklarna")
+        check('homey_devices: "Sovrum, Vardagsrum"' in txt,
+              "homey_devices star som strang, precis som config.example.yaml vill ha den")
+        check("autotune_target_indoor" in txt,
+              "kalibreringstipset sager vad som faktiskt behover fyllas i")
+        check("Inget att fylla i" not in txt,
+              "tipset lovar inte att kalibreringen slar pa sig sjalv")
         check(page.locator("#featHint .cfg").count() >= 3, "nycklarna visas som kod")
+        over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        check(over <= 1, "ingen horisontell scroll (%d px over)" % over)
+        return
+
+    check(not vis("#featHint"), "inget config-tips nar allt som gar att sla pa ar paslaget")
+    check(vis("#indoorCard"), "inomhuskortet syns")
+    zones = page.locator("#indoorBody .zone").count()
+    check(zones >= 1, "inomhustemperatur per vaning (%d)" % zones)
+    hero = page.locator("#heroKey").inner_text().strip().lower()
+    check(hero == "inne", "hjalten pa Just nu ar husets temperatur, inte varmvattnet (%r)" % hero)
+    check("Larm" not in page.locator("#heroSide").inner_text(),
+          "ingen 'Larm 0'-rad i hjalten")
+    page.locator("#indoorBody details summary").click()
+    page.wait_for_timeout(350)
+    dim = page.locator("#indoorBody tr.dim").count()
+    check(page.locator("#indoorBody tr").count() >= 4 and dim >= 1,
+          "givarlistan visar aven tysta givare (%d graa)" % dim)
+    check("inaktuell" not in page.locator("#indoorBody").inner_text(),
+          "en givare ar inte 'inaktuell', den har inte svarat")
+    shoot(page, out, "%s-%s-now-sensorer" % (mode, label))
+
+    check(vis("#weatherCard"), "vaderkortet syns")
+    check(page.locator("#wxChart path.ln").count() == 1, "timprognosen ritas som kurva")
+    check(page.locator("#weatherBody .day").count() >= 3, "dygnsprognos i rutor")
+    wx = page.locator("#weatherBody").inner_text()
+    check("48 h" not in wx and "-" not in wx.replace("−", ""),
+          "inga engelska minustecken eller '48 h' i vaderkortet")
+    check("i dag" in wx or "i morgon" in wx, "tidsaxeln sager vilken dag")
+    low = page.locator("#weatherBody .metric .n").first.inner_text()
+    check(low not in ("", "–"), "kommande lagsta temperatur visas: %r" % low)
+
+    # -- larmet ska synas pa varje flik, inte bara pa Just nu --------------
+    if mode == "full":
+        check(vis("#alarmBanner"), "aktivt larm pa Just nu")
+        n = page.locator("#alarmBanner .alarmcard").count()
+        sev = page.locator("#alarmBanner .alarmcard.sev-warning").count()
+        check(n == 2 and sev == 1, "larmen fargade efter allvar (%d st, %d varning)" % (n, sev))
+        check("Kontrollera" in page.locator("#alarmBanner").inner_text(),
+              "foreslagen atgard star i larmet")
+        check(page.locator("#alarmBanner .hint").count() == 1,
+              "aterstallningsforklaringen star en gang, inte en gang per larm")
+        for tab in ("heat", "water", "hist"):
+            page.locator('nav button[data-view="%s"]' % tab).click()
+            page.wait_for_timeout(500)
+            check(vis("#alarmBanner"), "larmet syns aven pa fliken %s" % tab)
+            check("larm" in page.locator("#freshness").inner_text().lower(),
+                  "rubrikraden sager larm pa %s, inte 'live'" % tab)
+        page.locator('nav button[data-view="now"]').click()
+        page.wait_for_timeout(600)
     else:
-        check(not vis("#featHint"), "inget config-tips när allt som går att slå på är påslaget"
-              if mode == "full" else "tipset syns bara för det som saknas")
-        check(vis("#indoorCard"), "inomhuskortet syns")
-        zones = page.locator("#indoorBody .zone").count()
-        check(zones >= 1, "inomhustemperatur per våning (%d)" % zones)
-        page.locator("#indoorBody details summary").click()
-        page.wait_for_timeout(350)
-        dim = page.locator("#indoorBody tr.dim").count()
-        check(page.locator("#indoorBody tr").count() >= 4 and dim >= 1,
-              "givarlistan visar även inaktuella givare (%d gråa)" % dim)
-        shoot(page, out, "%s-%s-now-sensorer" % (mode, label))
+        check(not vis("#alarmBanner"), "ingen larmruta nar inget larmar")
+    check(vis("#alarmHistWrap"), "larmhistoriken finns bakom en knapp")
+    page.locator("#alarmHistSum").click()
+    page.wait_for_timeout(400)
+    hist_txt = page.locator("#alarmHistWrap").inner_text()
+    # "information" innehaller "info", sa leta efter de engelska orden som de star.
+    check("warning" not in hist_txt and "severity" not in hist_txt,
+          "inga engelska allvarsgrader i larmhistoriken")
+    # Tre rader i historiken: varning, information, varning. Allvarsgraden ska
+    # sta en gang per rad, inte tva (den stod forr bade i undertexten och i
+    # kolumnen, och pa engelska bada gangerna).
+    check(hist_txt.count("varning") == 2 and hist_txt.count("information") == 1,
+          "allvarsgraden star pa svenska, en gang per rad (%d/%d)"
+          % (hist_txt.count("varning"), hist_txt.count("information")))
+    check(page.locator("#alarmTest").count() == 1, "det gar att prova larmnotisen")
+    if mode == "quiet":
+        check("når inte fram" in hist_txt or "avvisade" in hist_txt,
+              "en avvisad pushover-nyckel syns i appen, inte bara i loggen")
+    page.locator("#alarmHistSum").click()
+    page.wait_for_timeout(300)
+    check(page.locator("#alarmBanner button").count() == 0,
+          "ingen aterstall-larm-knapp finns")
 
-        check(vis("#weatherCard"), "väderkortet syns")
-        check(page.locator("#wxChart path.ln").count() == 1, "timprognosen ritas som kurva")
-        check(page.locator("#weatherBody .day").count() >= 3, "dygnsprognos i rutor")
-        low = page.locator("#weatherBody .metric .n").first.inner_text()
-        check(low not in ("", "–"), "kommande lägsta temperatur visas: %r" % low)
+    # -- elpriset: en genvag med tydlig knapp, och en egen flik ------------
+    check(page.locator("#priceStrip button").count() == 1, "elprisgenvag pa Just nu")
+    strip = page.locator("#priceStrip").inner_text()
+    check("kr/kWh" in strip, "genvagen visar samma enhet som kortet: %r" % strip.replace("\n", " "))
+    page.locator("#priceStrip button").click()
+    page.wait_for_timeout(1200)
+    check(page.locator("#v-price").is_visible(), "genvagen leder till elprisfliken")
 
-        if mode == "full":
-            check(vis("#alarmBanner"), "aktivt larm högst upp på Just nu")
-            n = page.locator("#alarmBanner .alarm").count()
-            sev = page.locator("#alarmBanner .alarm.sev-warning").count()
-            check(n == 2 and sev == 1, "larmen färgade efter allvar (%d st, %d varning)" % (n, sev))
-            check("Kontrollera" in page.locator("#alarmBanner").inner_text(),
-                  "föreslagen åtgärd står i larmet")
-        else:
-            check(not vis("#alarmBanner"), "ingen larmruta när inget larmar")
-        check(vis("#alarmHistWrap"), "larmhistoriken finns bakom en knapp")
-        check(page.locator("#alarmBanner button").count() == 0,
-              "ingen återställ-larm-knapp finns")
+    check(vis("#spotCard"), "elpriskortet pa sin egen flik")
+    bars = page.locator("#spotBody .bars rect").count()
+    check(bars >= 24, "timpriserna ritas som staplar (%d rektanglar)" % bars)
+    check(page.locator("#spotBody .barwrap .yax span").count() == 3,
+          "staplarna har en y-axel att lasa av")
+    txt = page.locator("#spotBody").inner_text()
+    if mode in ("full", "curve", "slow", "heat502"):
+        check(txt.count("gör ingenting av det här själv") == 1,
+              "planen sager en gang att appen inte agerar sjalv")
+        rows = page.locator("#spotBody .planrow").count()
+        check(rows >= 2, "planen listar timmar (%d rader)" % rows)
+        check("summerar till noll" in txt, "planen forklarar att dygnet summerar till noll")
+        check("Summan per dygn" not in txt, "och sager det bara en gang")
+        two = page.evaluate("""() => {
+          renderSpot({prices: {ok: true, currency: 'SEK', now: {total: 1, band: 'dyr'},
+            hours: [], stats: {}},
+            plan: {ok: true, advisory: true, hours: [
+              {starts_at: '2026-01-01T02:00:00+01:00', offset_delta: 2, why: 'billigt'},
+              {starts_at: '2026-01-01T18:00:00+01:00', offset_delta: -2, why: 'dyrt'}],
+              days: [{day: '2026-01-01', net: 0}]}});
+          return [...document.querySelectorAll('#spotBody .delta')].map(e => e.textContent);
+        }""")
+        check(two == ["+2", "−2"], "planen visar hela steget, inte alltid ±1 (%s)" % two)
+        page.reload(wait_until="networkidle")
+        page.wait_for_timeout(2000)
+        page.locator('nav button[data-view="price"]').click()
+        page.wait_for_timeout(1200)
+        check(page.locator("#spotBody .bars rect.nowcol").count() == 1, "nu-timmen markerad")
+        check(page.locator("#spotBody .bars rect.split").count() == 1, "imorgon avdelad")
+    else:
+        check(rows_flat(page), "platt dygn forklaras i stallet for att visa en plan")
+        check("gör ingenting av det här själv" not in txt,
+              "ingen varning om att appen inte agerar nar det inte finns nagon plan")
 
-        check(page.locator("#priceTile").count() == 1, "elpriskakel på Just nu")
-
-        page.locator('nav button[data-view="heat"]').click()
-        page.wait_for_timeout(1600)
-        check(vis("#spotCard"), "elpriskortet på Värme")
-        bars = page.locator("#spotBody .bars rect").count()
-        check(bars >= 24, "timpriserna ritas som staplar (%d rektanglar)" % bars)
-        txt = page.locator("#spotBody").inner_text()
-        if mode == "full":
-            check("gör ingenting av det här själv" in txt,
-                  "planen säger att appen inte agerar själv")
-            rows = page.locator("#spotBody .planrow").count()
-            check(rows >= 2, "planen listar timmar (%d rader)" % rows)
-            check("±0" in txt and "Summan" in txt,
-                  "planen förklarar att dygnet summerar till noll")
-            # spot_max_offset far vara 2. Da ska chippet sta +2, inte +1.
-            two = page.evaluate("""() => {
-              renderSpot({prices: {ok: true, currency: 'SEK', now: {total: 1, band: 'dyr'},
-                hours: [], stats: {}},
-                plan: {ok: true, advisory: true, hours: [
-                  {starts_at: '2026-01-01T02:00:00+01:00', offset_delta: 2, why: 'billigt'},
-                  {starts_at: '2026-01-01T18:00:00+01:00', offset_delta: -2, why: 'dyrt'}],
-                  days: [{day: '2026-01-01', net: 0}]}});
-              return [...document.querySelectorAll('#spotBody .delta')].map(e => e.textContent);
-            }""")
-            check(two == ["+2", "\u22122"], "planen visar hela steget, inte alltid ±1 (%s)" % two)
-            page.reload(wait_until="networkidle")
-            page.wait_for_timeout(1800)
-            check(page.locator("#spotBody .bars rect.nowcol").count() == 1, "nu-timmen markerad")
-            check(page.locator("#spotBody .bars rect.split").count() == 1, "imorgon avdelad")
-        else:
-            check(rows_flat(page), "platt dygn förklaras i stället för att visa en plan")
-            check("gör ingenting av det här själv" not in txt,
-                  "ingen varning om att appen inte agerar när det inte finns någon plan")
-
-        check(vis("#tuneCard"), "kalibreringskortet på Värme")
-        ttxt = page.locator("#tuneBody").inner_text()
-        if mode == "full":
-            check(page.locator("#tuneGo").count() == 1, "förslaget har en knapp")
-            check("40031" in ttxt and "36" in ttxt, "förslaget visar register och väntetid")
-        else:
-            check(page.locator("#tuneGo").count() == 0, "inget förslag när underlaget inte räcker")
-            check(page.locator("#tuneBody ul.miss li").count() >= 2, "det som saknas listas")
-        shoot(page, out, "%s-%s-heat-nedre" % (mode, label))
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(1600)
+    check(vis("#tuneCard"), "kalibreringskortet pa Varme")
+    ttxt = page.locator("#tuneBody").inner_text()
+    if mode == "quiet":
+        check(page.locator("#tuneGo").count() == 0, "inget forslag nar underlaget inte racker")
+        check(page.locator("#tuneBody ul.miss li").count() >= 2, "det som saknas listas")
+    else:
+        check(page.locator("#tuneGo").count() == 1, "forslaget har en knapp")
+        check("40031" in ttxt and "Värmeoffset" in ttxt,
+              "forslaget namnger reglaget och registret")
+        check("Register 40031:" not in ttxt,
+              "forslaget kallar det Varmeoffset, inte 'Register 40031'")
+    check("-0.6" not in ttxt and "+0.02" not in ttxt,
+          "inga engelska decimalpunkter i kalibreringskortet")
+    shoot(page, out, "%s-%s-heat-nedre" % (mode, label))
 
     over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
-    check(over <= 1, "ingen horisontell scroll (%d px över)" % over)
+    check(over <= 1, "ingen horisontell scroll (%d px over)" % over)
 
 
 def rows_flat(page):
-    return "för jämnt" in page.locator("#spotBody").inner_text() \
-        or "för lite" in page.locator("#spotBody").inner_text()
+    t = page.locator("#spotBody").inner_text()
+    return "för jämnt" in t or "för lite" in t or "för liten" in t
 
 
 def register_fallback(page, url):
@@ -644,40 +851,170 @@ def register_fallback(page, url):
     gamla, samre rutan visas anda -- ett larm ar viktigare an snyggheten."""
     print("\n=== larm utan larmbevakning ===")
     page.goto(url, wait_until="networkidle")
-    page.wait_for_timeout(2200)
-    check(page.locator("#alarmBanner").is_visible(), "registerlarmet visas ändå")
+    page.wait_for_timeout(2400)
+    check(page.locator("#alarmBanner").is_visible(), "registerlarmet visas anda")
     txt = page.locator("#alarmBanner").inner_text()
-    check("175" in txt, "larmnumret står i rutan: %r" % txt[:60])
+    check("175" in txt, "larmnumret star i rutan: %r" % txt[:60])
     check(not page.locator("#alarmHistWrap").is_visible(), "ingen larmhistorik utan bevakning")
     check(not page.locator("#indoorCard").is_visible(), "inget annat nytt renderas")
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(800)
+    check(page.locator("#alarmBanner").is_visible(), "och det foljer med till Varme")
+
+
+def owner_curve(page, url, out):
+    """Agarens egen kurva: P1-P3 alla 45, P7 under min framledning."""
+    print("\n=== agarens kurva ===")
+    page.goto(url + "#heat", wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    page.locator("#advSum").click()
+    page.wait_for_timeout(700)
+    body = page.locator("#advBody").inner_text()
+    check("P1–P3 ligger alla på 45" in body,
+          "den flata kalla anden pekas ut: %r" % body[body.find("P1–P3"):][:80])
+    check("58" in body, "och taket namns, sa att man ser att det inte ar taket som haller nere den")
+    check("under min framledning" in body, "P7 under golvet pekas ut")
+    check(page.locator("#curveChart path.raw").count() == 1,
+          "det pumpen faktiskt skickar ut ritas streckat nar en punkt ligger utanfor")
+    check("−1" in page.locator("#offsetNow").inner_text(), "offset -1 med riktigt minustecken")
+    shoot(page, out, "curve-avancerat-oppet")
+
+    # radgivaren pekar ut punkten, och punkten ritas i kurvan
+    page.locator('#whenTabs [data-when="cold_outside"]').click()
+    page.locator("#adviceGo").click()
+    page.wait_for_timeout(2500)
+    check(page.locator("#adviceOut .prop").count() == 1,
+          "de tva punkterna ligger i ett forslag med en knapp")
+    check(page.locator("#adviceOut [data-group]").count() == 1, "en knapp, inte tva")
+    check(page.locator("#curveChart circle.ghost").count() == 2,
+          "forslaget ritas som spoken i kurvan")
+    advtxt = page.locator("#advBody").inner_text()
+    check("Rådet just nu gäller den här kurvan" in advtxt,
+          "avancerat speglar radet, utan en andra knapp")
+    check(page.locator("#advBody button.primary").count() == 0,
+          "ingen andra genomfor-knapp i avancerat")
+    shoot(page, out, "curve-rad-i-kurvan")
+
+    # och skrivningen gar genom samma ruta som allt annat
+    page.locator("#adviceOut [data-group]").click()
+    page.wait_for_timeout(500)
+    check(page.locator("#modal").is_visible(), "bekraftelserutan oppnas")
+    mtxt = page.locator("#modalBody").inner_text()
+    check("40044" in mtxt and "45" in mtxt and "47" in mtxt,
+          "rutan visar register och fore -> efter")
+    check("ett dygn" in mtxt, "rutan sager hur lange man ska vanta")
+    shoot(page, out, "curve-bekraftelse")
+    page.locator("#modalNo").click()
+    page.wait_for_timeout(300)
+    check(not page.locator("#modal").is_visible(), "och gar att avbryta")
+
+
+def heat_down(page, url, out):
+    """/api/heating svarar 502. Varmefliken ska saga det."""
+    print("\n=== pumpen svarar inte pa /api/heating ===")
+    page.goto(url + "#heat", wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    txt = page.locator("#heatState").inner_text()
+    check(len(txt) > 30, "varmefliken sager vad som ar fel: %r" % txt[:70])
+    check("502" in txt or "svarar inte" in txt or "nekades" in txt, "och sager varfor")
+    check(page.locator("#heatUp").is_disabled() and page.locator("#heatDown").is_disabled(),
+          "stegaren gar inte att anvanda utan avlast varde")
+    shoot(page, out, "heat502-varme")
+
+
+def unreachable(page, url, out):
+    """Allt konfigurerat, ingenting svarar."""
+    print("\n=== integrationerna svarar inte ===")
+    page.goto(url, wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    for sel, ord_ in [("#indoorCard", "Homey"), ("#weatherCard", "SMHI")]:
+        check(page.locator(sel).is_visible(), "%s visas med felet i stallet for att forsvinna" % sel)
+        check(ord_ in page.locator(sel).inner_text(), "%s namnger tjansten" % sel)
+    check(not page.locator("#alarmBanner").is_visible() or
+          "175" in page.locator("#alarmBanner").inner_text(),
+          "larmrutan faller tillbaka pa registret nar bevakningen tiger")
+    shoot(page, out, "unreach-now")
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(1500)
+    check(page.locator("#advCard").is_visible(),
+          "avancerat funkar anda -- det hanger inte pa nagon integration")
+    shoot(page, out, "unreach-heat")
+
+
+def slow_server(page, url, out):
+    """Servern svarar, men langsamt: skelett ska sta kvar, inget far krascha."""
+    print("\n=== langsam server ===")
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_timeout(600)
+    check(page.locator(".skel").count() >= 1, "skelett medan svaren droejer")
+    shoot(page, out, "slow-tidigt")
+    page.wait_for_timeout(9000)
+    check(page.locator("#tiles .tile").count() >= 6, "och sedan kommer varden")
+    check(page.locator(".skel").count() == 0, "skeletten forsvinner nar svaren kommit")
+    shoot(page, out, "slow-klart")
 
 
 def guarded_write(page, url):
-    """Autotune-forslaget ska ga genom appens vanliga bekraftelse."""
+    """Autotune-forslaget ska ga genom appens vanliga bekraftelse -- samma ruta,
+    samma ordval och samma vantetid som stegaren och radgivaren."""
     print("\n=== skyddad skrivning ===")
     page.goto(url + "#heat", wait_until="networkidle")
-    page.wait_for_timeout(2500)
-    seen = {}
-    page.on("dialog", lambda d: (seen.update(text=d.message), d.accept()))
+    page.wait_for_timeout(2800)
     page.locator("#tuneGo").click()
-    page.wait_for_timeout(1500)
-    txt = seen.get("text", "")
-    check("40031" in txt and "2 → 3" in txt, "bekräftelserutan visar register och före → efter")
-    check("36 timmar" in txt, "bekräftelserutan säger hur länge man ska vänta")
+    page.wait_for_timeout(600)
+    check(page.locator("#modal").is_visible(), "bekraftelserutan oppnas")
+    txt = page.locator("#modalBody").inner_text()
+    check("40031" in txt and "2" in txt and "3" in txt,
+          "bekraftelserutan visar register och fore -> efter")
+    check("36 timmar" in txt, "bekraftelserutan sager hur lange man ska vanta")
+    check(txt.count("timmar") + txt.count("dygn") >= 1 and "ett dygn" not in txt,
+          "en vantetid, inte tva olika i samma ruta")
+    check("Värmeoffset" in txt, "rutan kallar reglaget vid namn, inte bara vid nummer")
+    page.locator("#modalYes").click()
+    page.wait_for_timeout(1800)
     check(page.locator("#toast .toast").count() >= 1, "skrivningen kvitteras med en toast")
+    t = page.locator("#toast .toast").first.inner_text()
+    check("Värmeoffset" in t and "→" in t, "kvittensen sager samma sak som rutan: %r" % t)
+    check("Register 40031" not in t, "och inte 'Register 40031: 2 -> 3'")
+
+
+def stepper_write(page, url):
+    """Stegaren och radgivaren ska ge exakt samma ruta for samma skrivning."""
+    print("\n=== samma skrivning, samma ruta ===")
+    page.goto(url + "#heat", wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    page.locator("#heatUp").click()
+    page.wait_for_timeout(1200)
+    check(page.locator("#modal").is_visible(), "stegaren oppnar samma ruta")
+    a = page.locator("#modalBody").inner_text()
+    check("40031" in a and "Värmeoffset" in a, "med samma rubrik och samma register")
+    page.locator("#modalNo").click()
+    page.wait_for_timeout(400)
+    page.locator("#adviceGo").click()
+    page.wait_for_timeout(2500)
+    page.locator("#adviceOut [data-group]").click()
+    page.wait_for_timeout(600)
+    b = page.locator("#modalBody").inner_text()
+    check(page.locator("#modal").is_visible(), "radgivaren oppnar samma ruta")
+    check("Värmeoffset" in b and "40031" in b, "med samma rubrik och samma register")
+    check(("ett dygn" in a) == ("ett dygn" in b), "och samma vantetid: %r / %r"
+          % (a[-90:].replace("\n", " "), b[-90:].replace("\n", " ")))
+    page.locator("#modalNo").click()
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--serve", action="store_true", help="bara servern, ingen webblasare")
-    ap.add_argument("--mode", default="full", choices=["full", "quiet", "off", "fallback"])
+    ap.add_argument("--mode", default="full",
+                    choices=["full", "quiet", "off", "fallback", "curve", "unreach",
+                             "slow", "heat502"])
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--out", default=str(ROOT / "_shots"))
     args = ap.parse_args()
 
     if args.serve:
         port = args.port or 8377
-        start(args.mode, port)
+        start(args.mode, port, 1.1 if args.mode == "slow" else 0.0)
         print("stub pa http://127.0.0.1:%d/ i lage %s" % (port, args.mode))
         while True:
             time.sleep(3600)
@@ -685,44 +1022,76 @@ def main():
     from playwright.sync_api import sync_playwright
     out = pathlib.Path(args.out)
     ports = {}
-    for mode in ("full", "quiet", "off", "fallback"):
+    for mode in ("full", "quiet", "off", "fallback", "curve", "unreach", "slow", "heat502"):
         ports[mode] = free_port()
-        start(mode, ports[mode])
+        start(mode, ports[mode], 1.1 if mode == "slow" else 0.0)
     time.sleep(0.4)
+    url = lambda m: "http://127.0.0.1:%d/" % ports[m]        # noqa: E731
 
     with sync_playwright() as pw:
         b = pw.chromium.launch()
-        for mode in ("full", "quiet", "off"):
-            url = "http://127.0.0.1:%d/" % ports[mode]
+        for mode in ("full", "quiet", "off", "curve"):
             for label, w, h in [("telefon", 390, 844), ("dator", 1280, 900)]:
                 page = b.new_page(viewport={"width": w, "height": h})
                 errs = []
                 page.on("console", lambda msg: errs.append(msg.text) if msg.type == "error" else None)
                 page.on("pageerror", lambda e: errs.append("pageerror: %s" % e))
-                drive(page, mode, label, out, url)
+                drive(page, mode, label, out, url(mode))
                 real = [e for e in errs if "favicon" not in e.lower()]
                 check(not real, "inga konsolfel i %s/%s%s"
                       % (mode, label, (": " + "; ".join(real[:3])) if real else ""))
                 page.close()
-        page = b.new_page(viewport={"width": 390, "height": 844})
-        register_fallback(page, "http://127.0.0.1:%d/" % ports["fallback"])
-        page.close()
 
-        page = b.new_page(viewport={"width": 390, "height": 844})
-        guarded_write(page, "http://127.0.0.1:%d/" % ports["full"])
-        page.close()
+        for fn, mode in [(register_fallback, "fallback")]:
+            page = b.new_page(viewport={"width": 390, "height": 844})
+            fn(page, url(mode))
+            page.close()
+        for fn, mode in [(owner_curve, "curve"), (heat_down, "heat502"),
+                         (unreachable, "unreach"), (slow_server, "slow")]:
+            page = b.new_page(viewport={"width": 390, "height": 844})
+            errs = []
+            page.on("pageerror", lambda e: errs.append("pageerror: %s" % e))
+            fn(page, url(mode), out)
+            check(not errs, "inga JS-krascher i %s: %s" % (mode, errs[:2]))
+            page.close()
 
-        # morkt lage, med allt pasl aget
-        page = b.new_page(color_scheme="dark", viewport={"width": 390, "height": 844})
-        page.goto("http://127.0.0.1:%d/" % ports["full"], wait_until="networkidle")
-        page.wait_for_timeout(2200)
-        shoot(page, out, "full-mork-now")
-        page.locator('nav button[data-view="heat"]').click()
-        page.wait_for_timeout(1600)
-        shoot(page, out, "full-mork-heat")
-        bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+        for fn in (guarded_write, stepper_write):
+            page = b.new_page(viewport={"width": 390, "height": 844})
+            fn(page, url("full"))
+            page.close()
+
+        # morkt lage, i bada bredder, over alla flikar
         print("\n=== morkt lage ===")
-        check(bg not in ("rgba(0, 0, 0, 0)", "rgb(255, 255, 255)"), "mork bakgrund: %s" % bg)
+        for label, w, h in [("telefon", 390, 844), ("dator", 1280, 900)]:
+            page = b.new_page(color_scheme="dark", viewport={"width": w, "height": h})
+            page.goto(url("full"), wait_until="networkidle")
+            page.wait_for_timeout(2400)
+            for name, _ in TABS:
+                tab = page.locator('nav button[data-view="%s"]' % name)
+                if not tab.is_visible():
+                    continue
+                tab.click()
+                page.wait_for_timeout(800)
+                shoot(page, out, "full-mork-%s-%s" % (label, name))
+            page.locator('nav button[data-view="heat"]').click()
+            page.wait_for_timeout(900)
+            page.locator("#advSum").click()
+            page.wait_for_timeout(700)
+            shoot(page, out, "full-mork-%s-avancerat" % label)
+            page.locator("#goSettings").click()
+            page.wait_for_timeout(1600)
+            shoot(page, out, "full-mork-%s-set" % label)
+            bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+            check(bg not in ("rgba(0, 0, 0, 0)", "rgb(255, 255, 255)"),
+                  "mork bakgrund i %s: %s" % (label, bg))
+            page.close()
+
+        page = b.new_page(color_scheme="dark", viewport={"width": 390, "height": 844})
+        page.goto(url("curve") + "#heat", wait_until="networkidle")
+        page.wait_for_timeout(2400)
+        page.locator("#advSum").click()
+        page.wait_for_timeout(700)
+        shoot(page, out, "curve-mork-avancerat")
         page.close()
         b.close()
 

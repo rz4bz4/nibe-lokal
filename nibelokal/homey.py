@@ -34,6 +34,7 @@ on 2026-09-06. Two things there differ from Athom's documented shape:
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import logging
@@ -42,6 +43,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+from .config import header_safe, scrub
 
 log = logging.getLogger("nibelokal.homey")
 
@@ -71,12 +74,28 @@ class Homey:
         self.whitelist = _split_names(devices)
         self.max_age_minutes = float(max_age_minutes or 0) or 60.0
         self.timeout = float(timeout or 5.0)
+        # The token is checked once, here, rather than every time a header is
+        # built from it: a value http.client refuses makes it raise a
+        # ValueError whose message quotes the whole header -- API key included
+        # -- and _get turns that into the error string the page prints. Found
+        # on a config.yaml with a stray carriage return inside a quoted string.
+        self.token_error: str | None = None
+        if self.token and not header_safe(self.token):
+            self.token_error = (
+                "homey_token innehåller tecken som inte får finnas i en "
+                "HTTP-header (radbrytning, tabb eller liknande). Kontrollera "
+                "att nyckeln står på en rad i config.yaml. Inget anrop görs "
+                "förrän den är rättad."
+            )
         # The pump poll runs every 60 s and the web page polls on top of it.
         # Homey is a small box doing real work; a cached answer that is up to
         # two minutes old is indistinguishable from a live one for a house that
         # takes hours to change temperature.
         self.cache_seconds = float(cache_seconds or 0)
+        # _lock guards the two cached attributes and nothing else -- never a
+        # network call. _fetching is the single-flight guard; see snapshot().
         self._lock = threading.Lock()
+        self._fetching = threading.Lock()
         self._cached: dict | None = None
         self._cached_at = 0.0
 
@@ -84,10 +103,10 @@ class Homey:
     def from_config(cls, cfg: dict) -> "Homey":
         """Build from the app config.
 
-        Read with .get and explicit defaults rather than indexing: these keys
-        are not in config.DEFAULTS, so on an older config.py they are absent
-        (and config.load() prints "ignoring unknown key homey_host" for each
-        one it does see). Add them to DEFAULTS to make the file take effect.
+        Read with .get and explicit defaults rather than indexing: the keys are
+        in config.DEFAULTS now, but this class is also built straight from a
+        plain dict in tests and from the environment in __main__, and a missing
+        key there must fall back rather than raise.
         """
         return cls(
             host=cfg.get("homey_host", "") or "",
@@ -111,25 +130,74 @@ class Homey:
     # -- the one public method -------------------------------------------
 
     def snapshot(self, force: bool = False) -> dict:
-        """Current indoor temperatures, or an error dict. Never raises."""
+        """Current indoor temperatures, or an error dict. Never raises.
+
+        The two LAN requests in _build() happen *outside* `self._lock`, and
+        that is the whole point of the dance below. Holding the lock across
+        them meant a Homey that accepts a connection and then never answers
+        blocked every other caller for the length of two timeouts -- measured
+        at 4.8 s on a concurrent /api/status while the pump was also down. The
+        lock now only ever guards two attribute assignments.
+
+        `_fetching` keeps that from becoming a stampede: one caller refreshes
+        and the others carry on with the copy they already have rather than
+        queueing up behind it on the network. Only a caller with nothing at all
+        to return waits, and it waits for the fetch, not for the lock.
+        """
         try:
+            at = time.time()
             with self._lock:
-                fresh_enough = (self._cached is not None
-                                and time.time() - self._cached_at < self.cache_seconds)
-                if fresh_enough and not force:
-                    return self._cached
+                cached, cached_at = self._cached, self._cached_at
+            # A backward clock step (ntp, a Pi with no RTC catching up after a
+            # power cut) makes `at - cached_at` negative, which read as "very
+            # fresh" and froze the cache until the clock caught up again.
+            if (cached is not None and not force
+                    and 0 <= at - cached_at < self.cache_seconds):
+                return copy.deepcopy(cached)
+
+            if not self._fetching.acquire(blocking=force or cached is None):
+                # Somebody else is already talking to Homey. An answer two
+                # minutes old beats waiting out their timeout -- unless the
+                # caller asked for a fresh one, and then we do wait.
+                return copy.deepcopy(cached)
+            try:
+                with self._lock:
+                    cached, cached_at = self._cached, self._cached_at
+                if (cached is not None and not force
+                        and 0 <= time.time() - cached_at < self.cache_seconds):
+                    # Somebody refreshed it while we waited for our turn.
+                    return copy.deepcopy(cached)
                 # Failures are cached for the same TTL as successes on purpose:
                 # a Homey that is down should be asked once every two minutes,
                 # not once every poll for as long as it stays down.
                 result = self._build()
-                self._cached = result
-                self._cached_at = time.time()
-                return result
+                with self._lock:
+                    self._cached = result
+                    self._cached_at = time.time()
+            finally:
+                self._fetching.release()
+            # A deep copy, always: the cache is shared with every other caller
+            # and a page handler that edits what it was handed -- even one
+            # sensor row inside it -- would corrupt it for everyone. Copying a
+            # dozen sensors costs microseconds; a poisoned cache lasts until
+            # the process restarts.
+            return copy.deepcopy(result)
         except Exception as exc:                           # noqa: BLE001
             # Nothing below is expected to throw, but this runs inside a loop
             # that must not die, so an unforeseen shape gets an error dict too.
             log.warning("homey snapshot failed unexpectedly: %s", exc)
-            return _fail("Kunde inte läsa inomhustemperaturen från Homey: %s" % exc)
+            return _fail("Kunde inte läsa inomhustemperaturen från Homey: %s"
+                         % scrub(exc, self.token))
+
+    def cached_snapshot(self) -> dict | None:
+        """The last answer, or None if there has not been one yet.
+
+        Never touches the network, so a caller that must not block -- the
+        /api/status summary the page polls every 30 s -- can have the number
+        without becoming a request to the LAN on a cold cache.
+        """
+        with self._lock:
+            return None if self._cached is None else copy.deepcopy(self._cached)
 
     # -- internals --------------------------------------------------------
 
@@ -138,6 +206,8 @@ class Homey:
             missing = "adress" if not self.base else "API-nyckel"
             return _fail("Homey är inte konfigurerad: %s saknas i config.yaml "
                          "(homey_host, homey_token)." % missing)
+        if self.token_error:
+            return _fail(self.token_error)
 
         devices, error = self._get(DEVICES_PATH)
         if error:
@@ -271,8 +341,14 @@ class Homey:
                 return entry
         return None
 
+    def _safe(self, value) -> str:
+        """A message with the API key taken out of it, whatever produced it."""
+        return scrub(value, self.token)
+
     def _get(self, path: str):
         """GET one endpoint. Returns (parsed, None) or (None, Swedish error)."""
+        if self.token_error:
+            return None, self.token_error
         req = urllib.request.Request(
             self.base + path,
             headers={"Authorization": "Bearer " + self.token,
@@ -296,9 +372,14 @@ class Homey:
             return None, "Homey svarade med fel %d." % exc.code
         except urllib.error.URLError as exc:
             return None, ("Kunde inte nå Homey på %s (%s). Kontrollera adressen "
-                          "och att den svarar på nätverket." % (self.base, exc.reason))
+                          "och att den svarar på nätverket."
+                          % (self.base, self._safe(exc.reason)))
         except (OSError, ValueError) as exc:
-            return None, "Kunde inte nå Homey på %s (%s)." % (self.base, exc)
+            # scrub() as well as the header_safe check in __init__: this string
+            # is printed on the page, and a message that quotes the request is
+            # exactly how an API key gets published to whoever is looking.
+            return None, ("Kunde inte nå Homey på %s (%s)."
+                          % (self.base, self._safe(exc)))
         try:
             return json.loads(raw.decode("utf-8", "replace")), None
         except ValueError:

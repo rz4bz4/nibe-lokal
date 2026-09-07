@@ -121,6 +121,12 @@ timeout: 5.0
 # Pushover: an application token and your user key, both from pushover.net --
 # log in, the user key is on the front page, then "Create an Application/API
 # Token" for the application token. Leave either empty and nothing is sent.
+#
+# Check them without waiting for a real alarm: POST /api/alarms/test sends one
+# ordinary-priority push and answers with what happened. A key pasted with a
+# character missing is rejected by Pushover, and the rejection then shows up as
+# `notify_error` on /api/alarms and in the status summary -- which is the only
+# way anybody finds out that the notifications are not working.
 # pushover_token: ""
 # pushover_user: ""
 

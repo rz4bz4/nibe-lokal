@@ -59,7 +59,12 @@ CREATE INDEX IF NOT EXISTS indoor_ts ON indoor (ts);
 R_OUTDOOR = 30002
 R_SUPPLY = 30006
 R_DEGREE_MINUTES = 40012
-R_PRIORITY = 31029        # text, e.g. "Varmvatten" -- what the compressor is on
+# Text, not a number: the register carries mappings, so registry.Register.decode
+# hands back the mapped English string from the package map -- "Hot Water",
+# "Heat", "Pool", "Cooling", "Off" -- and not 20/30/40. A CSV exported from a
+# Swedish pump can spell the same states in Swedish, which is why autotune
+# matches these case-insensitively as substrings in both languages.
+R_PRIORITY = 31029        # what the compressor is working on
 
 
 class Store:
@@ -135,6 +140,20 @@ class Store:
             # sense, and a table nobody prunes is a disk that fills up in a
             # year nobody is watching.
             c.execute("DELETE FROM indoor WHERE ts < ?", (cutoff,))
+            # And the alarm log, which alarms.py creates in this same file. It
+            # is small -- a working pump writes nothing to it for months -- but
+            # a flapping sensor writes two rows a minute, and nothing else was
+            # ever going to delete them. Guarded because these tables only
+            # exist once alarms.Watcher has been built at least once against
+            # this database; a store with no watcher must still prune.
+            for table in ("alarm_events", "alarm_state"):
+                try:
+                    c.execute("DELETE FROM %s WHERE %s < ?"
+                              % (table, "ts" if table == "alarm_events"
+                                 else "last_seen"), (cutoff,))
+                except sqlite3.OperationalError:
+                    # No such table: alarms have never run here.
+                    pass
         return pruned
 
     # -- reading ---------------------------------------------------------
@@ -179,6 +198,13 @@ class Store:
         Hours with no indoor reading are still returned. autotune counts them
         as "no_indoor" and can then say the pump data is fine and the room data
         is missing, which is a different problem from having no history at all.
+
+        `compressor` is the state the hour ended in and `compressor_states` is
+        every distinct state seen inside it, oldest first. Both, because they
+        answer different questions: the first is "what was it doing", and the
+        second is "is this hour evidence about the heating curve at all". An
+        hour that made hot water from 10:00 to 10:40 and then heated is not,
+        and the last state alone cannot say so.
         """
         since = int(time.time()) - max(3600, int(days) * 86400)
         rows: dict[int, dict] = {}
@@ -186,7 +212,7 @@ class Store:
         def bucket(ts: int) -> dict:
             return rows.setdefault(ts, {"ts": float(ts), "outdoor": None, "indoor": None,
                                         "supply": None, "degree_minutes": None,
-                                        "compressor": None})
+                                        "compressor": None, "compressor_states": []})
 
         with self._lock, self._db as c:
             for key, address in (("outdoor", R_OUTDOOR), ("supply", R_SUPPLY),
@@ -198,16 +224,18 @@ class Store:
                     if value is not None:
                         bucket(int(ts))[key] = float(value)
 
-            # The bare `text` column next to MAX(ts) is SQLite's documented
-            # behaviour for min/max aggregates: it comes from the row that won.
-            # The last state of the hour is the right one to keep -- the pump
-            # having made hot water at some point in the hour is what
-            # disqualifies it, and autotune only reads this as a string.
+            # Grouped by (hour, text) rather than by hour alone, so an hour
+            # that changed its mind reports every state it was in. Ordered by
+            # each state's last appearance, so the final element is the state
+            # the hour ended in -- which is what `compressor` keeps, and it is
+            # SQLite's documented behaviour for a bare column beside MAX().
             for ts, text, _ in c.execute(
-                    "SELECT (ts / 3600) * 3600 AS bucket, text, MAX(ts) FROM readings "
-                    "WHERE address = ? AND ts >= ? AND text IS NOT NULL "
-                    "GROUP BY bucket", (R_PRIORITY, since)):
-                bucket(int(ts))["compressor"] = text
+                    "SELECT (ts / 3600) * 3600 AS bucket, text, MAX(ts) AS last "
+                    "FROM readings WHERE address = ? AND ts >= ? AND text IS NOT NULL "
+                    "GROUP BY bucket, text ORDER BY bucket, last", (R_PRIORITY, since)):
+                row = bucket(int(ts))
+                row["compressor_states"].append(text)
+                row["compressor"] = text
 
             for ts, value in c.execute(
                     "SELECT (ts / 3600) * 3600 AS bucket, AVG(value) FROM indoor "
@@ -288,8 +316,13 @@ class Poller(threading.Thread):
             # and the web app's freshness alive; an integration that throws
             # must cost its own feature and nothing else.
             self._watch(self.latest if polled else {})
-            if polled:
-                self._record_indoor()
+            # The indoor feed runs whether or not the pump answered. It is an
+            # independent source -- a Homey on the LAN knows nothing about a
+            # Modbus session that dropped -- and this loop is the only thing
+            # keeping its cache warm for /api/status, which must never fetch.
+            # Skipping it on a failed poll meant the indoor reading disappeared
+            # from the page exactly when the pump was already down.
+            self._record_indoor()
             if time.time() - self._pruned > 86400:
                 try:
                     self.store.prune()

@@ -417,5 +417,115 @@ class Statistics(unittest.TestCase):
         self.assertLessEqual(many["confidence"], autotune.CONFIDENCE_CAP)
 
 
+class NoRetractedMeasurements(unittest.TestCase):
+    """What the user-facing text is allowed to claim.
+
+    docs/registers.md retracted the 1.5 C-per-step figure: the run that
+    produced it was stopped while the value was still ramping, which makes it a
+    lower bound and not a measurement. It was quoted in the proposal a
+    household reads before changing its heating -- and quoted as "just den här
+    pumpen", one specific house, in a project strangers run against theirs.
+    """
+
+    def _proposal(self):
+        result = autotune.analyse(nights(WIDE, lambda out: -1.2), TARGET,
+                                  settings(offset=0))
+        self.assertIsNotNone(result["proposal"])
+        return result["proposal"]
+
+    def test_the_proposal_does_not_quote_the_retracted_number(self):
+        text = " ".join(str(v) for v in self._proposal().values())
+        self.assertNotIn("1,5", text)
+        self.assertNotIn("1.5", text)
+
+    def test_and_does_not_speak_of_one_particular_pump(self):
+        text = " ".join(str(v) for v in self._proposal().values())
+        self.assertNotIn("just den här pumpen", text)
+
+    def test_it_still_says_what_to_expect(self):
+        expected = self._proposal()["expected_sv"]
+        self.assertIn("2,5", expected)
+        self.assertIn("Framledningen", expected)
+
+    def test_the_constants_are_the_documented_ones(self):
+        self.assertEqual(autotune.SUPPLY_C_PER_INDOOR_C, 2.5)
+        self.assertEqual(autotune.INDOOR_C_PER_OFFSET_STEP, 1.0)
+
+
+class TValues(unittest.TestCase):
+    """The table stops at 30 degrees of freedom. What happens after it."""
+
+    def test_past_the_table_it_does_not_jump_to_the_asymptote(self):
+        # t(31) is 2.04, not 1.96. Falling straight to the dof = infinity value
+        # overstated the evidence by 4 % the moment a run passed a month.
+        self.assertGreaterEqual(autotune._t95(31), 2.03)
+        self.assertGreaterEqual(autotune._t95(35), 2.02)
+
+    def test_it_never_goes_up_as_evidence_grows(self):
+        values = [autotune._t95(d) for d in range(1, 400)]
+        self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_and_never_below_the_asymptote(self):
+        for dof in (31, 60, 121, 1000, 10 ** 6):
+            self.assertGreaterEqual(autotune._t95(dof), 1.96)
+
+    def test_no_degrees_of_freedom_is_no_evidence_at_all(self):
+        for dof in (0, -1, None, "kalle"):
+            self.assertEqual(autotune._t95(dof), float("inf"))
+
+    def test_a_long_run_is_still_allowed_to_be_significant(self):
+        # Forty nights of a clear error must not become "uncertain" merely
+        # because the t value stopped shrinking.
+        outdoors = [-12 + i * 0.6 for i in range(40)]
+        result = autotune.analyse(nights(outdoors, lambda out: -1.2), TARGET,
+                                  settings())
+        self.assertEqual(result["state"], "confident")
+
+
+class HoursThatAreNotEvidence(unittest.TestCase):
+    """An hour that made hot water is not an hour about the heating curve."""
+
+    def _hourly(self, states_for_hour):
+        """One night of hourly buckets, as store.autotune_history hands them over."""
+        rows = []
+        for hour in range(22, 30):
+            states = states_for_hour(hour % 24)
+            rows.append({
+                "ts": _ts(10 if hour < 24 else 11, hour % 24),
+                "outdoor": -5.0,
+                "indoor": TARGET - 1.2,
+                "supply": 35.0,
+                "degree_minutes": -60.0,
+                "compressor": states[-1],
+                "compressor_states": states,
+            })
+        return rows
+
+    def test_a_bucket_that_only_ended_in_heating_is_still_dropped(self):
+        # Hot water 10:00-10:40 and heating 10:40-11:00 keeps the hour if only
+        # the last state is looked at, which is what the comment in store.py
+        # always said it did not do.
+        rows = self._hourly(lambda hour: ["Hot Water", "Heat"] if hour == 23
+                            else ["Heat"])
+        result = autotune.analyse(rows, TARGET, settings())
+        self.assertEqual(result["rejected"].get("compressor_not_heating"), 1)
+
+    def test_a_night_of_heating_only_is_kept(self):
+        rows = self._hourly(lambda hour: ["Heat"])
+        result = autotune.analyse(rows, TARGET, settings())
+        self.assertFalse(result["rejected"].get("compressor_not_heating"))
+        self.assertEqual(result["samples"], 8)
+
+    def test_the_english_the_package_map_actually_returns(self):
+        for state in ("Hot Water", "Pool", "Cooling"):
+            self.assertTrue(autotune._is_not_heating(state), state)
+        for state in ("Heat", "Off", "Värme"):
+            self.assertFalse(autotune._is_not_heating(state), state)
+
+    def test_a_plain_string_still_works_for_a_source_without_the_list(self):
+        self.assertTrue(autotune._is_not_heating("Varmvatten"))
+        self.assertFalse(autotune._is_not_heating(None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -355,6 +355,12 @@ class Handler(BaseHTTPRequestHandler):
                 # False means alarms are still recorded and shown here, but
                 # nothing leaves the machine. That is the default.
                 "notify": watcher.notifier is not None,
+                # notify is "credentials are configured"; notify_error is
+                # "and the notification service rejected them". Both, because
+                # a wrong Pushover token used to be a log line on a machine in
+                # a cupboard while this endpoint went on saying notify: true.
+                # null when nothing has been rejected.
+                "notify_error": watcher.notify_error,
                 "last_error": watcher.last_error,
             })
 
@@ -423,8 +429,14 @@ class Handler(BaseHTTPRequestHandler):
             # everything else. Only the push off the machine is optional.
             "alarms": watcher is not None,
             "notify": bool(watcher is not None and watcher.notifier is not None),
-            "autotune": bool(homey is not None and homey.configured
-                             and self.ctx.get("autotune_target") is not None),
+            # An indoor source is the hard requirement: without a room
+            # temperature there is nothing to compare a curve against. A target
+            # is *not* -- /api/autotune falls back to the pump's own room
+            # setpoint, which is what the household set on the display, and
+            # says which of the two it used in `target_source`. This flag used
+            # to require autotune_target_indoor as well, which hid a feature
+            # that worked.
+            "autotune": bool(homey is not None and homey.configured),
         }
         return {
             "indoor": self._indoor_summary(homey),
@@ -434,14 +446,23 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _indoor_summary(self, homey) -> dict:
-        # Safe to ask on every status: the answer is cached in the Homey object
-        # and the poller refreshes it in the background, so this is a dict
-        # lookup rather than a request to the LAN.
+        # Never fetched from here, the same rule the forecast follows below.
+        # snapshot() goes to the LAN whenever the cache is cold, and a Homey
+        # that accepts the connection and never answers then made this
+        # endpoint -- which the page polls every 30 s -- wait out two 5 s
+        # timeouts. The poller keeps the cache warm (it now does so even when
+        # the pump poll failed, which is when it used to stop); this only
+        # reads it, and says so plainly when there is nothing there yet.
         if homey is None or not homey.configured:
             return {"ok": False, "configured": False, "average": None,
                     "sensors": 0, "stale": 0, "at": None, "error": None}
         try:
-            snap = homey.snapshot()
+            snap = (homey.cached_snapshot()
+                    if hasattr(homey, "cached_snapshot") else homey.snapshot())
+            if snap is None:
+                return {"ok": False, "configured": True, "average": None,
+                        "sensors": 0, "stale": 0, "at": None,
+                        "error": "Inomhustemperaturen är inte hämtad ännu."}
             sensors = snap.get("sensors") or []
             return {
                 "ok": bool(snap.get("ok")),
@@ -488,14 +509,15 @@ class Handler(BaseHTTPRequestHandler):
     def _alarm_summary(self, watcher) -> dict:
         if watcher is None:
             return {"ok": False, "active": 0, "code": None, "text": "",
-                    "severity": None, "notify": False,
+                    "severity": None, "notify": False, "notify_error": None,
                     "error": self._provider_error("watcher")}
+        notify_error = getattr(watcher, "notify_error", None)
         try:
             active = watcher.active()
         except Exception as exc:                          # noqa: BLE001
             return {"ok": False, "active": 0, "code": None, "text": "",
                     "severity": None, "notify": watcher.notifier is not None,
-                    "error": str(exc)}
+                    "notify_error": notify_error, "error": str(exc)}
         first = active[0] if active else {}
         return {
             "ok": True,
@@ -506,6 +528,11 @@ class Handler(BaseHTTPRequestHandler):
             "text": first.get("text") or "",
             "severity": first.get("severity"),
             "notify": watcher.notifier is not None,
+            # A configuration the notification service rejected, in Swedish, or
+            # null. The page shows it next to the notify flag: "notiser på" and
+            # "Pushover avvisade inloggningen" are both true at once, and only
+            # saying the first is how somebody finds out at the wrong moment.
+            "notify_error": notify_error,
             "error": watcher.last_error,
         }
 
@@ -548,6 +575,16 @@ class Handler(BaseHTTPRequestHandler):
                                 body.get("expect"))
             result["logged"] = _log_writes(store, [result])
             return self._json(result)
+
+        if path == "/api/alarms/test":
+            # A notification somebody asked for. The alternative way to find
+            # out that a token was pasted with a character missing is to wait
+            # for a real alarm and then not hear about it.
+            watcher = self.ctx.get("watcher")
+            if watcher is None:
+                return self._json(_not_started("Larmbevakningen",
+                                               self._provider_error("watcher")))
+            return self._json(watcher.send_test_notification())
 
         if path == "/api/backup":
             path_out = pump.backup(self.ctx["backup_dir"], str(body.get("note", "")))

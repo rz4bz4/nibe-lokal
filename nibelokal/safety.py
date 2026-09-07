@@ -59,10 +59,18 @@ GUARDED: dict[int, str] = {
     40034: "heating offset, climate system 4",
     40035: "min supply temperature, climate system 1",
     40039: "max supply temperature, climate system 1",
+    # All seven hot water start/stop temperatures. Three of them - the two for
+    # the low comfort mode and the periodic increase - were missing from this
+    # dict while docs/registers.md listed the whole run 40059-40065. They landed
+    # on guarded anyway, by the default at the bottom of tier(); listing them
+    # changes no tier, only the reason a refusal quotes.
     40059: "start temperature, hot water high",
     40060: "start temperature, hot water normal",
+    40061: "start temperature, hot water low",
+    40062: "stop temperature, hot water periodic increase (the legionella cycle)",
     40063: "stop temperature, hot water high",
     40064: "stop temperature, hot water normal",
+    40065: "stop temperature, hot water low",
     40103: "max internal additional heat (kW of immersion heater)",
     40181: "permit additional heat for heating",
     40186: "auto mode, additional heat stop temperature",
@@ -213,13 +221,28 @@ BLOCKED_RANGES: list[tuple[int, int, str]] = [
     # an external price feed, but nothing NIBE publishes says what unit the s32
     # holds, which day the 24 slots refer to, or whether the pump honours them
     # without a myUplink account. They schedule the compressor. That is the
-    # wrong combination to guess at. 40844 arms the whole feature, and its
-    # strength - the degree of effect, 1-10 for heating - is not on Modbus at
-    # all, so this app could switch it on and then neither read nor set how hard
-    # it pushes. Same objection this app makes to SG Ready. Use the offset
-    # instead: bounded, reversible, and in units you already read on the display.
-    (40844, 40844, "Smart Price Adaption on/off - its strength is not exposed on Modbus, "
-                   "so this app cannot see or set how hard it would push"),
+    # wrong combination to guess at. Use the offset instead: bounded,
+    # reversible, and in units you already read on the display.
+    #
+    # 40844 arms the feature; 40845-40852 and 40903 are the rest of its menu -
+    # heating, hot water and cooling activated, the area code, and how hard each
+    # is allowed to push. An earlier version of this comment gave as its
+    # decisive reason that the degree of effect "is not on Modbus at all". That
+    # was wrong: 40846 is (SPA), heating influence, s8, 1-10, and 40903 is
+    # (SPA), hot water influence, s8, 1-4, both writable, both present on the
+    # S735 these tiers were written against. The knobs are on Modbus. What is
+    # not is the unit of the price they act on, which is the reason that holds.
+    # They are blocked with the switch rather than under it: arming SPA on the
+    # display and then setting its influence from here reaches the same feature
+    # by the other end.
+    (40844, 40844, "Smart Price Adaption on/off - the price feed it follows has an "
+                   "undocumented unit and an undocumented day, so this app will not "
+                   "arm it"),
+    (40845, 40852, "Smart Price Adaption's own menu - heating, hot water and cooling "
+                   "activated, the area code, and how hard each is allowed to push"),
+    (40903, 40903, "Smart Price Adaption, how hard it may push hot water (1-4) - the "
+                   "same menu as 40845-40852, fifty-one addresses above the end of "
+                   "it"),
     (46015, 46061, "Smart Price Adaption hourly price slots - undocumented unit and "
                    "undocumented day, feeding compressor scheduling"),
     # Compressor frequency blocking bands. Four separate runs, because the maps

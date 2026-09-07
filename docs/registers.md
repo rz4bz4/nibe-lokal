@@ -78,7 +78,7 @@ test is what keeps the two in step.
 | 45001, 45027–45031 | Forced control | The service menu's manual override. 45001 is the switch; on an S1155/S1255, S320/S325 and an SMO S40, 45027–45031 drive the same outputs one relay at a time — the immersion heater AZ30-EB17, the reversing valve QN37 open and closed, and the circulation pumps GQ2 and GQ3. |
 | 45009 | Follow externally calculated supply | Hands the supply temperature to whatever is on the other end of Modbus. If this app stops, the pump keeps regulating on a frozen setpoint. |
 | 45209–45230, 45987–45988, 46004–46007 | External sensor value injection, flags and values | Feeds the pump a value you supply instead of a real sensor. There is no dead-man's switch: if this app stops, the pump keeps regulating on a frozen number forever. 45988 is BT50, the room temperature the curve regulates against — the closest one of these to the house. The activation flags are blocked with the values: a flag left at 1 with a stale value behind it is the same failure. |
-| 40844, 46015–46061 | Smart Price Adaption on/off and its 24 hourly price slots | See the appendix below. |
+| 40844–40852, 40903, 46015–46061 | Smart Price Adaption: on/off, its per-circuit activations and influence settings, and its 24 hourly price slots | The whole menu rather than the switch alone — 40846 sets how hard it may push the heating (1–10) and 40903 the hot water (1–4). See the appendix below. |
 
 **The same settings, at the addresses other supported models use.** The tiers
 above were first written against one S735, and the models do not agree on
@@ -89,9 +89,9 @@ leaving one open costs the model that does implement it.
 
 | Register | Setting | Which models use it |
 |---|---|---|
-| 40683, 47138, 48085, 48130, 48456 | Heating medium pump operating mode and manual speed | 40683 on an SMO S40 and VVM S500; 47138, 48085 and 48130 on an SMO 20/40 (48085 and 48130 are two writable registers for the same speed). 48456 is the same operating mode again, for cooling, with the same two settings — 10 intermittent, 20 continuous — and exists only on the F series. |
-| 47214 / 48755 | Main fuse rating, transformer ratio | SMO 20 and SMO 40. |
-| 47276–47291 | Floor drying programme, plus its timer | SMO 20 and SMO 40. |
+| 40683, 47138, 48085, 48130, 48456 | Heating medium pump operating mode and manual speed | 40683 on an SMO S40 and VVM S500. 47138 is the F-generation numbering and is on all seventeen of those maps — the F series, the SMO 20 and SMO 40, and the VVM 225/310/320/325/500 — of which only the two SMOs can be reached over TCP. 48085 and 48130 are on the SMO 20, SMO 40, VVM 310 and VVM 500, and are two writable registers for the same speed. 48456 is the same operating mode again, for cooling, with the same two settings — 10 intermittent, 20 continuous — and exists only on the F series. |
+| 47214 / 48755 | Main fuse rating, transformer ratio | The F-generation numbering, so the same seventeen maps as 47138 for the fuse; 48755 is on sixteen of them, every one except the SMO 20. Of those the SMO 20 and SMO 40 are the ones this app can reach. |
+| 47276–47291 | Floor drying programme, plus its timer | Again all seventeen F-generation maps, the SMO 20 and SMO 40 among them. |
 | 48567 / 48568 | Initiate inverter, force inverter initiation | F750 only, and the same pair as 40904 / 40905 above. This app cannot reach an F-series pump at all — they need a MODBUS 40 over RS485 rather than the TCP this speaks — but the rule reads better with no exceptions than with one, and blocking one of two registers that do the same job is worse than blocking neither. |
 | 48979–49009, 49208–49209 | Smart energy source | SMO 40 and the F-generation VVMs, where the feature is one contiguous run rather than the S-series' scattered quads. 48976, *Smart home room control*, sits just below it and is deliberately left guarded: a different feature that happens to be a neighbour. 49208–49209 are 41327–41328 again on a VVM 225/310/320/325/500, abbreviated further to *Max diff. SES prio 1.* — the same two settings, the same 1–25 °C, the same consequence. |
 
@@ -108,6 +108,20 @@ on an S2125 (a comfort setting with its own menu), 42756 *Inverter fault reset*
 call: it is the same pump as the blocked 40219, but its own range starts at
 50 %, so unlike 40219 — which goes down to 1 % — it cannot be used to stop the
 circulation the compressor depends on.
+
+One more family stays **guarded**, and that one is a judgement call rather than a
+clear reading. On an S320/S325, S330/S332, S2125, SMO S40 and the VVM S series,
+each connected heat pump has its own circulation pump operating mode: 40784 and
+40783 for heating, 40800 and 40799 for hot water, 40816 for pool, 40833 and 40832
+for cooling. By title they belong with the blocked 40096. By content they may
+not. 40096 runs 10–40, the four values NIBE documents as intermittent,
+continuous, economy and auto; these are a plain 0–1 with no mapping and no info
+text in any map the `nibe` package ships, and nothing there says whether 0 means
+*off* or *intermittent*. Those two readings differ by exactly the hazard 40096 is
+blocked for. Blocking on the worse one would cost a working setting on models the
+author does not own, so they are guarded rather than blocked: `confirm: true`,
+range-checked, logged. If you know which it is on an S320, that is a good issue to
+open.
 
 ## Two things the tiers cannot protect you from
 
@@ -231,7 +245,9 @@ on a room sensor, and register 40203 (*use room sensor, climate system 1*) reads
 This pump exposes NIBE's own price-following feature over Modbus: register
 **40844** (*Activated (Smart Price Adaption)*, writable, 0/1, currently 0),
 **31919** (*Operating mode*, read-only, currently 10, no published
-enumeration), and **46015–46061** in steps of two — twenty-four slots titled
+enumeration), **40845–40852** and **40903** (the feature's own menu: what it may
+act on and how hard, all writable), and **46015–46061** in steps of two —
+twenty-four slots titled
 *Energy price 00:00 – 01:00* through *23:00 – 00:00*, writable s32, each
 defaulting to 2147483647, which is INT32_MAX and the conventional "unset".
 
@@ -251,15 +267,27 @@ It is still an inference, and these are the reasons it is not acted on:
   nor when they roll over.
 - At least one S-series owner has dumped every register looking for a way to
   pass in electricity prices over Modbus and reported finding none.
-- The decisive one: the *degree of effect* — how hard SPA is allowed to push,
-  1–10 for heating and 1–4 for hot water — does not appear in the register map
-  at all. This app could arm the feature and then neither read nor set its
-  strength. That is precisely the objection this app makes to SG Ready, and it
-  does not become acceptable because the register has a nicer name.
+A fourth reason stood here until 2026-09-07 and was wrong. It said the *degree of
+effect* — how hard SPA is allowed to push, 1–10 for heating and 1–4 for hot water
+— did not appear in the register map at all, so this app could arm the feature and
+then neither read nor set its strength. It does appear, and on the pump these
+tiers were written against: **40846** *(SPA), heating influence*, s8, range 1–10,
+default 5, writable, and **40903** *(SPA), hot water influence*, s8, range 1–4,
+default 2, writable. Next to them sit **40845** *heating activated*, **40847**
+*hot water activated*, **40850** *cooling activated*, **40849** and **40851**, the
+pool and cooling influences, and **40852** *(SPA), area*. The knobs are all there.
+What is missing is the number they act on, which is the objection above and the
+one the decision actually rests on.
 
-So 40844 and 46015–46061 are blocked, and price following is done with the
-heating offset instead: ±1 step, symmetric, summing to zero over a day,
-bounded, reversible, and expressed in the same units already on the pump's own
-display. Nothing was written to any of these registers to find this out.
+So 40844–40852, 40903 and 46015–46061 are blocked — the switch, the whole menu
+behind it, and the price slots. The menu goes with the switch because arming SPA
+on the pump's display and then setting its influence to 10 from here is the same
+feature reached from the other end, and blocking one half of a pair is the mistake
+the forced-control note above is about.
+
+Price following is done with the heating offset instead: ±1 step, symmetric,
+summing to zero over a day, bounded, reversible, and expressed in the same units
+already on the pump's own display. Nothing was written to any of these registers
+to find this out.
 
 If you know what the unit of 46015 is, that is a good issue to open.

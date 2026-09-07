@@ -128,8 +128,10 @@ nav button .bug{position:absolute;top:2px;right:calc(50% - 17px);width:8px;heigh
 
 /* En enda enhetsregel: enheten står efter siffran, med ett mellanrum, dämpad.
    I ett rutnät där varje ruta har samma enhet står enheten i rubriken i stället. */
-.u{margin-left:.26em;font-weight:550;color:var(--muted);letter-spacing:0;font-size:.44em}
-.side .u,.sub .u,td .u,.hint .u{font-size:.86em;margin-left:.24em}
+.u{margin-left:.26em;font-weight:550;color:var(--muted);letter-spacing:0;font-size:.62em}
+.hero .n .u{font-size:.44em}
+.metric .n .u,.stepval .v .u{font-size:.5em}
+.side .u,.sub .u,td .u,.hint .u,.setrow .val .u,.ptrow .val .u{font-size:.86em;margin-left:.24em}
 
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
 @media (min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
@@ -153,7 +155,11 @@ nav button .bug{position:absolute;top:2px;right:calc(50% - 17px);width:8px;heigh
   font-weight:640}
 .striplink .v{font-size:var(--fs-mid);font-weight:640;font-variant-numeric:tabular-nums;
   line-height:1.2}
-.striplink .go{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
+.striplink .go{margin-left:auto;color:var(--accent);font-size:12.5px;white-space:nowrap;
+  font-weight:600;display:flex;align-items:center;gap:5px}
+.striplink .go::after{content:"";width:6px;height:6px;border-top:1.8px solid currentColor;
+  border-right:1.8px solid currentColor;transform:rotate(45deg)}
+.striplink:hover{border-color:var(--line-2);box-shadow:var(--sh-2)}
 .striplink.billig .v{color:var(--cheap)} .striplink.dyr .v{color:var(--exp)}
 
 /* ---------- controls ---------- */
@@ -169,6 +175,8 @@ button.ghost{background:transparent;border-color:var(--line)}
 .row{display:flex;gap:9px;flex-wrap:wrap}
 .row>*{flex:1 1 128px}
 .row .grow2{flex:2 1 180px}
+.row .pair{display:flex;gap:9px;align-items:flex-end;flex:1 1 150px}
+.row .pair button{flex:1 1 auto}
 label{display:block;font-size:11.5px;color:var(--muted);margin:0 0 5px;font-weight:600;
   letter-spacing:.02em}
 select,input{font:inherit;width:100%;padding:11px 12px;border-radius:var(--r-sm);
@@ -198,10 +206,19 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   line-height:1.55;color:var(--ink-2)}
 .warn.quiet{border-left-color:var(--line-2);background:var(--sunk)}
 .warn.bad{border-left-color:var(--bad);background:color-mix(in srgb,var(--bad) 9%,var(--raise))}
-.alarm{background:color-mix(in srgb,var(--bad) 11%,var(--raise));border:1px solid var(--bad);
+/* Pa andra flikar an Just nu star larmet som en rad, inte som ett halvt
+   uppslag: det ska vara omojligt att missa, inte omojligt att komma forbi. */
+.alarmbar{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;
+  background:color-mix(in srgb,var(--bad) 11%,var(--raise));border:1px solid var(--bad);
+  color:var(--bad);border-radius:var(--r);padding:11px 14px;margin-bottom:12px;
+  font-size:13.5px;font-weight:620;cursor:pointer}
+.alarmbar .dot{background:var(--bad);width:9px;height:9px}
+.alarmbar .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alarmbar .go{font-size:11.5px;font-weight:600;white-space:nowrap;opacity:.85}
+.alarmcard{background:color-mix(in srgb,var(--bad) 11%,var(--raise));border:1px solid var(--bad);
   color:var(--bad);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;font-size:13.5px;
   line-height:1.55;animation:pulseIn .5s ease}
-.alarm b{display:block;font-size:15px;margin-bottom:4px}
+.alarmcard b{display:block;font-size:15px;margin-bottom:4px}
 @keyframes pulseIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
 
 #toast{position:fixed;left:12px;right:12px;bottom:calc(var(--nav-h) + 12px);z-index:60;
@@ -288,7 +305,12 @@ tr:last-child td{border-bottom:0}
 .curvenote b{color:var(--ink)}
 
 /* ---------- chart ---------- */
+/* Graferna far sin viewBox satt till elementets faktiska bredd i pixlar, sa att
+   en anvandarenhet ar en pixel. Da skalas ingen text ojamnt -- en axeletikett
+   hoptryckt till 60 % av sin bredd ar inte en stil, det ar en bugg. */
 .chart{width:100%;height:168px;display:block;overflow:visible}
+#wxChart{height:118px}
+#curveChart{height:190px}
 .chart .ln{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .chart .area{fill:url(#g);stroke:none}
 .chart .ax{stroke:var(--line);stroke-width:1}
@@ -297,7 +319,6 @@ tr:last-child td{border-bottom:0}
 .chart .ln{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
   animation:draw 1s cubic-bezier(.3,.8,.4,1) forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
-#curveChart{height:186px}
 #curveChart .ln{animation:none;stroke-dasharray:none}
 #curveChart .raw{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:4 3;opacity:.75}
 #curveChart .band{fill:var(--ink);opacity:.055}
@@ -336,12 +357,22 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;lin
 footer a{color:var(--muted)}
 
 /* ---------- integrationer: larm, inne, väder, elpris ---------- */
-.alarm.sev-warning{border-color:var(--warm);color:var(--warm);
+.alarmcard.sev-warning{border-color:var(--warm);color:var(--warm);
   background:color-mix(in srgb,var(--warm) 11%,var(--raise))}
-.alarm.sev-info{border-color:var(--line-2);color:var(--ink-2);background:var(--sunk)}
-.alarm .act{margin-top:6px;font-size:12.5px;line-height:1.55;opacity:.94}
-.alarm .meta{margin-top:8px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+.alarmcard.sev-info{border-color:var(--line-2);color:var(--ink-2);background:var(--sunk)}
+.alarmcard .act{margin-top:6px;font-size:12.5px;line-height:1.55;opacity:.94}
+.alarmcard .meta{margin-top:8px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
   font-weight:660;opacity:.7;font-variant-numeric:tabular-nums}
+#alarmBanner .hint{margin:-4px 0 12px}
+/* Kurvans forklaringsruta och radgivarens spegling i grafen */
+.advlead{color:var(--ink-2);font-size:12.5px;line-height:1.6;margin:0 0 12px}
+.rule{margin:12px 0 0;border-top:1px solid var(--line)}
+.rule div{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px;
+  line-height:1.5;color:var(--ink-2)}
+.rule div:last-child{border-bottom:0}
+.rule b{flex:0 0 40%;color:var(--ink);font-weight:600}
+.linkish{background:none;border:0;padding:0;color:var(--accent);font:inherit;font-size:12.5px;
+  font-weight:600;cursor:pointer;text-align:left}
 
 .metric{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
 .metric .n{font-size:var(--fs-big);font-weight:660;letter-spacing:-.03em;line-height:1;
@@ -364,13 +395,17 @@ tr.dim{opacity:.55}
   font-weight:660}
 .day .mx{font-size:15px;font-weight:640;font-variant-numeric:tabular-nums}
 .day .mn{font-size:13px;color:var(--cool);font-variant-numeric:tabular-nums}
-#wxChart{height:118px}
 #wxChart .ln{stroke:var(--cool)}
 #wxChart .area{fill:url(#gw)}
 #wxChart .mark{stroke:var(--cool);stroke-width:1.4;stroke-dasharray:3 3;opacity:.65}
 
-.bars{width:100%;height:132px;display:block;margin-top:12px}
-.bars rect.bar{fill:var(--line-2)}
+.barwrap{display:flex;gap:7px;margin-top:12px;align-items:flex-start}
+.barwrap .yax{flex:0 0 auto;height:132px;display:flex;flex-direction:column;
+  justify-content:space-between;font-size:10px;color:var(--muted);text-align:right;
+  font-variant-numeric:tabular-nums;padding:1px 0 1px;line-height:1}
+.barwrap .col{flex:1;min-width:0}
+.bars{width:100%;height:132px;display:block}
+.bars rect{fill:var(--line-2)}
 .bars rect.billig{fill:var(--cheap)}
 .bars rect.dyr{fill:var(--exp)}
 .bars rect.nowcol{fill:var(--accent);opacity:.16}
@@ -526,9 +561,18 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
     </div>
   </div>
 
-  <div class="card" id="curveCard" hidden>
-    <h2>Din värmekurva</h2>
-    <div id="curveBody"></div>
+  <!-- Avancerat: egen kurva, granser och punktforskjutning. Hopfallt fran start,
+       for det ar de har installningarna en varmepump gar sonder av att man andrar
+       pa mafa. Inte nedlatande -- ratt forval. -->
+  <div class="card" id="advCard" hidden>
+    <h2>Avancerat</h2>
+    <p class="lead" id="advLead">Bakom luckan ligger punkterna som formar din egen värmekurva,
+      golvet och taket för framledningen och punktförskjutningen. De styr värmen direkt och tar
+      ett dygn att utvärdera — det är de här som gör ett hus kallt om man ändrar dem på måfå.</p>
+    <details class="adv" id="advBox">
+      <summary id="advSum">Öppna avancerade värmeinställningar</summary>
+      <div class="inner" id="advBody"></div>
+    </details>
   </div>
 </section>
 
@@ -540,7 +584,10 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
   </div>
 </section>
 
-<!-- ===================== VATTEN OCH LUFT ===================== -->
+<!-- ===================== VATTEN OCH LUFT =====================
+     Luft var en flik med ett enda kort och en halv skarm tom. Varmvatten och
+     ventilation ar samma lada i pannrummet -- pa en franluftspump ar det till och
+     med samma luft -- sa de delar flik, och fliken heter bada delarna. -->
 <section class="view" id="v-water">
   <div class="card">
     <h2>Extra varmvatten</h2>
@@ -556,8 +603,8 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
           <option value="360">6 timmar</option>
         </select>
       </div>
-      <div style="display:flex;align-items:flex-end"><button class="warm" id="hwOn">Starta</button></div>
-      <div style="display:flex;align-items:flex-end"><button class="ghost" id="hwOff">Avbryt</button></div>
+      <div class="pair"><button class="warm" id="hwOn">Starta</button>
+        <button class="ghost" id="hwOff">Avbryt</button></div>
     </div>
     <div id="hwLive"></div>
   </div>
@@ -595,9 +642,9 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
 <!-- ===================== HISTORIK ===================== -->
 <section class="view" id="v-hist">
   <div class="card">
-    <h2>Historik</h2>
+    <h2>Mätvärden över tid</h2>
     <div class="chips" id="histTabs"></div>
-    <svg class="chart" id="chart" preserveAspectRatio="none">
+    <svg class="chart" id="chart">
       <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="var(--accent)" stop-opacity=".22"/>
         <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
@@ -673,8 +720,1943 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
   <button data-view="now" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Just nu</button>
   <button data-view="heat"><svg viewBox="0 0 24 24"><path d="M14 14.76V4a2 2 0 1 0-4 0v10.76a4 4 0 1 0 4 0z"/></svg>Värme</button>
   <button data-view="price" hidden><svg viewBox="0 0 24 24"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/></svg>Elpris</button>
-  <button data-view="water"><svg viewBox="0 0 24 24"><path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/></svg>Vatten</button>
+  <button data-view="water"><svg viewBox="0 0 24 24"><path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/></svg>Vatten &amp; luft</button>
   <button data-view="hist"><svg viewBox="0 0 24 24"><path d="M3 18l5-6 4 3 5-8 4 5"/></svg>Historik</button>
 </div></nav>
 
 <script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+/* ---------------- token + api ---------------- */
+let token = (() => {
+  const u = new URLSearchParams(location.search).get('token');
+  try {
+    if (u) localStorage.setItem('nibe_token', u);
+    return u || localStorage.getItem('nibe_token') || '';
+  } catch (e) { return u || ''; }
+})();
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
+  if (token) headers['X-Auth-Token'] = token;
+  const res = await fetch(path, Object.assign({}, opts, {headers}));
+  const body = await res.json().catch(() => ({error: 'svaret gick inte att tolka'}));
+  if (res.status === 401) {
+    // An installed home-screen app has its own storage, so a ?token= from the
+    // browser is not there. Ask once rather than showing a dead dashboard.
+    const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
+    if (given) {
+      token = given.trim();
+      try { localStorage.setItem('nibe_token', token); } catch (e) {}
+      return api(path, opts);
+    }
+  }
+  if (!res.ok) throw new Error((body && body.error) || ('HTTP ' + res.status));
+  return body;
+}
+const post = (p, b) => api(p, {method: 'POST', body: JSON.stringify(b || {})});
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toast(text, ok = true, ms = 7000) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (ok ? 'ok' : 'bad');
+  el.textContent = text;
+  $('#toast').appendChild(el);
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 260);
+  }, ms);
+}
+
+/* ---------------- siffror på svenska ----------------
+   Ett enda ställe. Decimalkomma, riktigt minustecken (U+2212, inte
+   bindestreck) och tunt mellanrum som tusentalsavskiljare — samma regel i
+   JavaScript som i den svenska text servern skickar, så att "Nivåfel −0,6 °C"
+   och "Ungefär +0,6 °C" kan stå i samma kort utan att se ut som två appar. */
+const NBTHIN = ' ';
+const MINUS = '−';
+
+function num(v, dec) {
+  if (typeof v !== 'number' || !isFinite(v)) return '–';
+  const d = dec === undefined ? (Number.isInteger(v) ? 0 : 1) : dec;
+  const r = Math.abs(Number(v.toFixed(d)));
+  const parts = r.toFixed(d).split('.');
+  const whole = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, NBTHIN);
+  // −0,0 är inte en mätning utan en avrundning. Tecknet faller bort med nollan.
+  const sign = (v < 0 && r !== 0) ? MINUS : '';
+  return sign + whole + (parts[1] ? ',' + parts[1] : '');
+}
+const one = v => num(v, 1);
+const two = v => num(v, 2);
+const signed = (v, dec) =>
+  (typeof v === 'number' && isFinite(v)) ? ((v > 0 ? '+' : '') + num(v, dec === undefined ? 1 : dec)) : '–';
+const signed2 = v => signed(v, 2);
+// Utetemperaturer i löpande text: "10 minusgrader" läser sig som svenska gör.
+function degWord(t) {
+  if (t === 0) return 'noll grader';
+  return Math.abs(t) + (t < 0 ? ' minusgrader' : ' plusgrader');
+}
+const unit = u => (u ? '<span class="u">' + esc(u) + '</span>' : '');
+
+function fmt(v, u) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') return num(v, (u === '°C' || !Number.isInteger(v)) ? 1 : 0) + unit(u);
+  return esc(String(v));
+}
+// Ett värde i en bekräftelseruta eller en rad: siffra + enhet, samma regel.
+const valTxt = (v, u) =>
+  (typeof v === 'number' ? num(v, Number.isInteger(v) ? 0 : 1) : esc(String(v))) + (u ? ' ' + u : '');
+
+/* ---------------- tid och datum ---------------- */
+const DAYS_SV = ['sön', 'mån', 'tis', 'ons', 'tor', 'fre', 'lör'];
+
+function toDate(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return new Date(v < 1e11 ? v * 1000 : v);
+  if (/^\d+$/.test(String(v).trim())) {
+    const n = Number(v);
+    return new Date(n < 1e11 ? n * 1000 : n);
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+const hh = d => String(d.getHours()).padStart(2, '0');
+function dayWord(d) {
+  const now = new Date();
+  const same = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
+                      && a.getDate() === b.getDate();
+  const tomorrow = new Date(now.getTime() + 864e5);
+  if (same(d, now)) return 'i dag';
+  if (same(d, tomorrow)) return 'i morgon';
+  return DAYS_SV[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1);
+}
+function whenTxt(v) {
+  const d = toDate(v);
+  if (!d) return '';
+  return dayWord(d) + ' kl ' + hh(d) + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+// En tidsstämpel på en axel ska säga vilken dag den är: "i dag 20:00", inte "20:00".
+const stampTxt = d => dayWord(d) + ' ' + hh(d) + ':00';
+function ageTxt(min) {
+  if (min === null || min === undefined) return '';
+  if (min < 1.5) return 'nyss';
+  if (min < 90) return Math.round(min) + ' min sedan';
+  if (min < 2880) return Math.round(min / 60) + ' h sedan';
+  return Math.round(min / 1440) + ' dygn sedan';
+}
+/* Väntetid: en enda formulering. Rådgivaren svarar i ord ("ett dygn"),
+   kalibreringen i timmar (36). Samma skrivning får inte utlova två olika
+   väntetider, så de räknas om till timmar, den längsta vinner, och den skrivs
+   ut på ett sätt. */
+const WAIT_WORDS = {'ett dygn': 24, 'två dygn': 48, 'ett halvt dygn': 12};
+function waitHours(v) {
+  if (typeof v === 'number' && isFinite(v)) return v;
+  const k = String(v || '').trim().toLowerCase();
+  return WAIT_WORDS[k] || null;
+}
+function waitWords(h) {
+  if (!h) return 'ett dygn';
+  if (h <= 12) return h + ' timmar';
+  if (h <= 24) return 'ett dygn';
+  if (h < 48) return Math.round(h) + ' timmar';
+  if (h < 72) return 'två dygn';
+  return Math.round(h / 24) + ' dygn';
+}
+const longestWait = (...v) => waitWords(Math.max(0, ...v.map(x => waitHours(x) || 0)) || 24);
+
+const SKEL = '<div class="skel" style="width:62%"></div><div class="skel" style="width:84%"></div>';
+const warnBox = m => `<div class="warn">${esc(m)}</div>`;
+const badBox = m => `<div class="warn bad">${esc(m)}</div>`;
+
+/* ---------------- navigering ----------------
+   Fliknamnet och vyns rubrik är samma ord. Elpriset har en egen flik när det
+   är konfigurerat -- det är dygnets färskvara och låg tidigare sist på en
+   3000 px lång Värme-flik. Ventilationen delar flik med varmvattnet: den var
+   ett kort och en halv skärm tomrum. */
+const TITLES = {now:'Just nu', heat:'Värme', price:'Elpris', water:'Vatten & luft',
+                hist:'Historik', set:'Inställningar'};
+const ONSHOW = {};
+let current = 'now';
+
+function show(name) {
+  if (!TITLES[name]) return;
+  const btn = document.querySelector('nav button[data-view="' + name + '"]');
+  if (btn && btn.hidden) name = 'now';
+  current = name;
+  $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + name));
+  $$('nav button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === name));
+  $('#viewTitle').textContent = TITLES[name];
+  window.scrollTo({top: 0, behavior: 'instant'});
+  try { history.replaceState(null, '', '#' + name); } catch (e) {}
+  paintAlarms(activeAlarms);
+  if (ONSHOW[name]) ONSHOW[name]();
+}
+$$('nav button').forEach(b => b.onclick = () => show(b.dataset.view));
+$('#goSettings').onclick = () => show('set');
+addEventListener('hashchange', () => show(location.hash.slice(1) || 'now'));
+addEventListener('scroll', () => $('#top').classList.toggle('scrolled', scrollY > 4),
+                 {passive: true});
+
+function setTabVisible(name, on) {
+  const b = document.querySelector('nav button[data-view="' + name + '"]');
+  if (!b || b.hidden === !on) return;
+  b.hidden = !on;
+  document.documentElement.style.setProperty('--tabs',
+    $$('nav button').filter(x => !x.hidden).length);
+  if (!on && current === name) show('now');
+}
+
+/* ---------------- en enda bekräftelseruta ----------------
+   Varje skrivning i appen -- stegaren, rådgivaren, kalibreringen, kurvans
+   punkter och inställningsredigeraren -- går genom ask() och applyWrite().
+   Ett register, en ruta, en formulering, en väntetid. */
+let modalClose = null;
+
+function ask(o) {
+  return new Promise(res => {
+    const m = $('#modal');
+    $('#modalTitle').textContent = o.title;
+    $('#modalBody').innerHTML = o.body;
+    $('#modalYes').textContent = o.yes || 'Genomför';
+    $('#modalNo').textContent = o.no || 'Avbryt';
+    m.hidden = false;
+    const done = v => {
+      m.hidden = true; modalClose = null;
+      $('#modalYes').onclick = null; $('#modalNo').onclick = null; m.onclick = null;
+      document.removeEventListener('keydown', key);
+      res(v);
+    };
+    const key = e => { if (e.key === 'Escape') done(false); };
+    modalClose = () => done(false);
+    $('#modalYes').onclick = () => done(true);
+    $('#modalNo').onclick = () => done(false);
+    m.onclick = e => { if (e.target === m) done(false); };
+    document.addEventListener('keydown', key);
+    setTimeout(() => $('#modalYes').focus(), 30);
+  });
+}
+
+/* Vad servern faktiskt svarade, oavsett vilken av de två formerna den valde.
+   En enkel skrivning svarar {address, before, after}; en gruppskrivning svarar
+   {changes: [...], partial, logged}. Att anta den ena och köra .map på den
+   andra är hur en genomförd skrivning en gång rapporterades som ett fel. */
+function readWrite(r) {
+  const out = {changes: [], partial: false, logged: true, error: ''};
+  if (!r || typeof r !== 'object') { out.error = 'Servern svarade med något appen inte kunde tolka.'; return out; }
+  if (Array.isArray(r.changes)) out.changes = r.changes.filter(c => c && typeof c === 'object');
+  else if (Array.isArray(r)) out.changes = r.filter(c => c && typeof c === 'object');
+  else if ('after' in r || 'address' in r) out.changes = [r];
+  out.partial = r.partial === true;
+  out.logged = r.logged !== false;
+  if (typeof r.error === 'string') out.error = r.error;
+  if (Array.isArray(r.rolled_back)) out.rolled_back = r.rolled_back;
+  return out;
+}
+
+/* Det värde pumpen har just nu, för de register appen redan läst. Används bara
+   när ett svar aldrig kom fram: en skrivning som gick igenom får inte
+   rapporteras som ett fel bara för att nätet dog på vägen tillbaka. */
+function currentValue(address) {
+  address = Number(address);
+  if (heat) {
+    if (address === 40031) return heat.offset;
+    if (address === 40027) return heat.curve;
+    if (address === 40035) return heat.min_supply;
+    if (address === 40039) return heat.max_supply;
+    const i = OWN_CURVE_REG.indexOf(address);
+    if (i >= 0 && Array.isArray(heat.own_curve)) return heat.own_curve[i];
+  }
+  const row = setRows[address];
+  return row ? row.value : undefined;
+}
+
+/* En skrivning, från början till slut. Bekräftelse, skrivning, kvittens.
+   `items` = [{address, label, from, to, unit, why}] -- flera bara när de hör
+   ihop och måste gå tillsammans (rådgivarens grupper). */
+async function applyWrite(button, items, opt) {
+  opt = opt || {};
+  const wait = longestWait(opt.wait, opt.waitHours);
+  const many = items.length > 1;
+  const body =
+    items.map(c => `<div class="change"><b>${esc(c.label)}</b>
+        <div class="arrow">${esc(valTxt(c.from, c.unit))} <span style="color:var(--muted)">→</span>
+          ${esc(valTxt(c.to, c.unit))}</div>
+        <div class="addr">register ${esc(String(c.address))}</div></div>`).join('') +
+    (many ? `<div class="why">De två hör ihop och genomförs tillsammans. Var för sig gör de fel sak.</div>` : '') +
+    items.map(c => c.why).filter(Boolean)
+         .filter((w, i, a) => a.indexOf(w) === i)
+         .map(w => `<div class="why">${esc(w)}</div>`).join('') +
+    (opt.expected ? `<div class="why">Förväntat: ${esc(opt.expected)}</div>` : '') +
+    `<div class="why">Pumpen ändras direkt, men huset svarar långsamt: vänta ${esc(wait)}
+      innan du bedömer resultatet, och gör bara en ändring i taget.</div>`;
+
+  const go = await ask({title: many ? 'Två ändringar som hör ihop' : 'Bekräfta ändringen', body});
+  if (!go) return false;
+
+  const label = button ? button.textContent : '';
+  if (button) { button.disabled = true; button.textContent = '…'; }
+  const said = c => `${c.label} ${valTxt(c.from, c.unit)} → ${valTxt(c.to, c.unit)}`;
+  try {
+    const payload = many
+      ? {confirm: true, changes: items.map(c => ({address: c.address, value: c.to, expect: c.from}))}
+      : {confirm: true, address: items[0].address, value: items[0].to, expect: items[0].from};
+    const r = readWrite(await post('/api/write', payload));
+
+    if (r.partial) {
+      // Halvvägs är inte "misslyckades": säg vad som faktiskt står i pumpen nu.
+      const done = r.changes.map(c => `${c.title || c.address}: ${valTxt(c.before)} → ${valTxt(c.after)}`);
+      toast('Bara en del gick igenom. ' + (done.length ? done.join('. ') + '. ' : '') +
+            (r.error || '') + (r.rolled_back && r.rolled_back.length
+              ? ' Återställde: ' + r.rolled_back.join(', ') + '.' : ''), false, 12000);
+    } else {
+      toast(items.map(said).join(' · ') + '. Känn efter om ' + wait + '.' +
+            (r.logged ? '' : ' (Ändringen gick igenom men kunde inte skrivas i ändringsloggen.)'));
+    }
+    return !r.partial;
+  } catch (e) {
+    // Svaret kom aldrig fram. Läs om och se efter innan appen påstår något.
+    let landed = null;
+    try {
+      await loadHeating(true);
+      await loadSettings(true);
+      landed = items.every(c => Number(currentValue(c.address)) === Number(c.to));
+    } catch (e2) { landed = null; }
+    if (landed === true) {
+      toast(items.map(said).join(' · ') + '. Svaret kom aldrig fram, men värdet i pumpen är ' +
+            'ändrat — skrivningen gick igenom. Känn efter om ' + wait + '.');
+      return true;
+    }
+    if (landed === false) { toast('Ändringen gick inte igenom: ' + e.message, false, 11000); return false; }
+    toast('Vet inte om ändringen gick igenom: ' + e.message +
+          ' Läs av värdet innan du försöker igen.', false, 13000);
+    return false;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = label; }
+  }
+}
+
+/* De skrivningar som inte är registerändringar: extra varmvatten, ventilation,
+   backup. Ingen bekräftelseruta, men samma regel om svarsformen -- ett svar
+   utan de fält appen väntar sig får inte se ut som ett fel. */
+async function act(button, fn, describe) {
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = '…';
+  try {
+    const r = await fn();
+    let text;
+    try { text = describe(r || {}); } catch (e) { text = 'Klart.'; }
+    toast(text || 'Klart.');
+    await refresh();
+  } catch (e) {
+    toast(e.message, false, 11000);
+  } finally { button.disabled = false; button.textContent = label; }
+}
+
+/* ================= just nu =================
+   Ett hus har en temperatur, och det är den frågan man ställer i dörren. När
+   det finns inomhusgivare är den siffran hjälten; utan dem är det varmvattnet,
+   som är det största pumpen själv vet. Utetemperaturen står på ett ställe till
+   (kaklet) och i den fullständiga tabellen -- inte fyra gånger på en skärm. */
+const TILES = [
+  [30002, 'Ute', 'cool'], [30006, 'Framledning', 'warm'], [30008, 'Retur', ''],
+  [30009, 'Varmvatten', 'warm'], [30010, 'Laddning', 'warm'], [30020, 'Frånluft', ''],
+  [31047, 'Kompressor', ''], [40012, 'Gradminuter', ''], [32134, 'Fläkt', ''],
+  [40057, 'Varmvattenkomfort', ''], [40105, 'Ventilation', ''], [31028, 'Tillskott', ''],
+  [31088, 'Drifttid', ''],
+];
+// Tre i bredd på telefon, fyra på dator: rutnätet ska gå jämnt ut i båda.
+const TILE_MAX = 12;
+
+let latest = [], byAddr = {}, fanSpeeds = null;
+
+/* Registerkartans titlar är engelsk installatörsförkortning. Där appen har ett
+   svenskt namn används det -- annars läcker "Heat offset" och "Priority" in i
+   en i övrigt svensk sida. Pumpens display säger tillskott, inte elpatron, och
+   varmvattenkomfort, inte VV-läge; appen säger samma sak som displayen. */
+const SWEDISH = {
+  30002:'Utetemperatur', 30006:'Framledning', 30008:'Returledning',
+  30009:'Varmvatten, topp', 30010:'Varmvatten, laddning', 30020:'Frånluft',
+  30117:'Rumstemperatur', 31018:'Beräknad framledning', 31026:'Drifttid, tillskott',
+  31028:'Tillskott just nu', 31029:'Prioritet just nu', 31047:'Kompressorfrekvens',
+  31079:'Extra varmvatten, status', 31088:'Drifttid, kompressor',
+  31092:'Drifttid, varmvatten', 31535:'Kompressorstarter', 31975:'Fläktvarvtal',
+  31976:'Larmnummer', 32134:'Frånluftsfläkt', 32196:'Larm av klass 1',
+  40012:'Gradminuter', 40031:'Värmeoffset', 40057:'Varmvattenkomfort',
+  40067:'Periodisk höjning, intervall', 40105:'Ventilationsläge',
+  40110:'Frånluftsfläkt, normal', 40226:'Extra varmvatten, minuter kvar',
+};
+const namn = r => SWEDISH[r.address] || r.title;
+
+function freshness(ts, err) {
+  const dot = $('#dot'), out = $('#freshness'), wrap = $('#statusWrap');
+  // Ett stående larm slår ut allt annat i rubriken. En grön andande prick och
+  // ordet "live" medan kompressorn är blockerad är sant och oanvändbart.
+  if (activeAlarms.length) {
+    wrap.classList.add('alarm');
+    dot.className = 'dot alarm';
+    out.textContent = activeAlarms.length === 1 ? 'larm' : activeAlarms.length + ' larm';
+    return;
+  }
+  wrap.classList.remove('alarm');
+  if (err) { dot.className = 'dot stale'; out.textContent = 'pumpen svarar inte'; return; }
+  if (!ts) { dot.className = 'dot'; out.textContent = 'väntar'; return; }
+  const age = Math.round(Date.now() / 1000 - ts);
+  dot.className = 'dot ' + (age < 180 ? 'live' : 'stale');
+  out.textContent = age < 90 ? 'live' : Math.round(age / 60) + ' min sedan';
+}
+
+function boosts() {
+  const out = [];
+  const hw = byAddr[40226] && byAddr[40226].value;
+  if (hw) out.push(['Extra varmvatten', num(hw, 0) + '<span class="u">min kvar</span>']);
+  const mode = byAddr[40105] && byAddr[40105].value;
+  if (mode) {
+    const pct = fanSpeeds && fanSpeeds[mode] !== undefined ? fanSpeeds[mode] : null;
+    out.push(['Ventilationsboost',
+              pct === null ? 'läge ' + mode : num(pct, 0) + '<span class="u">%</span>']);
+  }
+  return out;
+}
+
+function renderNow() {
+  byAddr = Object.fromEntries(latest.map(r => [r.address, r]));
+  const val = a => (byAddr[a] && byAddr[a].value !== null && byAddr[a].value !== undefined)
+    ? byAddr[a].value : null;
+
+  // Hjälten: inomhus när huset kan svara, annars varmvattnet.
+  const side = [];
+  if (indoorAvg !== null) {
+    $('#heroKey').textContent = 'Inne';
+    $('#heroVal').innerHTML = one(indoorAvg) + unit('°C');
+    if (val(30009) !== null) side.push('Varmvatten <b>' + fmt(val(30009), '°C') + '</b>');
+  } else {
+    $('#heroKey').textContent = 'Varmvatten';
+    $('#heroVal').innerHTML = val(30009) === null ? '–' : fmt(val(30009), '°C');
+  }
+  if (val(30002) !== null) side.push('Ute <b>' + fmt(val(30002), '°C') + '</b>');
+  // "Larm 0" är inte information. Ett larm har en egen ruta som syns på varje flik.
+  $('#heroSide').innerHTML = side.join('<br>') || '&nbsp;';
+
+  // Elpriset är en genväg till sin egen flik, inte ett kakel bland tolv andra.
+  const strip = $('#priceStrip');
+  if (spotNow && typeof spotNow.total === 'number') {
+    const band = spotNow.band === 'billig' || spotNow.band === 'dyr' ? spotNow.band : '';
+    strip.innerHTML = `<button class="striplink ${band}" id="priceGo">
+      <div><div class="k">Elpris just nu</div>
+        <div class="v">${two(spotNow.total)}${unit(spotCur + '/kWh')}</div></div>
+      <span class="go">Dygnets priser</span></button>`;
+    $('#priceGo').onclick = () => show('price');
+  } else strip.innerHTML = '';
+
+  const live = boosts();
+  const tiles = TILES
+    .filter(([a]) => val(a) !== null)
+    // Ventilationskaklet upprepar boostkaklet när en boost är igång.
+    .filter(([a]) => !(a === 40105 && live.length && val(40105)))
+    .map(([a, label, cls]) => {
+      const r = byAddr[a];
+      return `<div class="tile ${cls}"><div class="k">${esc(label)}</div>
+              <div class="v">${fmt(r.value, r.unit)}</div></div>`;
+    });
+  $('#tiles').innerHTML = (live.map(([k, v]) =>
+    `<div class="tile live"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`)
+    .concat(tiles)).slice(0, TILE_MAX).join('');
+
+  $('#all').innerHTML = latest.map(r =>
+    `<tr><td>${esc(namn(r))}<div class="addr">${r.address} · ${esc(r.title)}</div></td>
+     <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>' : fmt(r.value, r.unit)}</td></tr>`
+  ).join('');
+
+  const hwLive = val(40226);
+  $('#hwLive').innerHTML = hwLive
+    ? `<div class="warn">Extra varmvatten pågår — ${num(hwLive, 0)} minuter kvar.</div>` : '';
+  const vm = val(40105);
+  $('#ventLive').innerHTML = vm
+    ? `<div class="warn">Ventilationsläge ${vm}${fanSpeeds && fanSpeeds[vm] !== undefined
+        ? ' (' + num(fanSpeeds[vm], 0) + ' %)' : ''} är aktivt. Pumpen går tillbaka själv.</div>` : '';
+
+  if (!alarmsLive) registerAlarm(val(31976), val(32196));
+}
+
+async function refresh() {
+  try {
+    const d = await api('/api/status');
+    latest = Array.isArray(d.registers) ? d.registers : [];
+    if (d.features && typeof d.features === 'object') FEATURES = d.features;
+    setTabVisible('price', gate('spot') !== false);
+    lastPolled = d.polled_at; lastPollErr = d.poll_error;
+    renderNow();
+    freshness(lastPolled, lastPollErr);
+    if (!$('#histTabs').children.length) buildHistTabs();
+    if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
+  } catch (e) {
+    $('#statusWrap').classList.remove('alarm');
+    $('#dot').className = 'dot stale';
+    $('#freshness').textContent = 'fel';
+    if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
+  }
+}
+
+/* ================= larm =================
+   Larmrutan ligger utanför flikarna. Ett stående larm som bara syns på Just nu
+   är ett larm man missar, och rubrikraden säger det också. */
+let activeAlarms = [];
+let lastPolled = null, lastPollErr = null;
+
+function alarmBox(a) {
+  const sev = a.severity === 'warning' ? ' sev-warning'
+            : a.severity === 'info' ? ' sev-info' : '';
+  const meta = ['Kod ' + (a.code === undefined || a.code === null ? '?' : a.code)];
+  if (a.since) meta.push('sedan ' + whenTxt(a.since));
+  return `<div class="alarmcard${sev}">
+    <b>${esc(a.text || ('Larm ' + a.code))}</b>
+    ${a.action ? `<div class="act">${esc(a.action)}</div>` : ''}
+    ${a.known === false ? `<div class="act">Koden finns inte i appens lista — läs larmtexten
+      på pumpens display.</div>` : ''}
+    <div class="meta">${esc(meta.join(' · '))}</div></div>`;
+}
+
+function paintAlarms(list) {
+  activeAlarms = list || [];
+  const ab = $('#alarmBanner');
+  if (!activeAlarms.length) { ab.hidden = true; ab.innerHTML = ''; return; }
+  ab.hidden = false;
+  if (current !== 'now') {
+    const a = activeAlarms[0], more = activeAlarms.length - 1;
+    ab.innerHTML = `<button class="alarmbar" id="alarmGo"><span class="dot"></span>
+      <span class="t">${esc(a.text || ('Larm ' + a.code))}</span>
+      <span class="go">${more ? '+' + more + ' till · ' : ''}läs mer</span></button>`;
+    $('#alarmGo').onclick = () => show('now');
+    return;
+  }
+  // Förklaringen om återställning står en gång under alla larmen, inte en gång per larm.
+  ab.innerHTML = activeAlarms.map(alarmBox).join('') +
+    `<p class="hint">Larmet återställs på pumpens display, inte härifrån. Att kvittera ett larm
+      från telefonen utan att ha sett pumpen är att sudda ut spåret efter det som hände.</p>`;
+}
+
+// Utan larmbevakning finns bara larmnumret i registret. Sämre ruta, men ett
+// larm är viktigare än snyggheten.
+function registerAlarm(code, klass1) {
+  if (code) {
+    paintAlarms([{code: code, text: 'Pumpen larmar (kod ' + code + ')',
+      action: 'Slå upp koden på pumpens display — den visar larmtexten och vad som ska göras. ' +
+              'Ett larm kan betyda att pumpen slutat värma, så vänta inte på att det går över.',
+      severity: 'alarm'}]);
+  } else if (klass1) {
+    paintAlarms([{code: null, text: 'Pumpen har ett larm av klass 1',
+      action: 'Pumpen flaggar ett larm utan att lägga någon kod i larmregistret. Läs av ' +
+              'displayen.', severity: 'alarm'}]);
+  } else paintAlarms([]);
+  freshness_refresh();
+}
+const freshness_refresh = () => freshness(lastPolled, lastPollErr);
+
+const SEV_SV = {alarm: 'larm', warning: 'varning', info: 'information'};
+
+function renderAlarms(d) {
+  paintAlarms(d.active || []);
+
+  const hist = Array.isArray(d.history) ? d.history : [];
+  const wrap = $('#alarmHistWrap');
+  if (!hist.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  $('#alarmHistSum').textContent = 'Larmhistorik (' + hist.length + ')';
+  // Allvarsgraden på svenska, och en gång per rad -- inte "warning" två gånger.
+  $('#alarmHist').innerHTML = hist.slice(0, 30).map(a => `
+    <tr><td>${esc(a.text || ('Larm ' + a.code))}
+      <div class="addr">${esc(['kod ' + a.code, whenTxt(a.since)].filter(Boolean).join(' · '))}</div></td>
+     <td>${esc(SEV_SV[a.severity] || a.severity || '')}</td></tr>`).join('');
+  const notes = [];
+  if (d.notify_error)
+    notes.push(warnBox('Larmen visas här, men telefonen får inget: ' + d.notify_error +
+                       ' Larmbevakningen fortsätter ändå.'));
+  else if (d.notify === true) notes.push('<p class="hint">Notiser till telefonen är på.</p>');
+  else notes.push('<p class="hint">Inga notiser är konfigurerade — larm syns bara här i appen.</p>');
+  if (d.last_error)
+    notes.push(`<p class="hint">Senaste felet från larmbevakningen: ${esc(String(d.last_error))}</p>`);
+  notes.push(`<div class="row" style="margin-top:8px"><button class="ghost" id="alarmTest">
+    Skicka en testnotis</button></div>`);
+  $('#alarmHistNote').innerHTML = notes.join('');
+  $('#alarmTest').onclick = async ev => {
+    const b = ev.currentTarget, label = b.textContent;
+    b.disabled = true; b.textContent = '…';
+    try {
+      const r = await post('/api/alarms/test', {});
+      const ok = !!(r && (r.ok === true || r.sent === true));
+      toast(ok ? 'Testnotisen skickades. Kom den fram fungerar larmnotiserna.'
+               : ((r && r.error) || 'Testnotisen kunde inte skickas.'), ok, ok ? 7000 : 12000);
+    } catch (e) { toast('Testnotisen kunde inte skickas: ' + e.message, false, 12000); }
+    finally { b.disabled = false; b.textContent = label; loadAlarms(); }
+  };
+}
+
+async function loadAlarms() {
+  const g = gate('alarms');
+  if (g === false) {
+    alarmsLive = false; feature('alarms', false);
+    $('#alarmHistWrap').hidden = true;
+    if (latest.length) renderNow();
+    return;
+  }
+  let d;
+  try { d = await api('/api/alarms'); }
+  catch (e) {
+    alarmsLive = false; $('#alarmHistWrap').hidden = true;
+    if (latest.length) renderNow();
+    return;
+  }
+  if (!d || d.ok === false || !Array.isArray(d.active)) {
+    alarmsLive = false;
+    $('#alarmHistWrap').hidden = true;
+    feature('alarms', false);
+    if (latest.length) renderNow();
+    return;
+  }
+  alarmsLive = true;
+  feature('alarms', d.notify !== false);
+  renderAlarms(d);
+  freshness_refresh();
+}
+
+/* ================= integrationer =================
+   Fem av funktionerna hänger på något utanför pumpen: Homey, SMHI, Tibber,
+   larmbevakningen och långtidskalibreringen. En integration som inte är
+   konfigurerad är varken ett fel eller en tom ruta — den finns helt enkelt
+   inte, och nämns bara på ett ställe: en tystlåten, dölj-bar ruta under
+   Inställningar som säger vad som ska stå i config.yaml. */
+
+let FEATURES = null;          // /api/status.features; null = servern har inte sagt
+let alarmsLive = false;       // sant när /api/alarms svarar; då äger den larmrutan
+let spotNow = null;           // priset just nu, för genvägen på Just nu
+let spotCur = 'kr';           // valutan kommer från servern, inte från en gissning
+let indoorAvg = null;         // husets temperatur, när Homey vet den
+
+const FEATURE_ALIAS = {
+  indoor:   ['indoor', 'homey'],
+  weather:  ['weather', 'smhi', 'forecast'],
+  spot:     ['spot', 'tibber', 'prices', 'price'],
+  alarms:   ['alarms', 'alarm'],
+  autotune: ['autotune', 'tune', 'calibration'],
+};
+
+// true = påslagen, false = inte konfigurerad, null = servern har inte sagt
+// (då får svaret från endpointen avgöra i stället).
+function gate(name) {
+  if (!FEATURES || typeof FEATURES !== 'object') return null;
+  for (const k of FEATURE_ALIAS[name]) {
+    if (k in FEATURES) {
+      const v = FEATURES[k];
+      if (v && typeof v === 'object')
+        return !!(v.configured !== undefined ? v.configured
+                : v.enabled !== undefined ? v.enabled
+                : v.ok !== undefined ? v.ok : true);
+      return !!v;
+    }
+  }
+  return null;
+}
+
+/* Nycklarna ska stå exakt som config.example.yaml vill ha dem. homey_devices är
+   en kommaseparerad sträng där -- skriver man YAML-listan som tipset förr
+   visade tolkar reservparsern (utan PyYAML) den som skräp, tyst. */
+const HINT = {
+  indoor: {t: 'Inomhustemperatur från Homey',
+    k: 'homey_host: "192.168.1.20"\nhomey_token: "<lokal API-nyckel från Homey>"\nhomey_devices: "Sovrum, Vardagsrum"   # de givare du litar på, kommaseparerat',
+    w: 'Då visar Just nu husets egen temperatur per våning i stället för bara pumpens givare.'},
+  weather: {t: 'Väderprognos från SMHI',
+    k: 'weather_lat: 59.3293\nweather_lon: 18.0686',
+    w: 'Då syns kommande dygns lägsta temperatur — det som faktiskt betyder något för en värmepump. Kräver ingen nyckel.'},
+  spot: {t: 'Elpris från Tibber',
+    k: 'tibber_token: "<personlig token från developer.tibber.com>"\ntibber_home_id: ""    # bara om du har flera hem',
+    w: 'Då får elpriset en egen flik med dygnets timpriser och ett försiktigt förslag på när värmen är billigast att ta.'},
+  alarms: {t: 'Larm till telefonen',
+    k: 'alarm_notify: true\npushover_token: "<app-token>"\npushover_user: "<user key>"',
+    w: 'Larm visas i appen ändå. Det här är för att telefonen ska säga till när ett nytt larm dyker upp, utan att appen är öppen.'},
+  autotune: {t: 'Automatisk kalibrering',
+    k: 'autotune_target_indoor: 21.0   # valfri: temperaturen huset ska hålla\nautotune_days: 30',
+    w: 'Behöver en inomhustemperatur att jämföra kurvan mot, alltså Homey ovan — ' +
+       'det är hela kravet. Måltemperaturen är valfri: utan autotune_target_indoor ' +
+       'mäter analysen mot pumpens eget rumsbörvärde, och på en pump utan rumsgivare ' +
+       'är det ett tal som inte styr någonting, så sätt den om den står fel.'},
+};
+const missing = new Set();
+
+function feature(name, available) {
+  const had = missing.has(name);
+  if (available) missing.delete(name); else missing.add(name);
+  if (had !== missing.has(name)) renderHints();
+}
+
+function hintsHidden() {
+  try { return localStorage.getItem('nibe_hints_off') === '1'; } catch (e) { return false; }
+}
+
+function renderHints() {
+  const card = $('#featHint');
+  const list = [...missing];
+  if (!list.length || hintsHidden()) { card.hidden = true; return; }
+  card.hidden = false;
+  $('#featHintList').innerHTML = list.map(n => {
+    const h = HINT[n];
+    return `<div class="setgroup"><h3>${esc(h.t)}</h3>
+      <p class="intro">${esc(h.w)}</p>
+      ${h.k ? `<div class="cfg">${esc(h.k)}</div>` : ''}</div>`;
+  }).join('');
+}
+$('#featHintHide').onclick = () => {
+  try { localStorage.setItem('nibe_hints_off', '1'); } catch (e) {}
+  $('#featHint').hidden = true;
+  toast('Dolt. Det står kvar i config.example.yaml.');
+};
+
+// Elementets egen bredd i pixlar, när den finns. Ett hopfällt <details> har
+// ingen, och då ritas grafen om när luckan öppnas.
+function plotW(el, fallback) {
+  const w = el && el.clientWidth ? Math.round(el.clientWidth) : 0;
+  return w > 200 ? w : (fallback || 600);
+}
+
+/* En kurvritare för hela appen. Historikgrafen och timprognosen ritas av samma
+   kod, med samma axel och samma streck — inte tre olika sätt att rita en linje. */
+function linePlot(svg, pts, opt) {
+  opt = opt || {};
+  const W = opt.W || plotW(svg, 600), H = opt.H || 168, P = opt.P || 30, B = opt.B || 22, T = opt.T || 16;
+  const defsEl = svg.querySelector('defs');
+  const defs = defsEl ? defsEl.outerHTML : '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  if (pts.length < 2) {
+    svg.innerHTML = defs + `<text x="14" y="${Math.round(H / 2)}">${esc(opt.empty || 'Ingen data.')}</text>`;
+    return null;
+  }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 0.5) { y0 -= 0.5; y1 += 0.5; }
+  const pad = (y1 - y0) * 0.14; y0 -= pad; y1 += pad;
+  const X = t => P + (t - x0) / (x1 - x0 || 1) * (W - P - 10);
+  const Y = v => H - B - (v - y0) / (y1 - y0 || 1) * (H - B - T);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+  const area = line + ` L${X(x1).toFixed(1)} ${H - B} L${X(x0).toFixed(1)} ${H - B} Z`;
+  const box = {X, Y, x0, x1, y0, y1, W, H, P, B, T};
+  svg.innerHTML = defs +
+    `<path class="area" d="${area}"/><path class="ln" d="${line}"/>
+     <line class="ax" x1="${P}" y1="${H - B}" x2="${W - 10}" y2="${H - B}"/>
+     <text x="2" y="15">${esc(opt.hi !== undefined ? opt.hi : one(y1))}</text>
+     <text x="2" y="${H - B - 4}">${esc(opt.lo !== undefined ? opt.lo : one(y0))}</text>` +
+    (opt.extra ? opt.extra(box) : '');
+  const path = svg.querySelector('.ln');
+  try { path.style.setProperty('--len', path.getTotalLength()); } catch (e) {}
+  return box;
+}
+
+/* ---------------- inomhustemperatur (Homey) ---------------- */
+async function loadIndoor() {
+  const g = gate('indoor'), card = $('#indoorCard'), body = $('#indoorBody');
+  DUE.indoor = Date.now() + EVERY.indoor;
+  const none = () => { card.hidden = true; indoorAvg = null; if (latest.length) renderNow(); };
+  if (g === false) { none(); feature('indoor', false); return; }
+  if (g === true && card.hidden) { card.hidden = false; body.innerHTML = SKEL; }
+  let d;
+  try { d = await api('/api/indoor'); }
+  catch (e) {
+    DUE.indoor = Date.now() + RETRY;
+    indoorAvg = null;
+    if (g === true) { card.hidden = false; body.innerHTML = warnBox('Når inte givarna just nu: ' + e.message); }
+    if (latest.length) renderNow();
+    return;
+  }
+  if (!d || d.ok === false) {
+    indoorAvg = null;
+    if (g === true) {
+      card.hidden = false; feature('indoor', true);
+      body.innerHTML = warnBox((d && d.error) || 'Inomhustemperaturen kunde inte läsas.');
+    } else { card.hidden = true; feature('indoor', false); }
+    if (latest.length) renderNow();
+    return;
+  }
+  feature('indoor', true);
+  card.hidden = false;
+  indoorAvg = typeof d.average === 'number' ? d.average : null;
+  const zones = Object.entries(d.by_zone || {}).filter(([, v]) => typeof v === 'number');
+  const sensors = Array.isArray(d.sensors) ? d.sensors : [];
+  const fresh = sensors.filter(s => !s.stale), stale = sensors.filter(s => s.stale);
+  let html = '';
+  if (zones.length) {
+    html += '<div class="zones">' + zones.map(([z, v]) =>
+      `<div class="zone"><div class="k">${esc(z)}</div>
+        <div class="v">${one(v)}${unit('°C')}</div></div>`).join('') + '</div>';
+  } else if (indoorAvg !== null) {
+    html += `<div class="zones"><div class="zone"><div class="k">Hela huset</div>
+      <div class="v">${one(indoorAvg)}${unit('°C')}</div></div></div>`;
+  } else {
+    html += warnBox('Ingen givare har svarat på ett tag, så det finns ingen inomhustemperatur ' +
+                    'att visa. Hellre ingen siffra än en gammal.');
+  }
+  const bits = [];
+  if (indoorAvg !== null && zones.length) bits.push('Snitt ' + one(indoorAvg) + ' °C');
+  if (fresh.length) bits.push(fresh.length + ' givare svarar');
+  // "inaktuell" är inte vad en givare är; den har slutat svara.
+  if (stale.length) bits.push(stale.length + (stale.length === 1 ? ' har inte svarat' : ' har inte svarat'));
+  if (bits.length) html += `<div class="sub">${esc(bits.join(' · '))}</div>`;
+  if (d.warning) html += warnBox(d.warning);
+  if (sensors.length) {
+    html += `<details><summary>Givarna (${sensors.length})</summary><table>` +
+      sensors.map(s => {
+        const meta = [s.zone, ageTxt(s.age_minutes)].filter(Boolean).join(' · ');
+        return `<tr class="${s.stale ? 'dim' : ''}">
+          <td>${esc(s.name || '')}${s.stale ? ' <span class="tag quiet">tyst</span>' : ''}
+            <div class="addr">${esc(meta)}</div></td>
+          <td>${typeof s.value === 'number' ? one(s.value) + ' °C' : '–'}</td></tr>`;
+      }).join('') +
+      `</table><p class="hint">Givare som slutat svara räknas inte in i snittet, men ligger kvar
+        med sin ålder. En givare som tystnade för ett halvår sedan är något du vill veta om.</p></details>`;
+  }
+  body.innerHTML = html;
+  if (latest.length) renderNow();
+}
+
+/* ---------------- väder (SMHI) ---------------- */
+async function loadWeather() {
+  const g = gate('weather'), card = $('#weatherCard'), body = $('#weatherBody');
+  DUE.weather = Date.now() + EVERY.weather;
+  if (g === false) { card.hidden = true; feature('weather', false); return; }
+  if (g === true && card.hidden) { card.hidden = false; body.innerHTML = SKEL; }
+  let d;
+  try { d = await api('/api/weather'); }
+  catch (e) {
+    DUE.weather = Date.now() + RETRY;
+    if (g === true) { card.hidden = false; body.innerHTML = warnBox('Når inte SMHI just nu: ' + e.message); }
+    return;
+  }
+  if (!d || d.ok === false) {
+    if (g === true) {
+      card.hidden = false; feature('weather', true);
+      body.innerHTML = warnBox((d && d.error) || 'Prognosen kunde inte hämtas.');
+    } else { card.hidden = true; feature('weather', false); }
+    return;
+  }
+  feature('weather', true);
+  card.hidden = false;
+  renderWeather(d);
+}
+
+function renderWeather(d) {
+  const s = d.summary || {}, now = d.now || {};
+  // Ett dygn framåt: det är vad rubriken lovar och vad kurvan ska visa.
+  const hourly = (d.hourly || [])
+    .map(h => ({d: toDate(h.time), t: h.t, sv: h.symbol_sv, eff: h.effective}))
+    .filter(h => h.d && typeof h.t === 'number')
+    .slice(0, 24);
+  let low = typeof s.min_24h === 'number' ? s.min_24h : null;
+  let lowAt = toDate(s.coldest_hour);
+  if (low === null && hourly.length) {
+    const m = hourly.reduce((a, b) => (b.t < a.t ? b : a));
+    low = m.t; lowAt = m.d;
+  }
+  /* Utetemperaturen just nu står redan två gånger på Just nu, mätt av pumpens
+     egen givare på husväggen. SMHI:s siffra för en punkt i närheten skulle bli
+     en tredje som säger något annat. Här står bara det pumpen inte vet: vind,
+     upplevd temperatur och vad som kommer. */
+  const side = [];
+  if (typeof now.effective === 'number') side.push('Känns som <b>' + one(now.effective) + ' °C</b>');
+  if (typeof now.ws === 'number') side.push('<b>' + one(now.ws) + ' m/s</b>');
+  if (now.symbol_sv) side.push(esc(now.symbol_sv));
+
+  const trend = typeof s.trend_c === 'number'
+    ? (Math.abs(s.trend_c) < 0.5
+        ? 'ungefär som nu'
+        : one(Math.abs(s.trend_c)) + ' grader ' + (s.trend_c < 0 ? 'kallare' : 'mildare'))
+    : (s.trend ? String(s.trend) : '');
+
+  const sub = [];
+  if (lowAt) sub.push(dayWord(lowAt) + ' kl ' + hh(lowAt));
+  if (typeof s.min_48h === 'number' && s.min_48h !== low)
+    sub.push('kallast om två dygn ' + one(s.min_48h) + ' °C');
+  if (trend) sub.push('om ett dygn ' + trend);
+
+  // Varningen står före siffrorna den gäller, och bara en gång.
+  const foot = [];
+  if (d.issued) foot.push('Prognos från SMHI, hämtad ' + whenTxt(d.issued));
+  let html = '';
+  if (d.stale) {
+    html += warnBox('Prognosen är gammal, så siffrorna här kan vara några timmar efter. ' +
+                    (d.note || 'SMHI svarade inte vid senaste försöket.'));
+  } else if (d.note) foot.push(String(d.note));
+
+  html += `<div class="metric">
+    <div><div class="k">Kallast kommande dygn</div>
+      <div class="n">${low === null ? '–' : one(low)}${unit('°C')}</div></div>
+    <div class="side">${side.join('<br>') || '&nbsp;'}</div></div>
+    ${sub.length ? `<div class="sub">${esc(sub.join(' · '))}</div>` : ''}
+    <svg class="chart" id="wxChart">
+      <defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--cool)" stop-opacity=".22"/>
+        <stop offset="100%" stop-color="var(--cool)" stop-opacity="0"/>
+      </linearGradient></defs></svg>`;
+
+  const days = (d.daily || []).slice(0, 5);
+  if (days.length) {
+    html += '<div class="days">' + days.map(x => {
+      const dd = toDate(x.date);
+      return `<div class="day"><div class="d">${esc(dd ? DAYS_SV[dd.getDay()] : '')}</div>
+        <div class="mx">${one(x.max)}</div><div class="mn">${one(x.min)}</div></div>`;
+    }).join('') + '</div><p class="hint" style="margin-top:6px">Högsta och lägsta per dygn, °C.</p>';
+  }
+  html += (foot.length ? `<p class="hint">${esc(foot.join(' · '))}</p>` : '');
+  $('#weatherBody').innerHTML = html;
+
+  if (hourly.length > 1) {
+    const pts = hourly.map(h => [h.d.getTime() / 1000, h.t]);
+    linePlot($('#wxChart'), pts, {
+      H: 118, B: 20, P: 30,
+      empty: 'Ingen timprognos.', W: plotW($('#wxChart'), 600),
+      extra: box => {
+        let out = '';
+        const first = hourly[0].d, last = hourly[hourly.length - 1].d;
+        out += `<text x="${box.P}" y="${box.H - 5}">${esc(stampTxt(first))}</text>` +
+               `<text x="${box.W - 76}" y="${box.H - 5}">${esc(stampTxt(last))}</text>`;
+        if (lowAt) {
+          const x = box.X(lowAt.getTime() / 1000);
+          if (x >= box.P && x <= box.W - 10)
+            out += `<line class="mark" x1="${x.toFixed(1)}" y1="${box.T - 4}"
+                     x2="${x.toFixed(1)}" y2="${box.H - box.B}"/>
+                    <text x="${Math.min(x + 5, box.W - 60).toFixed(1)}" y="${box.T + 6}"
+                     >kallast ${hh(lowAt)}</text>`;
+        }
+        return out;
+      },
+    });
+  }
+}
+
+/* ---------------- elpris (Tibber) ---------------- */
+async function loadSpot() {
+  const g = gate('spot'), card = $('#spotCard'), body = $('#spotBody');
+  DUE.spot = Date.now() + EVERY.spot;
+  if (g === false) {
+    card.hidden = true; spotNow = null; feature('spot', false);
+    setTabVisible('price', false);
+    if (latest.length) renderNow();
+    return;
+  }
+  if (card.hidden) { card.hidden = false; body.innerHTML = SKEL; }
+  let d;
+  try { d = await api('/api/spot'); }
+  catch (e) {
+    DUE.spot = Date.now() + RETRY;
+    spotNow = null;
+    if (g === true) { card.hidden = false; body.innerHTML = warnBox('Når inte Tibber just nu: ' + e.message); }
+    if (latest.length) renderNow();
+    return;
+  }
+  const prices = d && d.prices;
+  if (!d || d.ok === false || !prices || prices.ok === false) {
+    spotNow = null;
+    const msg = (d && d.error) || (prices && prices.error) || 'Elpriserna kunde inte hämtas.';
+    if (g === true) { card.hidden = false; feature('spot', true); body.innerHTML = warnBox(msg); }
+    else { card.hidden = true; feature('spot', false); setTabVisible('price', false); }
+    if (latest.length) renderNow();
+    return;
+  }
+  feature('spot', true);
+  setTabVisible('price', true);
+  card.hidden = false;
+  renderSpot(d);
+  spotNow = prices.now || null;
+  if (latest.length) renderNow();
+}
+
+function renderSpot(d) {
+  const p = d.prices || {}, plan = d.plan || {};
+  // Valutan står i svaret. Kaklet och kortet får inte säga olika saker om
+  // samma pris för att det ena hårdkodat "kr".
+  spotCur = (p.currency || 'SEK') === 'SEK' ? 'kr' : String(p.currency);
+  const cur = spotCur;
+  const st = p.stats || {};
+  const now = p.now || {};
+  const hours = (p.hours || []).filter(h => h && typeof h.total === 'number');
+
+  const side = [];
+  if (typeof st.mean === 'number') side.push('snitt <b>' + two(st.mean) + '</b>');
+  if (typeof st.min === 'number' && typeof st.max === 'number')
+    side.push('spann <b>' + two(st.min) + '–' + two(st.max) + '</b>');
+  side.push(p.has_tomorrow ? 'morgondagens priser är släppta' : 'morgondagens priser är inte släppta än');
+
+  let html = `<div class="metric">
+    <div><div class="k">Elpris just nu</div>
+      <div class="n">${typeof now.total === 'number' ? two(now.total) : '–'}${unit(cur + '/kWh')}</div></div>
+    <div class="side">${side.join('<br>')}</div></div>`;
+  if (now.band) html += `<div class="sub">Timmen räknas som
+    <span class="pill ${esc(now.band)}" style="margin-left:0">${esc(now.band)}</span></div>`;
+
+  /* Stapeldiagram med y-axel: en stapel utan skala går inte att läsa av.
+     Staplarna skalas ojämnt med bredden, så axelns text står som HTML bredvid
+     grafen i stället för inuti den, där den hade blivit utdragen. */
+  if (hours.length) {
+    const max = Math.max(...hours.map(h => h.total));
+    const N = hours.length, CW = 10, H = 100;
+    const nowStart = now.starts_at ? String(now.starts_at) : null;
+    let bars = '', splits = '', grid = '';
+    [0, 0.5, 1].forEach(f => {
+      const y = (H - 12) * (1 - f) + 12;
+      grid += `<line class="${f === 0 ? 'ax' : 'grid'}" x1="0" y1="${y.toFixed(1)}"
+                x2="${N * CW}" y2="${y.toFixed(1)}"/>`;
+    });
+    if (typeof st.mean === 'number' && max) {
+      const y = 12 + (H - 12) * (1 - st.mean / max);
+      grid += `<line class="mean" x1="0" y1="${y.toFixed(1)}" x2="${N * CW}" y2="${y.toFixed(1)}"/>`;
+    }
+    hours.forEach((h, i) => {
+      const hgt = Math.max(1.5, (h.total / (max || 1)) * (H - 12));
+      const isNow = nowStart ? String(h.starts_at) === nowStart : false;
+      const dt = toDate(h.starts_at);
+      if (isNow) bars += `<rect class="nowcol" x="${i * CW}" y="0" width="${CW}" height="${H}"/>`;
+      bars += `<rect class="${esc(h.band || 'normal')}" x="${i * CW + 1}" y="${(H - hgt).toFixed(1)}"
+                width="${CW - 2}" height="${hgt.toFixed(1)}"><title>${esc(
+                (dt ? dayWord(dt) + ' ' + hh(dt) + ':00 · ' : '') + two(h.total) + ' ' + cur + '/kWh')
+                }</title></rect>`;
+      if (i && hours[i - 1].day !== h.day)
+        splits += `<rect class="split" x="${i * CW - 0.5}" y="0" width="1" height="${H}"/>`;
+    });
+    const cols = `grid-template-columns:repeat(${N},1fr)`;
+    const labels = hours.map((h, i) => {
+      const dt = toDate(h.starts_at);
+      if (!dt || dt.getHours() % 6 !== 0) return '';
+      return `<span style="grid-column:${i + 1}">${hh(dt)}</span>`;
+    }).join('');
+    const dayLabels = hours.map((h, i) => {
+      if (i && hours[i - 1].day === h.day) return '';
+      const dt = toDate(h.starts_at);
+      return `<span style="grid-column:${i + 1}/span 6">${esc(dt ? dayWord(dt) : (h.day || ''))}</span>`;
+    }).join('');
+    html += `<div class="barwrap">
+      <div class="yax"><span>${two(max)}</span><span>${two(max / 2)}</span><span>0</span></div>
+      <div class="col">
+        <svg class="bars" viewBox="0 0 ${N * CW} ${H}" preserveAspectRatio="none"
+          role="img" aria-label="Timpriser i ${esc(cur)} per kWh">${grid}${bars}${splits}</svg>
+        <div class="axrow" style="${cols}">${labels}</div>
+        <div class="axrow dayrow" style="${cols}">${dayLabels}</div>
+      </div></div>
+      <p class="hint">${esc(cur)}/kWh per timme. Streckad linje är dygnets snitt.</p>`;
+  }
+
+  // planen
+  const ph = (plan.hours || []).filter(h => h && typeof h.offset_delta === 'number' && h.offset_delta !== 0);
+  html += `<h3 class="sub-h" style="margin-top:22px">Förslag för dygnet</h3>`;
+  if (plan.ok === false) {
+    html += warnBox(plan.error || 'Ingen plan kunde räknas fram.');
+  } else if (!ph.length) {
+    // Ett platt dygn förklaras en gång, med serverns egen mening om den finns.
+    html += `<p class="hint">${esc((typeof plan.summary === 'string' && plan.summary)
+      || (st.flat ? 'Skillnaden mellan billigaste och dyraste timmen är för liten för att vara ' +
+                    'värd att planera efter.' : '')
+      || 'Ingen plan i dag — priserna ligger för jämnt för att det ska löna sig att flytta värmen.')}</p>`;
+  } else {
+    html += `<div class="warn">Appen gör ingenting av det här själv. Den ändrar inte värmen åt dig —
+      den säger vad den skulle ha gjort, och du bestämmer.</div>`;
+    // slå ihop timmar i följd med samma steg och samma motivering
+    const groups = [];
+    ph.forEach(h => {
+      const dt = toDate(h.starts_at);
+      const last = groups[groups.length - 1];
+      if (last && last.delta === h.offset_delta && last.why === (h.why || '') &&
+          dt && last.end && (dt - last.end) === 36e5) { last.end = dt; last.n++; }
+      else groups.push({delta: h.offset_delta, why: h.why || '', start: dt, end: dt, n: 1});
+    });
+    html += groups.map(g => {
+      const span = g.start
+        ? hh(g.start) + '–' + hh(new Date(g.end.getTime() + 36e5)) +
+          (dayWord(g.start) === 'i dag' ? '' : ' ' + dayWord(g.start))
+        : '';
+      return `<div class="planrow">
+        <div class="delta ${g.delta > 0 ? 'up' : 'down'}">${esc(signed(g.delta, 0))}</div>
+        <div><div class="t">${esc(span)}</div>
+          <div class="w">${esc(g.why || (g.delta > 0 ? 'billig timme — ta värmen här'
+                                                     : 'dyr timme — låt huset coasta'))}</div></div>
+      </div>`;
+    }).join('');
+    const ups = ph.filter(h => h.offset_delta > 0).length;
+    const downs = ph.filter(h => h.offset_delta < 0).length;
+    html += `<p class="hint">${ups} timmar upp och ${downs} timmar ner. Planen summerar till noll:
+      den flyttar när kompressorn gör jobbet, den tar inte bort värme, och huset ska sluta dygnet
+      lika varmt som det började. Vill du följa den justerar du själv med + och − under Värme.</p>`;
+  }
+  $('#spotBody').innerHTML = html;
+}
+
+/* ================= värme =================
+   Tre kort: stegaren för vardagsbruk, ett råd med två källor, och allt
+   avancerat bakom en lucka. */
+let heat = null;
+
+async function loadHeating(quiet) {
+  try { heat = await api('/api/heating'); }
+  catch (e) {
+    heat = null;
+    // Att pumpen inte svarar är det troligaste felet av alla, och fliken ska
+    // säga det i klartext i stället för att stå kvar med streck.
+    $('#heatState').innerHTML = badBox('Kunde inte läsa värmeinställningarna: ' + e.message +
+      ' Kontrollera att pumpen är igång och nåbar på nätet — appen skriver ingenting förrän ' +
+      'den kan läsa igen.');
+    $('#offsetNow').textContent = '–';
+    $('#heatLine').textContent = '';
+    $('#heatFlags').innerHTML = '';
+    $('#heatUp').disabled = $('#heatDown').disabled = true;
+    $('#adviceGo').disabled = true;
+    renderAdvanced();
+    return;
+  }
+  $('#heatState').innerHTML = '';
+  $('#heatUp').disabled = $('#heatDown').disabled = false;
+  $('#adviceGo').disabled = false;
+
+  const el = $('#offsetNow');
+  const next = heat.offset === null || heat.offset === undefined ? '–' : signed(heat.offset, 0);
+  if (el.textContent !== next) {
+    el.textContent = next;
+    if (!quiet) { el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 260); }
+  }
+
+  const bits = [];
+  if (heat.uses_own_curve) bits.push('egen kurva');
+  else if (heat.curve !== null && heat.curve !== undefined) bits.push('kurva ' + heat.curve);
+  if (typeof heat.outdoor === 'number') bits.push('ute ' + one(heat.outdoor) + ' °C');
+  if (typeof heat.calculated_supply === 'number')
+    bits.push('kurvan begär ' + one(heat.calculated_supply) + ' °C');
+  if (typeof heat.degree_minutes === 'number')
+    bits.push(num(heat.degree_minutes, 0) + ' gradminuter');
+  $('#heatLine').textContent = bits.join(' · ');
+
+  // Warnings first and always visible; the longer background notes are folded
+  // away. Five expanded text blocks above the button is not a heating control.
+  const warns = heat.warnings || [];
+  const notes = (heat.observations || []).filter(o => o.length > 90);
+  $('#heatFlags').innerHTML =
+    warns.slice(0, 2).map(w => warnBox(w)).join('') +
+    ((warns.length > 2 || notes.length)
+      ? `<details><summary>Mer om din anläggning</summary>${
+          warns.slice(2).map(w => warnBox(w)).join('')}${
+          notes.map(o => `<div class="warn quiet">${esc(o)}</div>`).join('')}</details>`
+      : '');
+
+  $('#offsetNote').textContent =
+    'Plus ger varmare hus, minus svalare — uppmätt på din pump. Utslaget syns tydligare i ' +
+    'kyla än i milt väder, och nedåt tar det stopp vid min framledning' +
+    (typeof heat.min_supply === 'number' ? ' (' + num(heat.min_supply) + ' °C).' : '.') +
+    ' Vänta ' + longestWait(heat.wait) + ' innan du justerar igen.';
+
+  renderAdvanced();
+}
+
+async function nudgeOffset(step, button) {
+  await loadHeating(true);                   // displayen kan ha flyttat den under tiden
+  if (!heat || heat.offset === null || heat.offset === undefined) return;
+  const to = heat.offset + step;
+  const golv = typeof heat.min_supply === 'number' ? num(heat.min_supply) + ' °C' : 'min framledning';
+  const ok = await applyWrite(button, [{
+    address: 40031, label: 'Värmeoffset', from: heat.offset, to: to, unit: '',
+    why: 'Offset flyttar hela värmekurvan lika mycket vid alla utetemperaturer — ungefär en grad ' +
+         'inomhus per steg, men hur många steg som behövs beror på ditt värmesystem. ' +
+         (step > 0 ? 'Det här gör huset varmare.'
+                   : 'Det här gör huset svalare. Nedåt tar det stopp vid ' + golv +
+                     ': ligger kurvan redan där gör en sänkning ingenting.'),
+  }], {wait: heat.wait});
+  if (ok) { await loadHeating(); await refresh(); }
+}
+$('#heatUp').onclick = e => nudgeOffset(1, e.currentTarget);
+$('#heatDown').onclick = e => nudgeOffset(-1, e.currentTarget);
+
+/* ================= avancerat: egen kurva, gränser, punktförskjutning =========
+   Flyttat hit från listan under Inställningar, där de sju punkterna stod som
+   sju numrerade register i rad. Det är samma sak som pumpens display kallar
+   egen kurva, och den enda begripliga bilden av den är en bild. */
+const OWN_CURVE_REG = [40046, 40045, 40044, 40043, 40042, 40041, 40040];  // P1 (kallast) .. P7
+const OWN_CURVE_OUT = [-30, -20, -10, 0, 10, 20, 30];
+// Register som lämnar Inställningar och bor här i stället.
+const ADV_EXTRA = [40035, 40039, 40185, 40047, 40048, 40027];
+const ADV_ALL = OWN_CURVE_REG.concat(ADV_EXTRA);
+
+let selPoint = -1;       // vald punkt i kurvan, -1 = ingen
+let lastAdvice = null;   // senaste svaret från rådgivaren, för att spegla det i grafen
+
+// Framledningen kurvan begär vid en utetemperatur. Rak linje mellan punkterna,
+// platt utanför ändarna — samma regel som pumpen och som advisor.curve_at.
+// Det här är ritning, inte rådgivning: förslagen kommer från servern.
+function curveAt(points, outdoor) {
+  const known = [];
+  points.forEach((p, i) => { if (typeof p === 'number') known.push([OWN_CURVE_OUT[i], p]); });
+  if (!known.length) return null;
+  if (outdoor <= known[0][0]) return known[0][1];
+  if (outdoor >= known[known.length - 1][0]) return known[known.length - 1][1];
+  for (let i = 0; i < known.length - 1; i++) {
+    const [t0, p0] = known[i], [t1, p1] = known[i + 1];
+    if (t0 <= outdoor && outdoor <= t1)
+      return t1 === t0 ? p0 : p0 + (outdoor - t0) / (t1 - t0) * (p1 - p0);
+  }
+  return known[known.length - 1][1];
+}
+
+function advPoints() {
+  const pts = (heat && Array.isArray(heat.own_curve)) ? heat.own_curve : [];
+  return OWN_CURVE_REG.map((a, i) => {
+    const v = pts[i];
+    if (typeof v === 'number') return v;
+    const row = setRows[a];
+    return row && typeof row.value === 'number' ? row.value : null;
+  });
+}
+
+/* Kurvan som bild. Golvet och taket ritas som det golv och tak de är: en punkt
+   ovanför max framledning är en inställning pumpen inte kommer att följa, och
+   det ska synas. */
+function curveSvg(vals, lo, hi, opt) {
+  opt = opt || {};
+  const W = plotW($('#advBody'), 600), H = 190, P = 40, B = 30, T = 16, R = 14;
+  const known = vals.filter(v => typeof v === 'number');
+  if (!known.length) return '<p class="hint">Punkterna gick inte att läsa från pumpen.</p>';
+  const ghost = opt.ghost || {};
+  const all = known.concat(
+    [lo, hi].filter(v => typeof v === 'number'),
+    Object.values(ghost).filter(v => typeof v === 'number'));
+  let y0 = Math.min(...all) - 3, y1 = Math.max(...all) + 3;
+  if (y1 - y0 < 8) { y0 -= 4; y1 += 4; }
+  const X = i => P + i / (OWN_CURVE_OUT.length - 1) * (W - P - R);
+  const Y = v => H - B - (v - y0) / (y1 - y0) * (H - B - T);
+  const clampV = v => (typeof v !== 'number' ? v
+    : Math.min(typeof hi === 'number' ? hi : v, Math.max(typeof lo === 'number' ? lo : v, v)));
+
+  const seg = (get) => vals.map((v, i) => {
+    const y = get(v, i);
+    return typeof y !== 'number' ? '' :
+      ((i === 0 || typeof get(vals[i - 1], i - 1) !== 'number' ? 'M' : 'L') +
+       X(i).toFixed(1) + ' ' + Y(y).toFixed(1));
+  }).join(' ').trim();
+
+  const outside = vals.some(v => typeof v === 'number' && clampV(v) !== v);
+  let out = '';
+  // Bandet mellan golv och tak: det pumpen faktiskt får skicka ut.
+  if (typeof lo === 'number' && typeof hi === 'number')
+    out += `<rect class="band" x="${P}" y="${Y(hi).toFixed(1)}" width="${W - P - R}"
+             height="${Math.max(0, Y(lo) - Y(hi)).toFixed(1)}"/>`;
+  [[hi, 'Max ' + num(hi) + ' °C'], [lo, 'Min ' + num(lo) + ' °C']].forEach(([v, label]) => {
+    if (typeof v !== 'number') return;
+    out += `<line class="lim" x1="${P}" y1="${Y(v).toFixed(1)}" x2="${W - R}" y2="${Y(v).toFixed(1)}"/>
+            <text x="${W - R}" y="${(Y(v) - 4).toFixed(1)}" text-anchor="end">${esc(label)}</text>`;
+  });
+  // Vad pumpen verkligen skickar ut, när en punkt ligger utanför gränserna.
+  if (outside) out += `<path class="raw" d="${seg(v => clampV(v))}"/>`;
+  out += `<path class="ln" d="${seg(v => v)}"/>`;
+
+  vals.forEach((v, i) => {
+    if (typeof v !== 'number') return;
+    const over = clampV(v) !== v;
+    const cls = 'pt' + (i === selPoint ? ' sel' : '') + (over ? ' over' : '');
+    out += `<circle class="${cls}" cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="4"/>`;
+    if (typeof ghost[i] === 'number')
+      out += `<circle class="ghost" cx="${X(i).toFixed(1)}" cy="${Y(ghost[i]).toFixed(1)}" r="6"/>`;
+    out += `<rect class="hit" data-pt="${i}" x="${(X(i) - 22).toFixed(1)}" y="${T}"
+             width="44" height="${H - B - T}"/>`;
+  });
+  // Var vi är i dag.
+  if (typeof opt.outdoor === 'number' && opt.outdoor > -30 && opt.outdoor < 30) {
+    const x = P + (opt.outdoor + 30) / 60 * (W - P - R);
+    const lx = x < W - 110 ? x + 5 : x - 5;
+    out += `<line class="now" x1="${x.toFixed(1)}" y1="${T}" x2="${x.toFixed(1)}" y2="${H - B}"/>
+            <text x="${lx.toFixed(1)}" y="${H - B - 7}"
+             text-anchor="${x < W - 110 ? 'start' : 'end'}">ute ${esc(one(opt.outdoor))} °C</text>`;
+  }
+  out += `<line class="ax" x1="${P}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
+          <text x="2" y="${T + 4}">${esc(num(y1, 0))} °C</text>
+          <text x="2" y="${(H - B).toFixed(1)}">${esc(num(y0, 0))} °C</text>`;
+  OWN_CURVE_OUT.forEach((t, i) => {
+    if (i % 2) return;
+    out += `<text x="${X(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(signed(t, 0))}</text>`;
+  });
+  out += `<text x="${P}" y="${H - 1}">kallt ute</text>
+          <text x="${W - R}" y="${H - 1}" text-anchor="end">varmt ute</text>`;
+  return `<svg class="chart" id="curveChart" viewBox="0 0 ${W} ${H}" role="img"
+           aria-label="Egen värmekurva: framledning per utetemperatur">${out}</svg>`;
+}
+
+function advRow(cfg) {
+  const sel = cfg.point !== undefined && cfg.point === selPoint;
+  const over = cfg.over ? ' over' : '';
+  return `<div class="ptrow${sel ? ' sel' : ''}${over}" data-row="${cfg.address}"
+      ${cfg.point !== undefined ? `data-pt="${cfg.point}"` : ''}>
+    <div class="n"><b>${esc(cfg.title)}</b><span class="say">${esc(cfg.say)}</span></div>
+    <div class="val">${cfg.value === null ? '–' : esc(num(cfg.value))}${unit(cfg.unit || '')}</div>
+    <div class="pm">
+      <button data-step="-1" data-addr="${cfg.address}" aria-label="Sänk ${esc(cfg.title)}">−</button>
+      <button data-step="1" data-addr="${cfg.address}" aria-label="Höj ${esc(cfg.title)}">+</button>
+    </div></div>`;
+}
+
+function renderAdvanced() {
+  const card = $('#advCard'), body = $('#advBody');
+  const vals = advPoints();
+  const known = vals.filter(v => typeof v === 'number');
+  const haveSettings = ADV_ALL.some(a => setRows[a]);
+  if (!heat && !haveSettings) { card.hidden = true; return; }
+  card.hidden = false;
+
+  const lo = typeof heat?.min_supply === 'number' ? heat.min_supply
+    : (setRows[40035] ? setRows[40035].value : null);
+  const hi = typeof heat?.max_supply === 'number' ? heat.max_supply
+    : (setRows[40039] ? setRows[40039].value : null);
+  const own = heat ? heat.uses_own_curve : (setRows[40027] && setRows[40027].value === 0);
+
+  // Rådgivarens förslag, speglat i grafen. Ingen knapp här: förslaget har en
+  // knapp, på ett ställe, i kortet ovanför.
+  const ghost = {};
+  let adviceLine = '';
+  const sugg = (lastAdvice && lastAdvice.suggestions || []).filter(s => ADV_ALL.includes(s.address));
+  sugg.forEach(s => {
+    const i = OWN_CURVE_REG.indexOf(s.address);
+    if (i >= 0 && typeof s.proposed === 'number') { ghost[i] = s.proposed; if (selPoint < 0) selPoint = i; }
+  });
+
+  let html = '';
+  if (own && known.length) {
+    html += `<p class="advnote">Kurvan står på 0, alltså egen kurva: pumpen följer de här sju
+      punkterna i stället för en av de numrerade kurvorna. Vänster är kallt ute, höger varmt.
+      Prickarna är dina punkter; det skuggade fältet är vad pumpen får skicka ut.</p>`;
+    html += curveSvg(vals, lo, hi, {ghost, outdoor: heat ? heat.outdoor : null});
+  } else if (!own) {
+    html += `<p class="advnote">Pumpen kör en numrerad kurva${heat && heat.curve != null
+      ? ' (kurva ' + heat.curve + ')' : ''}, så de sju egna punkterna ligger kvar men styr
+      ingenting. De börjar gälla igen om Värmekurva sätts till 0.</p>`;
+  }
+
+  if (known.length) {
+    html += `<h3 class="sub-h">Punkterna, i väder</h3>`;
+    html += vals.map((v, i) => advRow({
+      address: OWN_CURVE_REG[i], point: i,
+      title: OWN_CURVE_OUT[i] === 0 ? 'Kring noll grader ute'
+        : degWord(OWN_CURVE_OUT[i]).replace('grader', 'grader ute'),
+      say: 'Så varmt vatten pumpen skickar ut då · P' + (i + 1) + ' · ' + OWN_CURVE_REG[i],
+      value: v, unit: '°C',
+      over: typeof v === 'number' && ((typeof hi === 'number' && v > hi) ||
+                                      (typeof lo === 'number' && v < lo)),
+    })).join('');
+
+    // Observationer om formen. De pekar, de påstår inte.
+    const notes = [];
+    let run = 1;
+    while (run < vals.length && typeof vals[run] === 'number' && vals[run] === vals[0]) run++;
+    if (run >= 2 && typeof vals[0] === 'number') {
+      const tak = typeof hi === 'number' && hi - vals[0] > 2
+        ? ` Taket för framledningen ligger på ${num(hi)} °C, så det är inte taket som håller nere den —
+           det finns ${num(hi - vals[0])} grader kvar.` : '';
+      notes.push(`<b>P1–P${run} ligger alla på ${num(vals[0])} °C.</b> Kurvan är alltså platt från
+        ${signed(OWN_CURVE_OUT[0], 0)} till ${signed(OWN_CURVE_OUT[run - 1], 0)} grader ute: huset får
+        lika varmt vatten vid ${degWord(OWN_CURVE_OUT[run - 1])} som vid
+        ${degWord(OWN_CURVE_OUT[0])}.${tak} Är det avsiktligt är allt som det ska. Känns huset kallt
+        just när det är riktigt kallt ute är det den här delen av kurvan du ska titta på.`);
+    }
+    const below = vals.map((v, i) => [v, i]).filter(([v]) => typeof lo === 'number' && typeof v === 'number' && v < lo);
+    if (below.length) {
+      notes.push(`P${below.map(([, i]) => i + 1).join(', P')} ligger under min framledning
+        (${num(lo)} °C). Pumpen skickar ändå ut ${num(lo)} °C när den värmer, så de punkterna
+        styr ingenting förrän golvet sänks — den streckade linjen är vad som faktiskt händer.`);
+    }
+    const above = vals.map((v, i) => [v, i]).filter(([v]) => typeof hi === 'number' && typeof v === 'number' && v > hi);
+    if (above.length) {
+      notes.push(`P${above.map(([, i]) => i + 1).join(', P')} ligger över max framledning
+        (${num(hi)} °C). Pumpen kommer inte att följa dem: den stannar vid taket.`);
+    }
+    if (typeof heat?.outdoor === 'number' && own) {
+      const want = curveAt(vals, heat.outdoor);
+      if (want !== null) {
+        const said = heat.calculated_supply;
+        const diff = typeof said === 'number' ? said - want : null;
+        notes.push(`Vid ${one(heat.outdoor)} °C ute ligger kurvan mellan två punkter och begär
+          ${one(want)} °C framledning.` + (typeof said === 'number'
+            ? ` Pumpen räknar själv med ${one(said)} °C` + (Math.abs(diff) < 0.6 ? '.'
+                : ` — skillnaden på ${one(Math.abs(diff))} grader är värmeoffset och
+                   punktförskjutningen, som läggs ovanpå punkterna.`)
+            : ''));
+      }
+    }
+    if (notes.length) html += `<div class="curvenote">${notes.join('<br><br>')}</div>`;
+  }
+
+  const row = (a, title, say, u) => {
+    const r = setRows[a];
+    const v = (a === 40035 && typeof lo === 'number') ? lo
+            : (a === 40039 && typeof hi === 'number') ? hi
+            : (r ? r.value : null);
+    if (v === null || v === undefined) return '';
+    return advRow({address: a, title, say, value: v, unit: u});
+  };
+  const limits = row(40035, 'Kallaste vattnet pumpen skickar ut',
+      'Golvet. Med golvvärme är det satt så att golvet inte känns kallt · 40035', '°C') +
+    row(40039, 'Varmaste vattnet pumpen skickar ut',
+      'Taket. Ligger kurvan över det händer ingenting förrän taket höjs · 40039', '°C') +
+    row(40185, 'Då slutar pumpen värma för säsongen',
+      'Över den här utetemperaturen stängs värmen av · 40185', '°C');
+  if (limits) html += `<h3 class="sub-h">Golv, tak och säsong</h3>` + limits;
+
+  const shift = row(40047, 'Knycken sitter vid den här utetemperaturen',
+      'Punktförskjutning, utetemperatur · 40047', '°C') +
+    row(40048, 'Så mycket knycks kurvan där',
+      'Punktförskjutning, grader. För att rätta ett enda temperaturintervall · 40048', '°C');
+  if (shift) html += `<h3 class="sub-h">Punktförskjutning</h3>` + shift;
+
+  if (setRows[40027]) {
+    html += `<h3 class="sub-h">Vilken kurva pumpen följer</h3>` +
+      advRow({address: 40027, title: own ? 'Egen kurva (0)' : 'Kurva ' + setRows[40027].value,
+        say: '0 är egen kurva och punkterna ovan. 1–15 är NIBE:s färdiga kurvor · 40027',
+        value: setRows[40027].value, unit: ''});
+  }
+
+  /* Rekommendationen. Regeln är enkel och det är den som är svår att hålla i
+     huvudet — och det är appen som räknar ut vilken punkt som styr just det
+     väder du klagar på, inte P1 för att den heter "kallast". */
+  html += `<h3 class="sub-h">Vilken punkt ska jag flytta?</h3>
+    <p class="advnote">Det beror inte på hur mycket fel det känns, utan på <b>när</b>. Det är
+      den enda regeln, och den är hela skillnaden mellan en kurva som blir bättre och en som
+      blir sämre.</p>
+    <div class="rule">
+      <div><b>Fel i alla väder</b><span>Värmeoffset, överst på den här fliken. Hela kurvan flyttas
+        lika mycket — punkterna ska stå still.</span></div>
+      <div><b>Fel bara när det är kallt</b><span>Punkterna kring den kyla du faktiskt får. Inte
+        P1: den gäller ${degWord(-30)} och de flesta hus i Sverige ser aldrig det.</span></div>
+      <div><b>Fel bara i milt väder</b><span>De milda punkterna, P5 och P6 — de kalla ska ligga
+        kvar där de är.</span></div>
+    </div>`;
+  if (sugg.length) {
+    adviceLine = sugg.map(s => esc(s.title) + ': ' + esc(valTxt(s.current, s.unit)) + ' → ' +
+      esc(valTxt(s.proposed, s.unit))).join('<br>');
+    html += `<div class="curvenote"><b>Rådet just nu gäller den här kurvan.</b><br>${adviceLine}
+      <br><br>${esc(sugg[0].why || '')}<br>
+      <button class="linkish" id="advToAdvice">Visa förslaget och knappen ↑</button></div>`;
+  } else {
+    html += `<p class="hint">Vet du inte vilken punkt? Svara på de två frågorna under
+      <b>Vad ska jag ändra?</b> högst upp på fliken — appen räknar ut vilken punkt som styr
+      just det vädret, säger varför, och ritar förslaget i kurvan här.
+      <button class="linkish" id="advToAdvice">Ta mig dit</button></p>`;
+  }
+
+  body.innerHTML = html;
+
+  const jump = $('#advToAdvice');
+  if (jump) jump.onclick = () => {
+    $('#adviceCard').scrollIntoView({behavior: 'smooth', block: 'start'});
+  };
+  body.querySelectorAll('[data-pt]').forEach(el => el.addEventListener('click', ev => {
+    if (ev.target.closest('.pm')) return;
+    selPoint = Number(el.dataset.pt);
+    renderAdvanced();
+  }));
+  body.querySelectorAll('[data-step]').forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    stepAdvanced(Number(b.dataset.addr), Number(b.dataset.step), b);
+  });
+}
+
+/* Varje ändring här är en skyddad skrivning och går genom samma ruta som allt
+   annat appen skriver. */
+async function stepAdvanced(address, step, button) {
+  const r = setRows[address] || {};
+  let from = currentValue(address);
+  if (from === null || from === undefined) from = r.value;
+  if (typeof from !== 'number') { toast('Kunde inte läsa nuvarande värde.', false); return; }
+  const to = from + step;
+  if (typeof r.min === 'number' && to < r.min) { toast('Lägsta värdet är ' + num(r.min) + '.', false); return; }
+  if (typeof r.max === 'number' && to > r.max) { toast('Högsta värdet är ' + num(r.max) + '.', false); return; }
+
+  const i = OWN_CURVE_REG.indexOf(address);
+  const u = i >= 0 ? '°C' : (r.unit || '');
+  let label, why = r.why || '';
+  if (i >= 0) {
+    const vals = advPoints();
+    const after = vals.slice(); after[i] = to;
+    label = 'Egen kurva P' + (i + 1) + ' (' + signed(OWN_CURVE_OUT[i], 0) + ' °C ute)';
+    why = 'Det här är framledningen när det är ' + degWord(OWN_CURVE_OUT[i]) + ' ute. ' +
+      'Punkten formar kurvan i just det vädret och lämnar resten ifred.';
+    const hi = heat && typeof heat.max_supply === 'number' ? heat.max_supply : null;
+    const lo = heat && typeof heat.min_supply === 'number' ? heat.min_supply : null;
+    if (hi !== null && to > hi)
+      why += ' Observera: ' + num(to) + ' °C ligger över max framledning (' + num(hi) +
+             ' °C), så pumpen kommer inte att följa punkten förrän taket höjs.';
+    if (lo !== null && to < lo)
+      why += ' Observera: ' + num(to) + ' °C ligger under min framledning (' + num(lo) +
+             ' °C), så pumpen skickar ändå ut ' + num(lo) + ' °C när den värmer.';
+    if (typeof heat?.outdoor === 'number') {
+      const b1 = curveAt(vals, heat.outdoor), b2 = curveAt(after, heat.outdoor);
+      if (b1 !== null && b2 !== null) {
+        why += Math.abs(b2 - b1) < 0.05
+          ? ' I dagens väder (' + one(heat.outdoor) + ' °C ute) ändrar den ingenting — den punkten ' +
+            'styr annat väder än det du har nu.'
+          : ' I dagens väder (' + one(heat.outdoor) + ' °C ute) går framledningen från ' +
+            one(b1) + ' till ' + one(b2) + ' °C.';
+      }
+    }
+  } else if (address === 40027) {
+    label = 'Värmekurva';
+    if (to === 0) why = 'OBS: 0 är inte en flackare kurva. Det byter pumpen till egen kurva, ' +
+      'alltså punkterna P1–P7 ovan, och kurvnumret slutar gälla.';
+    else if (from === 0) why = 'OBS: du kör egen kurva i dag. Sätter du ett kurvnummer slutar ' +
+      'pumpen använda dina egna punkter P1–P7. De ligger kvar men styr ingenting.';
+    else why = r.why || 'Brantare siffra ger mer värme ju kallare det blir.';
+  } else {
+    label = r.label || ('Register ' + address);
+  }
+
+  const ok = await applyWrite(button, [{address, label, from, to, unit: u, why}],
+                              {wait: heat ? heat.wait : null});
+  if (ok) { await loadHeating(true); await loadSettings(true); renderAdvanced(); }
+}
+
+/* ================= rådet =================
+   Ett råd, två källor: hur huset känns för dig, och vad appen har mätt över
+   tid. Samma förslagsruta, samma bekräftelse, samma väntetid — de ska läsas
+   som en sak med två sorters belägg, inte som två rådgivare som råkar peka på
+   samma register. */
+function picker(sel, attr) {
+  $$(sel + ' button').forEach(b => b.onclick = () =>
+    $$(sel + ' button').forEach(x => x.setAttribute('aria-pressed', x === b)));
+  return () => {
+    const el = $(sel + ' [aria-pressed=true]');
+    return el ? el.dataset[attr] : '';
+  };
+}
+const feeling = picker('#feelingTabs', 'feeling');
+const when = picker('#whenTabs', 'when');
+
+function renderAdvice(a) {
+  const out = $('#adviceOut');
+  lastAdvice = a;
+  const wait = longestWait(a.wait);
+  let html = (a.warnings || []).map(w => warnBox(w)).join('');
+  const groups = [];
+  (a.suggestions || []).forEach((sg, i) => {
+    const key = sg.group || ('one' + i);
+    let g = groups.find(x => x.key === key);
+    if (!g) groups.push(g = {key, items: []});
+    g.items.push(sg);
+  });
+  if (a.blocked) html += warnBox(a.blocked);
+  else if (!groups.length) html += '<p class="hint">Inget förslag den här gången.</p>';
+  else {
+    html += groups.map((g, gi) => `<div class="prop">` + g.items.map(sg =>
+        `<div class="h">${esc(sg.title)}: ${esc(valTxt(sg.current, sg.unit))} →
+           ${esc(valTxt(sg.proposed, sg.unit))}</div>
+         <div class="addr">register ${esc(String(sg.address))}</div>
+         <div class="w">${esc(sg.why)}</div>`).join('') +
+      `<div class="row" style="margin-top:11px"><button class="primary" data-group="${gi}">
+        ${g.items.length > 1 ? 'Genomför båda' : 'Genomför'}</button></div></div>`).join('');
+    html += `<p class="hint">En justering i taget, och vänta ${esc(wait)} innan nästa — två
+      ändringar samtidigt går inte att utvärdera. Appen genomför ingenting av sig själv.</p>`;
+  }
+  out.innerHTML = html;
+  out.querySelectorAll('[data-group]').forEach(b => b.onclick = async ev => {
+    const items = groups[+ev.currentTarget.dataset.group].items.map(s => ({
+      address: s.address, label: s.title, from: s.current, to: s.proposed,
+      unit: s.unit || '', why: s.why,
+    }));
+    const ok = await applyWrite(ev.currentTarget, items, {wait: a.wait});
+    if (ok) { lastAdvice = null; await loadHeating(); await loadSettings(true); await refresh(); }
+    renderAdvanced();
+  });
+  renderAdvanced();
+}
+
+$('#adviceGo').onclick = async e => {
+  const btn = e.currentTarget, out = $('#adviceOut');
+  btn.disabled = true;
+  out.innerHTML = SKEL;
+  try {
+    renderAdvice(await api(`/api/advice?feeling=${feeling()}&when=${when()}`));
+  } catch (err) {
+    out.innerHTML = badBox('Rådgivaren kunde inte svara: ' + err.message);
+  } finally { btn.disabled = false; }
+};
+
+/* ---------------- automatisk kalibrering ---------------- */
+async function loadAutotune() {
+  const g = gate('autotune'), card = $('#tuneCard'), body = $('#tuneBody');
+  DUE.autotune = Date.now() + EVERY.autotune;
+  if (g === false) { card.hidden = true; feature('autotune', false); return; }
+  if (g === true && card.hidden) { card.hidden = false; body.innerHTML = SKEL; }
+  let d;
+  try { d = await api('/api/autotune'); }
+  catch (e) {
+    DUE.autotune = Date.now() + RETRY;
+    if (g === true) { card.hidden = false; body.innerHTML = warnBox('Kalibreringen svarar inte: ' + e.message); }
+    return;
+  }
+  if (!d || d.ok === false) {
+    if (g === true) {
+      card.hidden = false; feature('autotune', true);
+      body.innerHTML = warnBox((d && (d.error || d.reason_sv)) || 'Kalibreringen kunde inte köras.');
+    } else { card.hidden = true; feature('autotune', false); }
+    return;
+  }
+  feature('autotune', true);
+  card.hidden = false;
+  renderAutotune(d);
+}
+
+function renderAutotune(d) {
+  const body = $('#tuneBody');
+  const STATE = {insufficient: 'Underlaget räcker inte än',
+                 confident: 'Underlaget räcker',
+                 uncertain: 'Underlaget är osäkert'};
+  const facts = [];
+  if (typeof d.samples === 'number') facts.push(d.samples + ' mätpunkter');
+  if (typeof d.days === 'number') facts.push(d.days + ' dygn');
+  if (Array.isArray(d.outdoor_span) && d.outdoor_span.length === 2)
+    facts.push('ute ' + one(d.outdoor_span[0]) + ' … ' + one(d.outdoor_span[1]) + ' °C');
+
+  let html = `<p class="lead" style="margin:-4px 0 10px"><b>${esc(STATE[d.state] || d.state || '')}.</b>
+    ${esc(d.reason_sv || '')}</p>`;
+  if (facts.length) html += `<div class="sub" style="margin-top:0">${esc(facts.join(' · '))}</div>`;
+
+  if (typeof d.confidence === 'number') {
+    const pct = Math.round(Math.max(0, Math.min(1, d.confidence)) * 100);
+    html += `<div class="meter"><i style="width:${pct}%"></i></div>
+      <div class="sub" style="margin-top:0">Tillförlitlighet ${pct} %</div>`;
+  }
+
+  const err = [];
+  if (typeof d.offset_error_c === 'number') err.push('Nivåfel ' + signed(d.offset_error_c) + ' °C');
+  if (typeof d.slope_error_c_per_c === 'number')
+    err.push('Lutningsfel ' + signed2(d.slope_error_c_per_c) + ' °C per grad ute');
+  if (err.length) html += `<div class="sub">${esc(err.join(' · '))}</div>`;
+  if (d.slope_error_c_per_c === null && d.state !== 'insufficient')
+    html += `<p class="hint">Lutningen går inte att räkna ut än — vädret har inte varierat
+      tillräckligt. Den lämnas tom i stället för att sättas till noll, för en nolla med decimal
+      ser ut som ett mätvärde.</p>`;
+
+  const miss = d.missing_sv || [];
+  if (miss.length) html += `<div class="sub">Det som saknas:</div>
+    <ul class="miss">${miss.map(m => `<li>${esc(m)}</li>`).join('')}</ul>`;
+
+  const p = d.state === 'insufficient' ? null : d.proposal;
+  if (p) {
+    const lbl = SWEDISH[p.register] || ('Register ' + p.register);
+    html += `<div class="prop">
+      <div class="h">${esc(lbl)}: ${esc(valTxt(p.from))} → ${esc(valTxt(p.to))}</div>
+      <div class="addr">register ${esc(String(p.register))}</div>
+      <div class="w">${esc(p.why_sv || '')}</div>
+      ${p.expected_sv ? `<div class="sub">Förväntat: ${esc(p.expected_sv)}</div>` : ''}
+      <div class="row" style="margin-top:11px"><button class="primary" id="tuneGo">Genomför</button></div>
+      </div>`;
+  } else if (d.state !== 'insufficient') {
+    html += `<p class="hint">Inget förslag just nu.</p>`;
+  }
+
+  (d.notes_sv || []).forEach(n => { html += `<div class="warn quiet">${esc(n)}</div>`; });
+  body.innerHTML = html;
+
+  const go = $('#tuneGo');
+  if (go && p) go.onclick = async ev => {
+    const ok = await applyWrite(ev.currentTarget, [{
+      address: p.register, label: SWEDISH[p.register] || ('Register ' + p.register),
+      from: p.from, to: p.to, unit: '', why: p.why_sv || '',
+    }], {wait: heat ? heat.wait : null, waitHours: p.wait_hours, expected: p.expected_sv});
+    if (ok) { await loadHeating(); await loadAutotune(); await refresh(); }
+  };
+}
+
+/* ================= inställningar =================
+   Varmvattnet bor på sin egen flik, och värmekurvans punkter och gränser bor
+   under Värme → Avancerat, där de hör hemma. Den här listan är resten. */
+const WATER_GROUP = 'hotwater';
+let setRows = {};
+
+async function loadSettings(quiet) {
+  let groups;
+  try { groups = (await api('/api/settings')).groups; }
+  catch (e) {
+    if (!quiet) {
+      $('#settings').innerHTML = badBox('Kunde inte läsa inställningarna: ' + e.message);
+      $('#setWater').innerHTML = badBox('Kunde inte läsa inställningarna: ' + e.message);
+    }
+    return;
+  }
+  if (!Array.isArray(groups)) groups = [];
+  setRows = {};
+  groups.forEach(g => (g.rows || []).forEach(r => { setRows[r.address] = r; }));
+
+  const render = (g, bare) => `<div class="setgroup">${bare ? '' : `<h3>${esc(g.title)}</h3>`}
+    ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
+    ${g.rows.map(r => {
+      const range = (r.min !== null && r.max !== null)
+        ? `${r.address} · ${num(r.min)} … ${num(r.max)}${r.unit ? ' ' + r.unit : ''}`
+        : String(r.address);
+      return `<div class="setrow">
+        <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
+          ? '<span class="tag">skyddad</span>' : ''}</b>
+          <span class="addr">${esc(range)}</span></div>
+        <div class="val">${esc(num(r.value))}${unit(r.unit || '')}</div>
+        <button data-edit="${r.address}">Ändra</button></div>
+      <div data-panel="${r.address}" hidden></div>`;
+    }).join('')}</div>`;
+
+  const MOVED = ' Kurvans punkter P1–P7, framledningens golv och tak, värmestoppet och ' +
+    'punktförskjutningen ligger under Värme → Avancerat, tillsammans med bilden av kurvan.';
+  const strip = g => {
+    const rows = (g.rows || []).filter(r => !ADV_ALL.includes(r.address));
+    return Object.assign({}, g, {
+      rows,
+      intro: (g.intro || '') + (rows.length < (g.rows || []).length ? MOVED : ''),
+    });
+  };
+  const rest = groups.filter(g => g.key !== WATER_GROUP).map(strip).filter(g => g.rows.length);
+  $('#settings').innerHTML = rest.map(render).join('');
+  const water = groups.find(g => g.key === WATER_GROUP);
+  $('#setWater').innerHTML = water ? render(water, true) : '<p class="hint">Inga lästes.</p>';
+
+  $$('[data-edit]').forEach(btn => btn.onclick = () => {
+    const addr = btn.dataset.edit, row = setRows[addr];
+    const panel = document.querySelector(`[data-panel="${addr}"]`);
+    if (!panel.hidden) {
+      panel.hidden = true; panel.innerHTML = ''; btn.textContent = 'Ändra'; return;
+    }
+    panel.hidden = false; btn.textContent = 'Avbryt';
+    const field = row.options
+      ? `<select id="sv-${addr}">${row.options.map(([k, l]) =>
+          `<option value="${esc(k)}"${String(row.value) === l ? ' selected' : ''}>${esc(l)}</option>`
+        ).join('')}</select>`
+      : `<input id="sv-${addr}" type="number" inputmode="decimal" step="any"
+           value="${esc(String(row.value))}"
+           ${row.min !== null ? `min="${row.min}"` : ''} ${row.max !== null ? `max="${row.max}"` : ''}>`;
+    panel.innerHTML = `<div class="setwhy">${esc(row.why)}</div>
+      <div class="setedit">${field}<button class="primary" data-save="${addr}">Spara</button></div>`;
+    panel.querySelector('[data-save]').onclick = async ev => {
+      const value = Number($('#sv-' + addr).value);
+      if (Number.isNaN(value)) { toast('Ogiltigt värde.', false); return; }
+      if (value === Number(row.value)) { toast('Samma värde som förut.'); return; }
+      const ok = await applyWrite(ev.currentTarget, [{
+        address: Number(addr), label: row.label, from: row.value, to: value,
+        unit: row.unit || '', why: row.why,
+      }], {wait: heat ? heat.wait : null});
+      if (ok) { await loadSettings(); await loadHeating(true); }
+    };
+  });
+
+  renderAdvanced();
+}
+
+async function loadBackups() {
+  let d;
+  try { d = await api('/api/backups'); }
+  catch (e) { $('#backupState').innerHTML = badBox('Kunde inte läsa backuperna: ' + e.message); return; }
+  const list = Array.isArray(d.backups) ? d.backups : [];
+
+  $('#backups').innerHTML = list.slice(0, 20).map(b => {
+    const t = new Date(b.taken_at * 1000);
+    return `<tr><td>${esc(b.name)}<div class="addr">${t.toLocaleString('sv-SE')}</div></td>
+            <td>${num(b.bytes / 1024, 0)} kB</td></tr>`;
+  }).join('') || '<tr><td>Inga backuper än</td><td></td></tr>';
+
+  const n = list.length;
+  const auto = d.auto
+    ? `Appen tar en automatiskt var ${d.auto_every_hours} timme${d.auto_every_hours == 1 ? '' : 'r'}.`
+    : 'Automatisk backup är avstängd i config.yaml.';
+  if (!n) {
+    $('#backupState').innerHTML =
+      warnBox('Ingen backup ännu. Ta en innan du ändrar något — det är den som gör en felställd ' +
+              'kurva möjlig att ångra.') + esc(auto);
+    return;
+  }
+  const h = d.age_hours;
+  const when = h < 1 ? 'för mindre än en timme sedan'
+    : (h < 48 ? `för ${Math.round(h)} timmar sedan` : `för ${Math.round(h / 24)} dygn sedan`);
+  const stale = h > (d.auto_every_hours || 24) * 2;
+  $('#backupState').innerHTML =
+    (stale ? warnBox('Senaste backupen togs ' + when + ' — äldre än väntat.') : '') +
+    `${n} backup${n === 1 ? '' : 'er'} sparade, den senaste ${esc(when)}. ${esc(auto)}`;
+}
+
+async function loadLog() {
+  try {
+    const rows = await api('/api/log?limit=25');
+    if (!Array.isArray(rows)) return;
+    $('#wlog').innerHTML = rows.length ? rows.map(r => {
+      const d = new Date(r.ts * 1000);
+      const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const day = `${d.getDate()}/${d.getMonth() + 1}`;
+      return `<tr><td>${esc(r.title || SWEDISH[r.address] || r.address)}
+              <div class="addr">${day} ${t} · ${r.address}</div></td>
+              <td>${esc(valTxt(r.before))} → ${esc(valTxt(r.after))}</td></tr>`;
+    }).join('') : '<tr><td>Inget skrivet ännu</td><td></td></tr>';
+  } catch (e) { /* optional */ }
+}
+
+$('#doBackup').onclick = e => act(e.currentTarget,
+  () => post('/api/backup', {note: 'från appen'}),
+  r => r.name ? `Backup sparad som ${r.name}.` : 'Backup sparad.');
+$('#backups').closest('details').addEventListener('toggle', ev => {
+  if (ev.target.open) loadBackups();
+});
+
+/* ================= varmvatten och ventilation ================= */
+$('#hwOn').onclick = e => act(e.currentTarget,
+  () => post('/api/hotwater', {minutes: +$('#hwMin').value}),
+  r => typeof r.minutes === 'number'
+    ? `Extra varmvatten igång i ${r.minutes} minuter.` : 'Extra varmvatten igång.');
+$('#hwOff').onclick = e => act(e.currentTarget,
+  () => post('/api/hotwater', {off: true}), () => 'Extra varmvatten avbrutet.');
+
+async function loadFanModes() {
+  try {
+    const d = await api('/api/fan');
+    fanSpeeds = (d && d.speeds) || null;
+  } catch (e) { return; }
+  if (!fanSpeeds) return;
+  const normal = fanSpeeds['0'], sel = $('#ventMode');
+  sel.innerHTML = Object.keys(fanSpeeds).filter(m => m !== '0').map(m => {
+    const p = fanSpeeds[m];
+    if (p === null || p === undefined) return '';
+    const rel = (normal === null || normal === undefined) ? ''
+      : (p > normal ? ' — mer luft' : (p < normal ? ' — MINDRE luft' : ' — som normalt'));
+    return `<option value="${m}">Läge ${m}: ${p} %${rel}</option>`;
+  }).join('') || '<option value="">inga lägen kunde läsas</option>';
+  const higher = Object.keys(fanSpeeds).filter(m => m !== '0' &&
+    fanSpeeds[m] !== null && normal != null && fanSpeeds[m] > normal);
+  if (higher.length) sel.value = higher.sort((a, b) => fanSpeeds[a] - fanSpeeds[b])[0];
+  if (normal != null) {
+    $('#fanNote').textContent = `Normalt är ${normal} %. Lägena är inte ordnade lågt till högt — ` +
+      `procenten i listan är det som gäller, inte numret.`;
+  }
+}
+
+$('#ventSet').onclick = async e => {
+  const mode = $('#ventMode').value;
+  if (mode === '') return;
+  const p = fanSpeeds ? fanSpeeds[mode] : null, normal = fanSpeeds ? fanSpeeds['0'] : null;
+  if (p != null && normal != null && p < normal) {
+    const go = await ask({title: 'Mindre luft än normalt',
+      body: `<div class="change"><b>Ventilationsläge ${esc(mode)}</b>
+        <div class="arrow">${num(normal, 0)} % → ${num(p, 0)} %</div></div>
+        <div class="why">På en frånluftspump är ventilationen värmekällan. Låg fläkt betyder
+        mindre värme att hämta och risk för fukt inomhus. Är det verkligen vad du vill?</div>`,
+      yes: 'Sätt läget ändå'});
+    if (!go) return;
+  }
+  return act(e.currentTarget,
+    () => post('/api/ventilation', {mode: +mode, hours: +$('#ventH').value}),
+    r => `Läge ${r.mode} — ${num(r.percent, 0)} % mot normalt ${num(r.normal_percent, 0)} %. ` +
+         `Tillbaka om ${r.hours} h.`);
+};
+$('#ventNorm').onclick = e => act(e.currentTarget,
+  () => post('/api/ventilation', {direction: 'normal'}),
+  r => typeof r.normal_percent === 'number'
+    ? `Tillbaka till normal ventilation (${num(r.normal_percent, 0)} %).`
+    : 'Tillbaka till normal ventilation.');
+
+/* ================= historik ================= */
+let histAddr = 30009, histHours = 24;
+
+function buildHistTabs() {
+  const want = [[30009,'Varmvatten'],[30002,'Ute'],[30020,'Frånluft'],[30006,'Framledning'],
+                [40012,'Gradminuter'],[32134,'Fläkt'],[31047,'Kompressor']];
+  const have = new Set(latest.filter(r => !r.error).map(r => r.address));
+  $('#histTabs').innerHTML = want.filter(([a]) => have.has(a))
+    .map(([a, n]) => `<button data-a="${a}" aria-pressed="${a === histAddr}">${n}</button>`).join('');
+  $$('#histTabs button').forEach(b => b.onclick = () => {
+    histAddr = +b.dataset.a;
+    $$('#histTabs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    drawHistory();
+  });
+}
+
+async function drawHistory() {
+  const svg = $('#chart');
+  let pts = [];
+  try {
+    const d = await api(`/api/history?address=${histAddr}&hours=${histHours}`);
+    pts = Array.isArray(d.points) ? d.points : [];
+  } catch (e) { /* tomt läge nedan */ }
+  linePlot(svg, pts, {
+    empty: 'Ingen historik för den här perioden ännu.',
+    extra: box => {
+      const ft = t => {
+        const d = new Date(t * 1000);
+        return histHours > 48 ? `${d.getDate()}/${d.getMonth() + 1}` : stampTxt(d);
+      };
+      return `<text x="${box.P}" y="${box.H - 6}">${esc(ft(box.x0))}</text>
+              <text x="${box.W - 76}" y="${box.H - 6}">${esc(ft(box.x1))}</text>`;
+    },
+  });
+}
+$$('[data-h]').forEach(b => b.onclick = () => {
+  histHours = +b.dataset.h;
+  $$('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  drawHistory();
+});
+
+/* ================= takt ================= */
+const EVERY = {indoor: 150e3, weather: 1800e3, spot: 900e3, autotune: 1800e3};
+const RETRY = 120e3;
+const DUE = {indoor: 0, weather: 0, spot: 0, autotune: 0};
+let spotHour = -1;
+
+function tick() {
+  if (document.hidden) return;
+  refresh();
+  loadAlarms();
+  const now = Date.now(), h = new Date().getHours();
+  if (now >= DUE.indoor) loadIndoor();
+  if (now >= DUE.weather) loadWeather();
+  if (now >= DUE.spot || h !== spotHour) { spotHour = h; loadSpot(); }
+  if (current === 'heat' && now >= DUE.autotune) loadAutotune();
+}
+
+/* ================= start ================= */
+ONSHOW.heat = () => {
+  loadHeating(true);
+  if (!Object.keys(setRows).length) loadSettings(true);
+  loadAutotune();
+};
+ONSHOW.price = () => loadSpot();
+ONSHOW.hist = drawHistory;
+ONSHOW.set = () => { loadSettings(); loadLog(); loadBackups(); };
+ONSHOW.water = () => {
+  if (!$('#setWater').querySelector('.setrow')) loadSettings();
+  if (!fanSpeeds) loadFanModes();
+};
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+(async () => {
+  await refresh();                 // features först, så inget blinkar förbi
+  loadAlarms();
+  loadHeating();
+  loadSettings(true);
+  loadFanModes();
+  loadIndoor(); loadWeather(); loadSpot();
+  spotHour = new Date().getHours();
+  renderHints();
+  show(location.hash.slice(1) || 'now');
+  if (current === 'heat') loadAutotune();
+})();
+
+$('#advBox').addEventListener('toggle', () => { if ($('#advBox').open) renderAdvanced(); });
+let redrawTimer = null;
+addEventListener('resize', () => {
+  clearTimeout(redrawTimer);
+  redrawTimer = setTimeout(() => {
+    if ($('#advBox').open) renderAdvanced();
+    if (current === 'hist') drawHistory();
+  }, 200);
+});
+
+setInterval(tick, 30000);
+setInterval(() => { if (current === 'hist') drawHistory(); }, 300000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { refresh(); loadAlarms(); loadHeating(true); }
+});
+</script>
+</body>
+</html>

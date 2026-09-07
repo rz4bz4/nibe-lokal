@@ -314,8 +314,14 @@ class Caching(unittest.TestCase):
         w._fetch = lambda: (calls.append(1), original())[1]
         first = w.snapshot(now=1000.0)
         second = w.snapshot(now=1000.0 + 59 * 60)
-        self.assertIs(first, second)
+        self.assertEqual(first, second)
         self.assertEqual(len(calls), 1)
+        # Equal, but not the same object: the cache is handed out as a copy so
+        # that a caller who edits what it was given cannot corrupt it for
+        # everybody else.
+        self.assertIsNot(first, second)
+        first["now"]["t"] = -999
+        self.assertNotEqual(w.snapshot(now=1000.0 + 59 * 60)["now"]["t"], -999)
 
     def test_smhis_own_cache_control_wins_over_a_shorter_ttl(self):
         # SMHI answers max-age=3600 because the model runs about hourly.
@@ -339,6 +345,87 @@ class Caching(unittest.TestCase):
         w._fetch = lambda: (_ for _ in ()).throw(urllib.error.URLError("down"))
         snap = w.snapshot(now=1000.0 + 24 * 3600)
         self.assertFalse(snap["ok"])
+
+
+class FailuresAreRemembered(unittest.TestCase):
+    """SMHI answers the same way to the same bad question every time.
+
+    homey.py and spot.py both remember a failure for a while. This one did not,
+    so a point outside the model area (a permanent 404) or a 429 was asked
+    again on every single page load -- which is how a rate limit becomes a
+    block.
+    """
+
+    def _counting(self, exc):
+        w = weather.Weather(CONFIG)
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise exc
+
+        w._fetch = boom
+        return w, calls
+
+    def test_a_failure_is_not_refetched_on_every_page_load(self):
+        w, calls = self._counting(urllib.error.URLError("no route to host"))
+        first = w.snapshot(now=1000.0)
+        second = w.snapshot(now=1000.0 + 30)
+        self.assertFalse(first["ok"])
+        self.assertEqual(first, second)
+        self.assertEqual(len(calls), 1)
+
+    def test_but_it_is_forgotten_sooner_than_a_forecast_is(self):
+        w, calls = self._counting(urllib.error.URLError("down"))
+        w.snapshot(now=1000.0)
+        self.assertLessEqual(w.failure_seconds, 300.0)
+        self.assertLessEqual(w.failure_seconds, w.ttl)
+        w.snapshot(now=1000.0 + w.failure_seconds + 1)
+        self.assertEqual(len(calls), 2)
+
+    def test_a_success_clears_it(self):
+        w = fake(FIXTURE)
+        original = w._fetch
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise urllib.error.URLError("down")
+
+        w._fetch = boom
+        self.assertFalse(w.snapshot(now=1000.0)["ok"])
+        w._fetch = original
+        self.assertTrue(w.snapshot(now=1000.0 + 400)["ok"])
+        # And a later failure inside the success TTL is not even reached.
+        w._fetch = boom
+        self.assertTrue(w.snapshot(now=1000.0 + 500)["ok"])
+        self.assertEqual(len(calls), 1)
+
+    def test_a_stale_forecast_is_still_served_while_the_failure_is_remembered(self):
+        w = fake(FIXTURE)
+        w.snapshot(now=1000.0)
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise urllib.error.URLError("down")
+
+        w._fetch = boom
+        first = w.snapshot(now=1000.0 + 2 * 3600)
+        second = w.snapshot(now=1000.0 + 2 * 3600 + 10)
+        self.assertTrue(first["stale"])
+        self.assertTrue(second["stale"])
+        self.assertEqual(len(calls), 1)
+
+    def test_a_clock_that_steps_backwards_does_not_freeze_the_cache(self):
+        w = fake(FIXTURE)
+        calls = []
+        original = w._fetch
+        w._fetch = lambda: (calls.append(1), original())[1]
+        w.snapshot(now=10000.0)
+        w.snapshot(now=10000.0 - 3600)
+        self.assertEqual(len(calls), 2,
+                         "a negative age read as very fresh and froze the cache")
 
 
 if __name__ == "__main__":

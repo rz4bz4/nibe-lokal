@@ -383,5 +383,227 @@ class Timestamps(unittest.TestCase):
         self.assertIsNone(result["now"])
 
 
+class DaysAreBandedOnTheirOwnPrices(unittest.TestCase):
+    """The regression the whole day/horizon split exists for.
+
+    Two days at different levels -- a weekday followed by a windy weekend, or a
+    front moving through -- put every horizon-cheap hour on one of them and
+    every horizon-dear hour on the other. Banding across the horizon and then
+    pairing per day found nothing to pair on either, and told the owner that no
+    hour stood out on a day with 1.15 kr of spread. In Sweden that is the
+    common case, not the corner one.
+    """
+
+    # Today 1.00 -> 2.15 kr, tomorrow 0.10 -> 0.56 kr. Every hour of tomorrow is
+    # cheaper than every hour of today.
+    TODAY = [1.00 + i * (1.15 / 23) for i in range(24)]
+    TOMORROW = [0.10 + i * (0.46 / 23) for i in range(24)]
+
+    def setUp(self):
+        self.prices = FakeTibber(
+            payload(prices(self.TODAY), prices(self.TOMORROW, day=NEXT))
+        ).snapshot(now=AT)
+        self.plan = Plan().build(self.prices, now=AT)
+
+    def test_both_days_get_a_plan(self):
+        by_day = {row["day"]: row for row in self.plan["days"]}
+        self.assertEqual(sorted(by_day), [DAY, NEXT])
+        for day, row in by_day.items():
+            self.assertGreater(row["pairs"], 0,
+                               "%s has real spread and must be planned" % day)
+            self.assertEqual(row["net"], 0)
+            self.assertEqual(row["reason"], "")
+
+    def test_the_horizon_view_is_still_there_for_the_chart(self):
+        # The page draws one chart across today and tomorrow, and "dear for the
+        # hours I can see" is the comparison a person reading it is making.
+        today_bands = {row["band"] for row in self.prices["hours"]
+                       if row["day"] == DAY}
+        tomorrow_bands = {row["band"] for row in self.prices["hours"]
+                          if row["day"] == NEXT}
+        # Across the horizon every cheap hour is tomorrow and every dear hour
+        # is today -- which is exactly why the plan cannot use this banding.
+        self.assertNotIn(spot.BAND_CHEAP, today_bands)
+        self.assertIn(spot.BAND_EXPENSIVE, today_bands)
+        self.assertNotIn(spot.BAND_EXPENSIVE, tomorrow_bands)
+        self.assertIn(spot.BAND_CHEAP, tomorrow_bands)
+        # And per day both days have both, which is what makes a plan possible.
+        for day in (DAY, NEXT):
+            bands = {row["day_band"] for row in self.prices["hours"]
+                     if row["day"] == day}
+            self.assertIn(spot.BAND_CHEAP, bands)
+            self.assertIn(spot.BAND_EXPENSIVE, bands)
+
+    def test_each_row_carries_both_answers_and_the_json_says_which(self):
+        self.assertEqual(self.prices["band_scope"], "horizon")
+        self.assertEqual(self.plan["band_scope"], "day")
+        for row in self.prices["hours"]:
+            self.assertIn(row["band"], (spot.BAND_CHEAP, spot.BAND_NORMAL,
+                                        spot.BAND_EXPENSIVE))
+            self.assertIn(row["day_band"], (spot.BAND_CHEAP, spot.BAND_NORMAL,
+                                            spot.BAND_EXPENSIVE))
+            self.assertGreaterEqual(row["day_rank"], 0.0)
+            self.assertLessEqual(row["day_rank"], 1.0)
+        # Every day is described on its own terms as well.
+        self.assertEqual([d["day"] for d in self.prices["days"]], [DAY, NEXT])
+        self.assertAlmostEqual(self.prices["days"][0]["spread"], 1.15, places=2)
+
+    def test_the_cheapest_hours_of_each_day_are_the_ones_moved(self):
+        for day, totals in ((DAY, self.TODAY), (NEXT, self.TOMORROW)):
+            rows = [r for r in self.plan["hours"] if r["day"] == day]
+            up = sorted(r["total"] for r in rows if r["offset_delta"] > 0)
+            down = sorted(r["total"] for r in rows if r["offset_delta"] < 0)
+            self.assertEqual(len(up), len(down))
+            self.assertLess(max(up), min(down))
+            self.assertAlmostEqual(min(up), min(totals), places=6)
+
+    def test_a_day_that_really_is_flat_still_says_so(self):
+        # The other half of the bargain: banding per day must not invent a
+        # cheapest quartile on a day whose whole spread is nine öre.
+        snapshot = FakeTibber(
+            payload(prices(SPIKY), prices(FLAT, day=NEXT))).snapshot(now=AT)
+        plan = Plan().build(snapshot, now=AT)
+        by_day = {row["day"]: row for row in plan["days"]}
+        self.assertGreater(by_day[DAY]["pairs"], 0)
+        self.assertEqual(by_day[NEXT]["pairs"], 0)
+        self.assertIn("Prisskillnaden", by_day[NEXT]["reason"])
+
+    def test_the_summary_does_not_claim_an_even_split(self):
+        # Four pairs one day and one the next is a perfectly normal outcome, so
+        # the summary says what each day got instead of promising a split it
+        # does not make good on.
+        lopsided = [0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37,
+                    0.38, 0.39, 0.40, 0.41, 0.42, 0.43, 0.44, 0.45,
+                    0.46, 0.47, 0.48, 0.49, 0.50, 0.51, 0.52, 1.90]
+        snapshot = FakeTibber(
+            payload(prices(SPIKY), prices(lopsided, day=NEXT))).snapshot(now=AT)
+        plan = Plan().build(snapshot, now=AT)
+        self.assertNotIn("jämnt fördelat", plan["summary"])
+        for row in plan["days"]:
+            if row["pairs"]:
+                self.assertIn("%s: %d par" % (row["day"], row["pairs"]),
+                              plan["summary"])
+
+
+class DstFallBack(unittest.TestCase):
+    """The last Sunday in October, when 02:00 happens twice."""
+
+    ROWS = [("00", "+02:00", 1.90), ("01", "+02:00", 1.70), ("02", "+02:00", 1.50),
+            ("02", "+01:00", 0.30), ("03", "+01:00", 0.35), ("04", "+01:00", 0.40),
+            ("05", "+01:00", 0.55), ("06", "+01:00", 1.20)]
+
+    def _snapshot(self):
+        rows = [{"total": total, "level": "NORMAL",
+                 "startsAt": "2026-10-25T%s:00:00.000%s" % (hour, offset)}
+                for hour, offset, total in self.ROWS]
+        at = dt.datetime.fromisoformat("2026-10-25T02:30:00+01:00").timestamp()
+        return FakeTibber(payload(rows, current_hour=0)).snapshot(now=at), at
+
+    def test_rows_come_back_in_the_order_they_happen(self):
+        # As text "02:00:00+01:00" sorts before "02:00:00+02:00", which is
+        # backwards in time: the offset shrinks as the clock goes back, so a
+        # text sort put the second 02:00 first and interleaved 03:00 after it.
+        snapshot, _ = self._snapshot()
+        got = [row["starts_at"] for row in snapshot["hours"]]
+        self.assertEqual(got, ["2026-10-25T00:00:00+02:00",
+                               "2026-10-25T01:00:00+02:00",
+                               "2026-10-25T02:00:00+02:00",
+                               "2026-10-25T02:00:00+01:00",
+                               "2026-10-25T03:00:00+01:00",
+                               "2026-10-25T04:00:00+01:00",
+                               "2026-10-25T05:00:00+01:00",
+                               "2026-10-25T06:00:00+01:00"])
+
+    def test_the_plan_keeps_that_order_and_the_day_still_nets_to_zero(self):
+        snapshot, at = self._snapshot()
+        plan = Plan().build(snapshot, now=at)
+        stamps = [row["starts_at"] for row in plan["hours"]]
+        self.assertEqual(stamps, [row["starts_at"] for row in snapshot["hours"]])
+        self.assertEqual(len(plan["days"]), 1)
+        self.assertEqual(plan["days"][0]["net"], 0)
+        self.assertEqual(plan["days"][0]["hours"], 25 - 17)
+
+    def test_the_repeated_hour_is_not_lost(self):
+        snapshot, _ = self._snapshot()
+        repeated = [row for row in snapshot["hours"]
+                    if row["starts_at"].startswith("2026-10-25T02:00")]
+        self.assertEqual(len(repeated), 2)
+        self.assertNotEqual(repeated[0]["total"], repeated[1]["total"])
+
+
+class FailuresAreRemembered(unittest.TestCase):
+    """A dead token answers the same way every time. Ask once."""
+
+    def test_a_failure_is_cached_instead_of_retried_on_every_page_load(self):
+        import urllib.error
+        client = FakeTibber(urllib.error.URLError("no route to host"),
+                            {"spot_cache_seconds": 900})
+        first = client.snapshot(now=AT)
+        second = client.snapshot(now=AT + 30)
+        self.assertFalse(first["ok"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(client.calls, 1, "a 429 asked again every page load is a ban")
+        self.assertTrue(second["cached"])
+
+    def test_but_it_is_forgotten_sooner_than_a_success(self):
+        import urllib.error
+        client = FakeTibber(urllib.error.URLError("down"), {"spot_cache_seconds": 900})
+        client.snapshot(now=AT)
+        self.assertLessEqual(client.failure_seconds, 300.0)
+        client.snapshot(now=AT + client.failure_seconds + 1)
+        self.assertEqual(client.calls, 2)
+
+    def test_a_clock_that_steps_backwards_does_not_freeze_the_cache(self):
+        client = FakeTibber(payload(prices(SPIKY)), {"spot_cache_seconds": 900})
+        client.snapshot(now=AT)
+        client.snapshot(now=AT - 3600)
+        self.assertEqual(client.calls, 2)
+
+
+class TokenHandling(unittest.TestCase):
+    """A credential must not end up in an error message on the page."""
+
+    BAD = "abc\rSECRETVALUE"
+
+    def test_a_token_with_a_control_character_is_refused_before_the_request(self):
+        client = FakeTibber(payload(prices(SPIKY)), {"tibber_token": self.BAD})
+        result = client.snapshot(now=AT)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["configured"])
+        self.assertEqual(client.calls, 0, "nothing may be sent with such a token")
+        self.assertIn("tibber_token", result["error"])
+        self.assertNotIn("SECRETVALUE", result["error"])
+
+    def test_an_error_message_that_quotes_the_token_is_scrubbed(self):
+        # http.client's own ValueError quotes the whole header value, and that
+        # message used to be echoed into the HTTP response body verbatim.
+        token = "goodlookingtoken"
+        client = FakeTibber(ValueError("Invalid header value b'Bearer %s'" % token),
+                            {"tibber_token": token})
+        result = client.snapshot(now=AT)
+        self.assertFalse(result["ok"])
+        self.assertNotIn(token, result["error"])
+        self.assertIn("***", result["error"])
+
+
+class RejectedTokenOverHttp200(unittest.TestCase):
+    """Tibber does not answer 401. It answers 200 with a GraphQL error."""
+
+    def test_the_graphql_error_gets_the_tailored_advice(self):
+        for message in ("invalid token", "Unauthenticated.",
+                        "The token is invalid", "Forbidden resource"):
+            result = FakeTibber({"errors": [{"message": message}]}).snapshot(now=AT)
+            self.assertFalse(result["ok"])
+            self.assertIn("developer.tibber.com", result["error"])
+            self.assertIn("tibber_token", result["error"])
+
+    def test_another_graphql_error_is_not_mistaken_for_a_bad_token(self):
+        result = FakeTibber(
+            {"errors": [{"message": "Cannot query field \"pricInfo\"."}]}
+        ).snapshot(now=AT)
+        self.assertFalse(result["ok"])
+        self.assertNotIn("developer.tibber.com", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

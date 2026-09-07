@@ -376,12 +376,18 @@ alarm_min_severity: "warning"     # info | warning | alarm
 alarm_emergency_priority: true
 alarm_retry_seconds: 300
 alarm_expire_seconds: 10800
+alarm_debounce_seconds: 900
 ```
 
 **The credentials** are both from [pushover.net](https://pushover.net): log in,
 the **user key** is on the front page, then *Create an Application/API Token* for
 the **application token**. Leave either empty and nothing is sent. Pushover is a
 paid app, one-off, per platform.
+
+`alarm_debounce_seconds` is the flap guard. A sensor sitting right on its limit
+raises and clears the same alarm on alternate polls, which at a 60 s poll is two
+pushes a minute; at most three notifications per code go out inside the window
+and the rest arrive as one message saying how many times it has switched.
 
 `alarm_emergency_priority` sends priority 2 — repeating until acknowledged — for
 codes classified as real alarms. Turn it off if being woken at 03:00 by a sensor

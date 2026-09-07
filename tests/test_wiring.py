@@ -328,6 +328,19 @@ class Endpoints(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
 
+    def post(self, path, body, token="hemligt"):
+        request = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path),
+            data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json"})
+        if token:
+            request.add_header("X-Auth-Token", token)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
+
     # -- the contract ----------------------------------------------------
 
     def test_indoor(self):
@@ -367,6 +380,19 @@ class Endpoints(unittest.TestCase):
         # Watching works without credentials; only the push is off.
         self.assertIs(body["notify"], False)
         self.assertIsNone(body["last_error"])
+        # Nothing has been rejected, so nothing to show the household.
+        self.assertIsNone(body["notify_error"])
+
+    def test_a_test_notification_without_credentials_says_what_to_set(self):
+        status, body = self.post("/api/alarms/test", {})
+        self.assertEqual(status, 200)
+        self.assertIs(body["ok"], False)
+        self.assertIs(body["notify"], False)
+        self.assertIn("pushover_token", body["error"])
+
+    def test_the_test_notification_endpoint_needs_the_token_too(self):
+        status, _ = self.post("/api/alarms/test", {}, token=None)
+        self.assertEqual(status, 401)
 
     def test_autotune(self):
         status, body = self.get("/api/autotune")
@@ -590,6 +616,223 @@ class SummariesWhenConfigured(unittest.TestCase):
         self.assertEqual(sum(h["offset_delta"] for h in body["plan"]["hours"]), 0)
 
 
+class AutotuneIsShownWhenItWorks(unittest.TestCase):
+    """features.autotune and /api/autotune had different opinions.
+
+    The flag required autotune_target_indoor; the endpoint falls back to the
+    pump's own room setpoint and works without it. The UI hides the feature on
+    the flag, so a working analysis was invisible to anybody who had not set a
+    key config.example.yaml documents as optional. The flag now means what the
+    endpoint means: there is an indoor source.
+    """
+
+    class Indoor:
+        configured = True
+
+        def snapshot(self):
+            return {"ok": True, "at": 1788700000, "average": 21.3,
+                    "sensors": [], "source": "homey"}
+
+        def cached_snapshot(self):
+            return self.snapshot()
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        self.pump = FakePump()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _ctx(self, **cfg):
+        # 40207 is the room setpoint on the pump's own display -- the fallback
+        # target the endpoint uses when nobody has configured one.
+        self.pump.values[40207] = 21.0
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        return server.build_context(self.pump, _cfg(**cfg), self.tmp.name,
+                                    self.store, poller,
+                                    {"homey": self.Indoor()})
+
+    def test_the_flag_is_on_without_a_target_in_the_config(self):
+        body, _ = _handler(self._ctx(autotune_target_indoor="")).call("/api/status")
+        self.assertIs(body["features"]["autotune"], True)
+
+    def test_and_the_endpoint_agrees_by_using_the_pumps_own_setpoint(self):
+        body, status = _handler(
+            self._ctx(autotune_target_indoor="")).call("/api/autotune")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["target_source"], "pump")
+        self.assertIsNotNone(body["target_indoor"])
+
+    def test_a_configured_target_wins_and_says_so(self):
+        body, _ = _handler(
+            self._ctx(autotune_target_indoor=21.5)).call("/api/autotune")
+        self.assertEqual(body["target_indoor"], 21.5)
+        self.assertEqual(body["target_source"], "config")
+
+    def test_without_an_indoor_source_there_is_nothing_to_tune_against(self):
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(autotune_target_indoor=21.0),
+                                   self.tmp.name, self.store, poller, {})
+        body, _ = _handler(ctx).call("/api/status")
+        self.assertIs(body["features"]["autotune"], False)
+
+    def test_the_example_config_calls_the_target_optional(self):
+        # The three have to agree, and this is the third.
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(base, "config.example.yaml"), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        where = next(i for i, line in enumerate(lines)
+                     if line.lstrip("# ").startswith("autotune_target_indoor"))
+        above = " ".join(lines[max(0, where - 12):where])
+        self.assertIn("Optional", above)
+        self.assertIn("room setpoint", above)
+
+
+class TheStatusSummaryNeverGoesToTheLan(unittest.TestCase):
+    """/api/status is polled every 30 s and must not wait for anything.
+
+    The comment used to say the indoor summary was "a dict lookup rather than a
+    request to the LAN". That was true only while the cache was warm, and the
+    poller refreshes it after a *successful* pump poll -- so when the pump was
+    down and Homey was slow, the endpoint the page lives on stalled for two
+    timeouts.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        self.pump = FakePump()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _status(self, homey):
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(), self.tmp.name, self.store,
+                                   poller, {"homey": homey})
+        return _handler(ctx).call("/api/status")[0]
+
+    def test_a_cold_cache_is_reported_rather_than_fetched(self):
+        class NeverAnswers:
+            configured = True
+            asked = 0
+
+            def snapshot(self):
+                NeverAnswers.asked += 1
+                raise AssertionError("/api/status went to the LAN")
+
+            def cached_snapshot(self):
+                return None
+
+        body = self._status(NeverAnswers())
+        self.assertEqual(NeverAnswers.asked, 0)
+        self.assertIs(body["indoor"]["configured"], True)
+        self.assertIs(body["indoor"]["ok"], False)
+        self.assertTrue(body["indoor"]["error"])
+        self.assertIs(body["features"]["indoor"], True)
+
+    def test_a_warm_cache_is_summarised_without_asking_homey(self):
+        class Cached:
+            configured = True
+            asked = 0
+
+            def snapshot(self):
+                Cached.asked += 1
+                raise AssertionError("/api/status went to the LAN")
+
+            def cached_snapshot(self):
+                return {"ok": True, "at": 1788700000, "average": 21.3,
+                        "sensors": [{"name": "Sovrum", "value": 20.9,
+                                     "stale": False},
+                                    {"name": "Garage", "value": 12.0,
+                                     "stale": True}],
+                        "source": "homey"}
+
+        body = self._status(Cached())
+        self.assertEqual(Cached.asked, 0)
+        self.assertEqual(body["indoor"]["average"], 21.3)
+        self.assertEqual(body["indoor"]["sensors"], 2)
+        self.assertEqual(body["indoor"]["stale"], 1)
+
+    def test_the_real_homey_class_offers_that_method(self):
+        from nibelokal.homey import Homey
+
+        self.assertTrue(hasattr(Homey(host="192.0.2.20", token="x"),
+                                "cached_snapshot"))
+
+
+class AlarmNotificationsThatWereRejected(unittest.TestCase):
+    """A configuration the notification service refused, where a person sees it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        self.pump = FakePump()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _ctx(self, watcher):
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        return server.build_context(self.pump, _cfg(), self.tmp.name, self.store,
+                                    poller, {"watcher": watcher})
+
+    def _watcher(self):
+        class Notifier:
+            name = "fake"
+            sent = []
+
+            def send(self, title, message, priority=0):
+                Notifier.sent.append((title, priority))
+
+        Notifier.sent = []
+        return alarms.Watcher(self.store, self.pump, _cfg(), notifier=Notifier())
+
+    def test_the_endpoint_carries_the_rejection_next_to_the_notify_flag(self):
+        watcher = self._watcher()
+        watcher.notify_error = "Pushover avvisade inloggningen (HTTP 401)."
+        body, status = _handler(self._ctx(watcher)).call("/api/alarms")
+        self.assertEqual(status, 200)
+        self.assertIs(body["notify"], True)
+        self.assertEqual(body["notify_error"], watcher.notify_error)
+
+    def test_and_so_does_the_status_summary(self):
+        watcher = self._watcher()
+        watcher.notify_error = "Fel token."
+        body, _ = _handler(self._ctx(watcher)).call("/api/status")
+        self.assertEqual(body["alarm"]["notify_error"], "Fel token.")
+        self.assertIs(body["alarm"]["notify"], True)
+
+    def test_a_healthy_watcher_reports_no_rejection(self):
+        body, _ = _handler(self._ctx(self._watcher())).call("/api/status")
+        self.assertIsNone(body["alarm"]["notify_error"])
+
+    def test_no_watcher_at_all_still_has_the_key(self):
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(), self.tmp.name, self.store,
+                                   poller, {})
+        body, _ = _handler(ctx).call("/api/status")
+        self.assertIn("notify_error", body["alarm"])
+
+    def test_the_test_notification_endpoint_reaches_the_watcher(self):
+        watcher = self._watcher()
+        handler = server.Handler.__new__(server.Handler)
+        handler.ctx = self._ctx(watcher)
+        captured = {}
+        handler._json = lambda obj, status=200: captured.update(
+            body=obj, status=status)                            # noqa: SLF001
+        from urllib.parse import urlparse
+
+        handler._api_post(urlparse("/api/alarms/test"), {})     # noqa: SLF001
+        self.assertIs(captured["body"]["ok"], True)
+        self.assertEqual(len(watcher.notifier.sent), 1)
+        self.assertEqual(watcher.notifier.sent[0][1], 0)
+
+
 class PollLoop(unittest.TestCase):
     """The poll loop is the one thread that must not die."""
 
@@ -712,6 +955,70 @@ class PollLoop(unittest.TestCase):
         self.assertEqual(summary["alarm"]["code"], 163)
         self.assertEqual(summary["alarm"]["active"], 1)
 
+    def test_pruning_covers_the_alarm_log(self):
+        # alarms.py creates its tables in this same file, and nothing was ever
+        # going to delete their rows. A working pump writes none for months; a
+        # flapping sensor writes two a minute.
+        store = Store(os.path.join(self.tmp.name, "alarmprune.db"), history_days=1)
+        watcher = alarms.Watcher(store, FakePump(), _cfg())
+        old = int(time.time()) - 10 * 86400
+        with store._lock, store._db as c:                       # noqa: SLF001
+            c.execute("INSERT INTO alarm_events (ts, code, kind, severity, text, "
+                      "sent) VALUES (?,?,?,?,?,2)", (old, 163, "alarm", "alarm", "x"))
+            c.execute("INSERT INTO alarm_events (ts, code, kind, severity, text, "
+                      "sent) VALUES (?,?,?,?,?,2)",
+                      (int(time.time()), 163, "clear", "info", "x"))
+            c.execute("INSERT OR REPLACE INTO alarm_state (code, first_seen, "
+                      "last_seen) VALUES (?,?,?)", (42, old, old))
+        store.prune()
+        with store._lock, store._db as c:                       # noqa: SLF001
+            events = c.execute("SELECT COUNT(*) FROM alarm_events").fetchone()[0]
+            state = c.execute("SELECT COUNT(*) FROM alarm_state").fetchone()[0]
+        self.assertEqual(events, 1, "only the old event goes")
+        self.assertEqual(state, 0)
+        self.assertIsNotNone(watcher)
+        store.close()
+
+    def test_pruning_a_database_that_has_never_seen_an_alarm_still_works(self):
+        # The alarm tables only exist once a Watcher has been built against the
+        # file. prune() must not raise on a store that has no watcher.
+        store = Store(os.path.join(self.tmp.name, "noalarms.db"), history_days=1)
+        store.record({30002: {"value": 1.0}}, ts=int(time.time()) - 10 * 86400)
+        self.assertEqual(store.prune(), 1)
+        store.close()
+
+    def test_a_standing_alarm_is_not_pruned_out_from_under_the_watcher(self):
+        store = Store(os.path.join(self.tmp.name, "standing.db"), history_days=1)
+        watcher = alarms.Watcher(store, FakePump(), _cfg())
+        watcher.poll({alarms.R_ALARM: {"value": 163}})
+        store.prune()
+        self.assertEqual([a["code"] for a in watcher.active()], [163])
+        store.close()
+
+    def test_the_indoor_feed_keeps_running_when_the_pump_is_unreachable(self):
+        # It is an independent source, and the poll loop is the only thing
+        # keeping its cache warm for /api/status, which never fetches.
+        seen = []
+
+        class Source:
+            configured = True
+
+            def snapshot(self):
+                seen.append(1)
+                return {"ok": True, "at": int(time.time()) + len(seen),
+                        "average": 20.5, "sensors": [], "source": "homey"}
+
+        pump = FakePump(fail=True)
+        poller = Poller(pump, self.store, [30002], seconds=15, indoor=Source())
+        poller.start()
+        deadline = time.time() + 10
+        while time.time() < deadline and not seen:
+            time.sleep(0.01)
+        poller.stop()
+        poller.join(timeout=5)
+        self.assertTrue(seen, "the indoor feed stopped with the pump")
+        self.assertEqual(self._indoor_rows(), len(seen))
+
     def test_pruning_covers_the_indoor_table(self):
         store = Store(os.path.join(self.tmp.name, "prune.db"), history_days=1)
         old = int(time.time()) - 10 * 86400
@@ -761,7 +1068,8 @@ class HistoryForAutotune(unittest.TestCase):
         self.assertTrue(rows)
         for row in rows[:5]:
             self.assertEqual(set(row), {"ts", "outdoor", "indoor", "supply",
-                                        "degree_minutes", "compressor"})
+                                        "degree_minutes", "compressor",
+                                        "compressor_states"})
         self.assertEqual(rows, sorted(rows, key=lambda r: r["ts"]))
         # Bucketed to the hour: the indoor sample was written half a minute
         # after the pump reading and still lands on the same row.
@@ -769,6 +1077,7 @@ class HistoryForAutotune(unittest.TestCase):
         self.assertTrue(joined)
         self.assertEqual(joined[0]["indoor"], 20.4)
         self.assertEqual(joined[0]["compressor"], "Värme")
+        self.assertEqual(joined[0]["compressor_states"], ["Värme"])
         self.assertEqual(joined[0]["degree_minutes"], -180.0)
 
     def test_analyse_accepts_the_join_without_complaining(self):
