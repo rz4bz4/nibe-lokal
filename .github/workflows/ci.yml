@@ -1,0 +1,52 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unittest (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is what pyproject requires. The ceiling is what the
+        # author's own machine runs, which is where this is used every day.
+        python: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the optional register map
+        # The app runs without it -- a CSV exported from the pump works just as
+        # well -- but tests/test_safety.py walks every S-series map to check the
+        # write gate is not blind outside the model it was written against, and
+        # it skips rather than fails when the package is absent. A skipped
+        # safety test is not a passing safety test, so CI installs it.
+        run: python -m pip install --quiet 'nibe>=2.0'
+      - run: python -m unittest discover -s tests -v
+
+  page:
+    name: the page actually loads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet 'nibe>=2.0' playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Drive web/index.html in a real browser
+        # v0.3.0 shipped a web/index.html truncated mid-<script>, with the whole
+        # behaviour layer missing. Every unit test was green; the app rendered a
+        # dead screen for a day. Nothing but a browser opening the page catches
+        # that, so a browser opens the page here.
+        run: python tests/ui_smoke_new.py

@@ -1,5 +1,7 @@
 # nibe-lokal
 
+[![tests](https://github.com/rz4bz4/nibe-lokal/actions/workflows/ci.yml/badge.svg)](https://github.com/rz4bz4/nibe-lokal/actions/workflows/ci.yml)
+
 A small web app for a NIBE S-series heat pump that talks **directly to the pump
 over Modbus TCP on your own network**. No cloud account, no subscription, no
 myUplink. Your settings and your history stay in files you own.
@@ -127,7 +129,19 @@ python3 -m unittest discover tests    # no pump required
 ```
 
 Nothing in the suite touches a pump or the network. The ones that walk every
-register map the `nibe` package ships skip themselves if it is not installed.
+register map the `nibe` package ships skip themselves if it is not installed —
+so install it before you trust a green run, because a skipped safety test is
+not a passing one.
+
+`tests/test_web_asset.py` earns its keep by being dull: it checks that the web
+app on disk is a *whole file*. Version 0.3.0 shipped an `index.html` truncated
+in the middle of an empty `<script>` tag. Every other test passed, and the app
+rendered a dead screen — right colours, right header, no data — until a person
+opened it. Unit tests do not open files they are not about.
+
+GitHub Actions runs all of this on every push, on Python 3.10 through 3.13, and
+then opens the page in a real Chromium, which is the only thing that would have
+caught that bug.
 
 There are also two browser smoke tests, and both only read and open panels —
 neither changes anything on the pump. `tests/ui_smoke_new.py` is the one to
