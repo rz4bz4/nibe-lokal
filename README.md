@@ -7,16 +7,20 @@ myUplink. Your settings and your history stay in files you own.
 It does six things:
 
 - **Shows the pump** — temperatures, hot water, ventilation, fan speed, degree
-  minutes, compressor hours, alarms. Five tabs, built for a phone, installable
-  on the home screen as a PWA.
+  minutes, compressor hours, alarms. Four tabs — five once electricity prices
+  are configured, since that tab is hidden until they are — built for a phone,
+  installable on the home screen as a PWA.
 - **Does the things you actually reach for a phone for** — extra hot water before
   a bath, more ventilation for a few hours that goes back on its own, and nudging
   the heat up or down a step.
 - **Helps you get the heat curve right**, which is the part everyone gets wrong.
   Two questions — is it too cold or too warm, and *when* — turn into one concrete
-  register change, with the reasoning shown. See "Heating advice" below. Every
-  setting the pump exposes is also editable directly, grouped and explained in
-  plain language rather than as raw register numbers.
+  register change, with the reasoning shown. See "Heating advice" below. Some
+  three dozen further settings are editable directly, grouped and explained in
+  plain language rather than as raw register numbers. That is a deliberate
+  selection, not the whole pump: an S735 exposes 562 writable registers, and
+  most of them are commissioning settings that belong on the pump's display.
+  `nibelokal/settings.py` is the list and says why each one is on it.
 - **Backs up every setting** to a timestamped JSON file — automatically, once a
   day — and diffs two snapshots so you can see what changed since June. A backup
   you have to remember to take is one you will not have when you need it, and you
@@ -31,12 +35,15 @@ It does six things:
   something NIBE publishes. This is the one thing myUplink gave away free that
   actually matters when something breaks at two in the morning.
 - **Knows things the pump does not** — indoor temperature from your own sensors,
-  the SMHI forecast, and hourly electricity prices — and uses them to suggest
-  gentle, symmetric changes it never applies on its own. Given weeks of indoor
-  readings it will also say whether the heat curve's height or its slope is the
-  thing that is wrong. Those three feeds, the alarm push above and the curve
-  autotuning are five optional integrations; with none of them configured the app
-  is exactly what it was before. See
+  hourly electricity prices, and the SMHI forecast. The first two feed
+  suggestions it never applies on its own: given weeks of indoor readings it will
+  say whether the heat curve's height or its slope is the thing that is wrong,
+  and given prices it will lay out which hours to heat in and which to coast,
+  paired inside one day. The forecast is shown and not used — nothing computes
+  against it — because a panel you read before you act is a smaller promise than
+  a model, and the honest description of what is there. Those three feeds, the
+  alarm push above and the curve autotuning are five optional integrations; with
+  none of them configured the app is exactly what it was before. See
   [Optional integrations](#optional-integrations).
 
 It is deliberately boring: Python standard library plus one optional package for
@@ -122,12 +129,18 @@ python3 -m unittest discover tests    # no pump required
 Nothing in the suite touches a pump or the network. The ones that walk every
 register map the `nibe` package ships skip themselves if it is not installed.
 
-There is also a browser smoke test that clicks through a running instance. It
-only reads and opens panels — it changes nothing on the pump:
+There are also two browser smoke tests, and both only read and open panels —
+neither changes anything on the pump. `tests/ui_smoke_new.py` is the one to
+reach for: it starts its own server answering invented but realistic JSON, so it
+needs no pump, no Homey, no Tibber and no SMHI, and it runs the app through
+seven states — everything configured, everything configured but empty, nothing
+configured, an owner's real curve, integrations that do not answer, a slow
+server, and a pump that will not read. It writes screenshots to `_shots/`.
 
 ```bash
 pip install playwright && playwright install chromium
-python3 tests/ui_smoke.py              # against a running `serve`
+python3 tests/ui_smoke_new.py          # starts its own stub server
+python3 tests/ui_smoke.py              # against a running `serve`, needs a pump
 ```
 
 To keep it running, use whatever your machine already has — `systemd`, `launchd`,
@@ -159,13 +172,27 @@ three tiers:
 
 | Tier | What is in it | Behaviour |
 |---|---|---|
-| **Everyday** | extra hot water, hot water comfort mode, ventilation mode and its return time, room setpoint, periodic hot water interval, SG Ready | written freely |
-| **Guarded** | heating curve and offset, supply temperature limits, hot water start/stop temperatures, immersion heater power, operating mode, fan speed percentages | require `confirm: true`, are range-checked against the register's own min/max, and are logged |
-| **Blocked** | compressor frequency limits, heating medium pump mode, floor drying, AUX-over-Modbus, external sensor value injection, smart-price control | never written by this app |
+| **Everyday** | extra hot water, hot water comfort mode, ventilation mode and its return time, room setpoint, periodic hot water interval | accepted without `confirm: true` |
+| **Guarded** | heating curve and offset, supply temperature limits, hot water start/stop temperatures, immersion heater power, operating mode, fan speed percentages, the whole SG Ready menu | require `confirm: true`, are range-checked against the register's own min/max, and are logged |
+| **Blocked** | compressor frequency limits, heating medium and brine pump modes, floor drying, AUX-over-Modbus, external sensor value injection, smart-price control | never written by this app |
 
 Anything not explicitly classified is treated as **guarded**, not as free.
 [docs/registers.md](docs/registers.md) lists every register in each tier and the
 reasoning behind it.
+
+**What that means from a phone.** Every write that goes through `/api/write` —
+the heating step on the Värme tab, every row in the settings list — opens a
+dialog first, showing the register, the value before and after and how long to
+wait for an effect, and sends `confirm: true` whatever tier the register is in.
+Two buttons are deliberately one tap and no dialog: extra hot water and the
+ventilation boost. They post to `/api/hotwater` and `/api/ventilation`, which
+write only everyday registers, and both undo themselves — the hot water after
+the minutes you asked for, the fan after its return time. So the promise is not
+"the app confirms every write"; it is **nothing with consequences is written
+without an explicit confirm**, and the everyday tier is the list of registers
+this project has decided have none. That list is also what lets something which
+is not the app — a script, a Homey flow, `curl` — start a ventilation boost
+without asserting that it understands consequences it does not have.
 
 Two things worth knowing before you change a setting from a phone:
 
@@ -305,9 +332,15 @@ below has nothing to work from and says so.
 
 ### Weather forecast, from SMHI
 
-**What it gives you.** The pump's own outdoor sensor says what is happening now.
-A house with hours of thermal inertia is better served by what is about to
-happen, and the heating advice reads the forecast before suggesting a change.
+**What it gives you.** A panel showing what is about to happen, next to what
+the pump's own outdoor sensor says is happening now. A house with hours of
+thermal inertia is better served by the first of those.
+
+**The heating advice does not read it.** `/api/advice` is not passed the
+forecast and neither `advisor.py` nor `autotune.py` touches it; both work from
+the pump's own outdoor temperature and from the history. The forecast is
+something for you to look at before you act on a suggestion, not an input to
+it. Wiring it in would be a real feature and is not one this does yet.
 
 ```yaml
 weather_lat: 59.3293
@@ -322,8 +355,8 @@ point, and do not swap them — a longitude in the latitude field is a point
 outside SMHI's model and answers 404. The forecast covers Sweden and its
 surroundings; elsewhere the model has nothing to say.
 
-**If you skip it:** no forecast panel, and the advice works from the pump's own
-outdoor sensor as it did before.
+**If you skip it:** no forecast panel, and nothing else changes — the advice
+works from the pump's own outdoor sensor either way.
 
 ### Electricity prices, from Tibber
 
@@ -413,8 +446,13 @@ autotune_days: 30
 
 **No credential**, but it needs an indoor temperature, which the pump does not
 have — so in practice it needs the Homey integration above, and enough history
-for the weather to have varied. Without `autotune_target_indoor` there is no
-error to measure and the analysis says so rather than guessing.
+for the weather to have varied. `autotune_target_indoor` is optional: left
+unset, the analysis measures against the room setpoint on the pump's own
+display, which is the closest thing to a stated wish that exists without this
+key, and `/api/autotune` says which of the two it used in `target_source`. Set
+it when the pump's setpoint is not what you actually want the house to hold —
+on a pump with no room sensor that number regulates nothing, so it is easy to
+have left at something you never meant.
 
 **Advisory only: it never writes.** Like everything else in the heating advice,
 the change it proposes is one step, and it tells you how long to wait.
@@ -444,7 +482,26 @@ value, so they stay readable without this tool. They are worth keeping in git.
 
 The app polls the dashboard registers every 60 seconds into a SQLite file. That
 is the history that myUplink's paid tier sells you, in a file you own, for as
-long as `history_days` says. It costs a few tens of MB a year.
+long as `history_days` says.
+
+**It is not small, and the size is arithmetic rather than a guess.** One row per
+register per poll, and each row costs about 57 bytes once the two indexes on
+`readings` are counted. So:
+
+    rows  = registers × 86400 ÷ poll_seconds × days
+    bytes = rows × 57
+
+The shipped defaults are the 25 registers in `DASHBOARD` (`nibelokal/pump.py`)
+at `poll_seconds: 60`, which is 36 000 rows a day: **about 21 MB per ten days,
+750 MB and 13 million rows a year**, and about 830 MB in the steady state at the
+shipped `history_days: 400`. Measured by building the table, not estimated.
+SQLite handles that size without complaint — the index on `ts` exists so the
+daily prune does not full-scan it — but it is a real amount of disk on a Pi with
+an SD card, and it is more than twenty times the "few tens of MB a year" an
+earlier version of this paragraph claimed. Cut `history_days`, lengthen
+`poll_seconds`, or shorten `DASHBOARD`; each is linear in the figures above, so
+recompute rather than trusting the three bolded numbers if you have changed any
+of the three.
 
 Do not poll harder than the pump allows: NIBE documents **max 100 registers per
 second and 20 registers per query**, and the app enforces both. Community reports

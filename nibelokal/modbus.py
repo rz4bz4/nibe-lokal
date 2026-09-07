@@ -183,7 +183,19 @@ class ModbusTCP:
                     time.sleep(0.25)
                     continue
                 self._seen_pump = True
+                # A frame the length header promised but that carries no
+                # function code, or an exception frame with no exception code,
+                # is a truncated answer -- not something to index into. body[1]
+                # on a one-byte exception frame raised IndexError, which is
+                # neither ModbusError nor ModbusOffline and so escaped every
+                # caller that handles Modbus failures, pump._read_block among
+                # them.
+                if not body:
+                    raise ModbusOffline("The pump sent an empty Modbus response.")
                 if body[0] & 0x80:
+                    if len(body) < 2:
+                        raise ModbusOffline(
+                            "The pump sent a truncated Modbus exception response.")
                     raise ModbusError(body[1], context)
                 return body
         raise ModbusOffline(str(last))
@@ -197,8 +209,19 @@ class ModbusTCP:
         fc = 4 if kind == 3 else 3
         pdu = struct.pack(">BHH", fc, address, count)
         body = self._transact(pdu, count, "reading %d registers from %d" % (count, address))
+        # Everything below indexes into the answer, so the answer is checked
+        # first. A short body used to raise IndexError or struct.error, which
+        # are not Modbus exceptions and were not caught as such anywhere:
+        # pump._read_block catches ModbusError, and the poller then logged a
+        # struct.error as if the pump had said something about a register.
+        if len(body) < 2:
+            raise ModbusOffline("The pump sent a Modbus response with no data.")
         nbytes = body[1]
         raw = body[2:2 + nbytes]
+        if nbytes % 2 or len(raw) < nbytes:
+            raise ModbusOffline(
+                "The pump promised %d bytes of register data and sent %d."
+                % (nbytes, len(raw)))
         return list(struct.unpack(">" + "H" * (nbytes // 2), raw))
 
     def write(self, address: int, values: list[int]) -> None:

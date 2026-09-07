@@ -6,10 +6,12 @@ import json
 import logging
 import os
 import threading
+import time
 
 from .modbus import MAX_REGS_PER_QUERY, ModbusError, ModbusOffline, ModbusTCP
 from .registry import Register, Registry
 from . import safety
+from . import sv_number
 
 log = logging.getLogger("nibelokal.pump")
 
@@ -58,6 +60,20 @@ R_MORE_HW_MINUTES = 40226
 R_MORE_HW = 40698
 R_VENT_MODE = 40105
 
+#: How long a register the pump refused stays out of the polled block before it
+#: is offered another chance.
+#:
+#: Exception 1 is two different answers wearing one number: Modbus' generic
+#: "illegal function" and -- measured on an S735-family pump -- "I do not
+#: implement that register". A pump that is rebooting, or busy, answers the
+#: first for a register it has. Dropping such a register for the life of the
+#: process meant one bad second could hide it until somebody restarted the app,
+#: and if that register was 31976 the alarm watcher stopped watching without
+#: anything saying so. An hour is long enough that a genuinely absent register
+#: costs one query an hour instead of one a minute, and short enough that a
+#: reboot heals itself before anybody notices.
+MISSING_RETRY_SECONDS = 3600.0
+
 
 class Pump:
     def __init__(self, host: str, port: int, unit: int, registry: Registry,
@@ -68,7 +84,9 @@ class Pump:
         self.host = host
         self.port = port
         self._lock = threading.RLock()
-        self._missing: set[int] = set()   # registers this pump answered "illegal address" for
+        # Registers this pump refused, and when. A dict rather than a set: see
+        # MISSING_RETRY_SECONDS -- these expire, and /api/status shows them.
+        self._missing: dict[int, float] = {}
 
     # -- reading ---------------------------------------------------------
 
@@ -81,10 +99,11 @@ class Pump:
 
     def read_many(self, addresses: list[int]) -> dict[int, dict]:
         """Read a set of registers, batching contiguous runs into single queries."""
+        now = time.time()
         wanted: list[Register] = []
         for a in addresses:
             r = self.registry.get(a)
-            if r is not None and a not in self._missing:
+            if r is not None and not self._is_missing(a, now):
                 wanted.append(r)
 
         out: dict[int, dict] = {}
@@ -106,7 +125,7 @@ class Pump:
                 # (illegal function), not the textbook 2 (illegal data address),
                 # for registers it does not implement -- so treat both as absent.
                 if exc.code in (1, 2):
-                    self._missing.add(block[0].address)
+                    self._missing[block[0].address] = time.time()
                 out[block[0].address] = {"error": str(exc)}
                 return
             # A hole somewhere in the block: fall back to reading each one.
@@ -120,6 +139,38 @@ class Pump:
             except Exception as exc:                      # noqa: BLE001
                 out[reg.address] = {"error": "decode failed: %s" % exc}
 
+    def _is_missing(self, address: int, now: float | None = None) -> bool:
+        """True while this register is being skipped. Expires; see the constant."""
+        at = self._missing.get(address)
+        if at is None:
+            return False
+        if (time.time() if now is None else now) - at >= MISSING_RETRY_SECONDS:
+            # Its turn again. Removed rather than merely ignored, so a register
+            # that answers this time stops being reported as missing at all.
+            self._missing.pop(address, None)
+            return False
+        return True
+
+    def missing(self) -> list[dict]:
+        """Registers currently being skipped, for /api/status to show.
+
+        A register that quietly disappeared from every poll is invisible
+        otherwise, and 31976 disappearing means the alarm watching stopped.
+        """
+        now = time.time()
+        out = []
+        for address, at in sorted(self._missing.items()):
+            if now - at >= MISSING_RETRY_SECONDS:
+                continue
+            reg = self.registry.get(address)
+            out.append({
+                "address": address,
+                "title": reg.title if reg else str(address),
+                "since": at,
+                "retry_in": round(max(0.0, MISSING_RETRY_SECONDS - (now - at)), 1),
+            })
+        return out
+
     # -- writing ---------------------------------------------------------
 
     def write(self, address: int, value, confirmed: bool = False, expect=None) -> dict:
@@ -127,7 +178,7 @@ class Pump:
         if reg is None:
             raise KeyError("register %d is not in the map" % address)
         if not reg.writable:
-            raise safety.Refused("%s (%d) is read-only." % (reg.title, address))
+            raise safety.Refused("%s (%d) går inte att skriva till." % (reg.title, address))
 
         safety.check(address, confirmed, self.allow_guarded)
 
@@ -148,15 +199,14 @@ class Pump:
             # Optimistic concurrency: a phone that has had the page open for a
             # day may be stepping from a value the display has since changed,
             # which moves the heat the opposite way from the button pressed.
-            if expect is not None and not _same(before, reg.coerce(expect)
-                                                if reg.mappings and not isinstance(expect, str)
-                                                else expect):
+            if expect is not None and not _same(before, _as_read(reg, expect)):
                 # Including the case where `before` could not be read at all:
                 # a conditional write whose condition is unknown is not one.
                 raise safety.Refused(
                     "%s har ändrats sedan du läste den (%s nu, %s då). Läs om och "
                     "försök igen så du vet vad du ändrar från."
-                    % (reg.title, "okänt" if before is None else before, expect)
+                    % (reg.title, "okänt" if before is None else before,
+                       _as_read(reg, expect))
                 )
             self.mb.write(reg.wire, words)
             after = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
@@ -189,12 +239,21 @@ class Pump:
         """
         prepared = []
         for change in changes:
-            address = int(change["address"])
+            if not isinstance(change, dict):
+                raise ValueError("each change must be an object with an address")
+            try:
+                address = int(change["address"])
+            except (TypeError, ValueError):
+                # A bad address is a bad request. int(None) is a TypeError,
+                # which used to surface as a 502 with a stack trace.
+                raise ValueError("%r is not a register address"
+                                 % (change.get("address"),))
             reg = self.registry.get(address)
             if reg is None:
                 raise KeyError("register %d is not in the map" % address)
             if not reg.writable:
-                raise safety.Refused("%s (%d) is read-only." % (reg.title, address))
+                raise safety.Refused("%s (%d) går inte att skriva till."
+                                     % (reg.title, address))
             safety.check(address, confirmed, self.allow_guarded)
             value = reg.coerce(change.get("value"))
             if not reg.mappings:
@@ -212,22 +271,30 @@ class Pump:
                     before = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
                 except (ModbusError, ModbusOffline):
                     pass
-                if expect is not None and not _same(before, reg.coerce(expect)
-                                                   if reg.mappings else expect):
+                if expect is not None and not _same(before, _as_read(reg, expect)):
                     raise safety.Refused(
                         "%s har ändrats sedan du läste den (%s nu, %s då). Läs om och "
                         "försök igen så du vet vad du ändrar från."
-                        % (reg.title, "okänt" if before is None else before, expect)
+                        % (reg.title, "okänt" if before is None else before,
+                           _as_read(reg, expect))
                     )
                 befores.append(before)
 
             done: list[dict] = []
             for i, (reg, value, _expect) in enumerate(prepared):
+                written = False
                 try:
                     self.mb.write(reg.wire, reg.encode(value))
+                    # From here on the pump has already changed. A read-back
+                    # that then fails is a lost answer, not an unwritten
+                    # register -- rolling back only prepared[:i] left write i
+                    # standing, which is exactly the half-applied pair this
+                    # function exists to prevent.
+                    written = True
                     after = reg.decode(self.mb.read(reg.kind, reg.wire, reg.count))
                 except Exception as exc:                   # noqa: BLE001
-                    rolled, failed_back = self._rollback(prepared[:i], befores[:i])
+                    upto = i + 1 if written else i
+                    rolled, failed_back = self._rollback(prepared[:upto], befores[:upto])
                     return {
                         "changes": done,
                         "partial": True,
@@ -279,15 +346,26 @@ class Pump:
     def ventilate(self, direction: str = "up", hours: int = 3, mode: int | None = None) -> dict:
         hours = int(hours)
         if not 1 <= hours <= 24:
-            raise safety.Refused("The return time must be between 1 and 24 hours.")
-        if mode is not None and not 0 <= int(mode) <= 4:
-            raise safety.Refused("Ventilation mode must be 0..4.")
+            raise safety.Refused("Återgångstiden måste vara mellan 1 och 24 timmar.")
+        if mode is not None:
+            # Converted, not merely validated. The web app sends whatever the
+            # JSON body carried, and "2" out of a phone passed int(mode) as a
+            # check and then failed `mode in FAN_RETURN_REGISTER` -- so the
+            # return time was never written while the answer still said
+            # "hours: 3", and the fan sat at mode 2 for whatever return time
+            # the pump happened to have.
+            try:
+                mode = int(mode)
+            except (TypeError, ValueError):
+                raise safety.Refused("Ventilationsläget måste vara ett tal 0–4.")
+            if not 0 <= mode <= 4:
+                raise safety.Refused("Ventilationsläget måste vara 0–4.")
         speeds = self.fan_speeds()
         normal = speeds.get(0)
         if normal is None:
             raise safety.Refused(
-                "Could not read the normal fan speed (register 40110), so I cannot tell "
-                "which mode means 'more air' on this pump."
+                "Kunde inte läsa normalfläktnivån (register 40110), så appen kan inte "
+                "avgöra vilket läge som betyder mer luft på den här pumpen."
             )
         if mode is None:
             if direction == "normal":
@@ -295,12 +373,16 @@ class Pump:
             elif direction == "down":
                 lower = {m: p for m, p in speeds.items() if m and p is not None and p < normal}
                 if not lower:
-                    raise safety.Refused("No mode gives less air than normal (%g %%)." % normal)
+                    raise safety.Refused(
+                        "Inget läge ger mindre luft än normalläget (%s %%)."
+                        % sv_number(normal, None))
                 mode = max(lower, key=lambda m: lower[m])
             else:
                 higher = {m: p for m, p in speeds.items() if m and p is not None and p > normal}
                 if not higher:
-                    raise safety.Refused("No mode gives more air than normal (%g %%)." % normal)
+                    raise safety.Refused(
+                        "Inget läge ger mer luft än normalläget (%s %%)."
+                        % sv_number(normal, None))
                 mode = min(higher, key=lambda m: higher[m])
 
         results = []
@@ -311,7 +393,9 @@ class Pump:
             "mode": mode,
             "percent": speeds.get(mode),
             "normal_percent": normal,
-            "hours": hours if mode else None,
+            # The return time is only written for a mode that has a return
+            # register, so this is what was set -- not what was asked for.
+            "hours": hours if mode in FAN_RETURN_REGISTER else None,
             "speeds": speeds,
             "writes": results,
         }
@@ -324,7 +408,7 @@ class Pump:
         minutes = int(minutes)
         if not off and not 1 <= minutes <= self.MAX_EXTRA_HOT_WATER_MINUTES:
             raise safety.Refused(
-                "Extra hot water is limited to 1..%d minutes by this app."
+                "Extra varmvatten är begränsat till 1–%d minuter i den här appen."
                 % self.MAX_EXTRA_HOT_WATER_MINUTES
             )
         if off:
@@ -415,6 +499,28 @@ def _blocks(regs: list[Register], gap: int = 3) -> list[list[Register]]:
     if current:
         out.append(current)
     return out
+
+
+def _as_read(reg: Register, expect):
+    """`expect` in the form decode() would have handed it back.
+
+    An enum register reads as its label ("Medium") and writes as its key (1),
+    so a caller may legitimately send either. Comparing the raw `expect` with
+    the decoded `before` made a conditional write on a mapped register refuse
+    every time -- with the memorable text "Medium nu, Medium då" -- while the
+    single-write path refused only the key form. Normalise once, here, so both
+    paths compare like with like.
+    """
+    if not reg.mappings:
+        return expect
+    try:
+        key = reg.coerce(expect)
+    except (TypeError, ValueError):
+        # Not a value this register takes at all, so it cannot be what the
+        # register reads as either. Left alone, and the comparison fails --
+        # which is the honest answer to "I expected something impossible".
+        return expect
+    return reg.mappings.get(str(key), key)
 
 
 def _same(a, b) -> bool:

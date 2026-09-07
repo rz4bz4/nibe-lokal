@@ -263,5 +263,51 @@ class RateLimit(unittest.TestCase):
         self.assertGreater(time.monotonic() - start, 3.0)
 
 
+class ValuesThatAreNotNumbers(unittest.TestCase):
+    """json.loads("1e999") is float("inf"), and it reached the encoder.
+
+    A JSON body is not a form: `{"value": 1e999}` is valid JSON, parses to a
+    float Python is perfectly happy with, and then int(round(inf)) raises
+    OverflowError -- which is not a ValueError, so it sailed past the router's
+    "a bad value is a 400" arm and left as a 502 with a stack trace blaming the
+    pump. A value no register can hold is a bad request.
+    """
+
+    def test_infinity_is_refused_by_a_plain_register(self):
+        for value in (float("inf"), float("-inf"), float("nan")):
+            with self.assertRaises(ValueError, msg=repr(value)):
+                reg(size="s16", factor=10).coerce(value)
+
+    def test_and_by_a_mapped_one(self):
+        r = reg(size="s8", mappings={"0": "Small", "2": "Large"})
+        for value in (float("inf"), float("nan")):
+            with self.assertRaises(ValueError, msg=repr(value)):
+                r.coerce(value)
+
+    def test_encode_refuses_it_too(self):
+        with self.assertRaises(ValueError):
+            reg(size="s16", factor=10).encode(float("inf"))
+
+    def test_it_is_a_value_error_and_not_an_overflow_error(self):
+        # The distinction is the whole point: server.py answers 400 for
+        # ValueError and 502 for anything else.
+        try:
+            reg(size="s16").coerce(float("inf"))
+        except ValueError:
+            pass
+        except Exception as exc:                          # noqa: BLE001
+            self.fail("coerce raised %s, which the router answers 502 for"
+                      % type(exc).__name__)
+
+    def test_a_huge_but_finite_number_is_still_refused_by_the_range(self):
+        with self.assertRaises(ValueError):
+            reg(size="s16", factor=1).encode(10 ** 20)
+
+    def test_ordinary_values_still_pass(self):
+        self.assertEqual(reg(size="s16", factor=10).coerce("51.2"), 51.2)
+        self.assertEqual(reg(size="s16", factor=10).coerce(0), 0.0)
+        self.assertFalse(reg(size="u8").coerce(False))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,31 @@
 """History: a background poller and a SQLite table of readings.
 
 myUplink's paid tier sells you history. This is that history, in a file you own,
-at whatever resolution you configure. One row per register per poll; a year of
-20 registers at 60 s is roughly 10 million rows, which SQLite handles fine but
-which is why old rows are pruned to `history_days`.
+at whatever resolution you configure.
+
+**What it costs.** One row per register per poll, and nothing is aggregated on
+the way in. The shipped DASHBOARD is 25 registers and `poll_seconds` is 60, so:
+
+    rows = registers x 86400 / poll_seconds x days
+
+which is 36 000 rows a day and 13.1 million a year -- measured by building the
+table, not estimated. On disk that came out between 57 and 83 bytes a row
+depending on how SQLite's pages fill, so roughly 0.75-1.1 GB a year, and about
+the same again in the steady state at the shipped `history_days: 400`. That is
+a real amount of an SD card on a Pi, and the three levers are the three terms
+of the formula: fewer registers in DASHBOARD, a longer `poll_seconds`, or a
+shorter `history_days`. Nothing here thins old rows behind the owner's back:
+somebody working out why the immersion heater ran at three in the morning last
+February wants the minute the pump has, not an hourly average of it, and that
+is not a trade this file gets to make on their behalf.
+
+**What it must not cost.** Asking the table a question must not scan it. Every
+/api/heating, /api/advice and /api/autotune request asks how far back the
+history reaches, and it used to ask with COUNT(*) alongside MIN(ts) and
+MAX(ts) -- one statement, and that statement is a full scan: 1.4 s at 13
+million rows, taken while holding `_lock`, which is the lock the poller needs
+to write the next reading. span() answers the same question off readings_ts in
+microseconds; see it and stats() below.
 """
 from __future__ import annotations
 
@@ -251,11 +273,34 @@ class Store:
 
         return [rows[ts] for ts in sorted(rows)]
 
-    def stats(self) -> dict:
+    def span(self) -> tuple:
+        """(first ts, last ts) of the history, or (None, None). Index only.
+
+        Bare MIN(ts) and MAX(ts) are answered from readings_ts in microseconds;
+        asking for COUNT(*) in the same statement turns both into a full scan
+        of the table -- 1.3 s at a year of data, taken with `_lock` held, which
+        means the poller waits for it. This is what the callers that only want
+        "how long have we been recording" ask for, and it is on every request
+        the page makes: /api/heating, /api/advice and /api/autotune all reach
+        it through advisor._history_hours.
+        """
         with self._lock, self._db as c:
-            n, first, last = c.execute(
-                "SELECT COUNT(*), MIN(ts), MAX(ts) FROM readings"
-            ).fetchone()
+            first = c.execute("SELECT MIN(ts) FROM readings").fetchone()[0]
+            last = c.execute("SELECT MAX(ts) FROM readings").fetchone()[0]
+        return first, last
+
+    def stats(self) -> dict:
+        """Row count and span. Same keys as before; three statements, not one.
+
+        COUNT(*) alone is a covering-index count SQLite does in a tenth of the
+        time the combined statement took, and the two extremes come off the
+        index for nothing. Only /api/backups asks for the count, and nobody
+        polls that.
+        """
+        with self._lock, self._db as c:
+            n = c.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
+            first = c.execute("SELECT MIN(ts) FROM readings").fetchone()[0]
+            last = c.execute("SELECT MAX(ts) FROM readings").fetchone()[0]
         return {"rows": n or 0, "first": first, "last": last}
 
 
@@ -282,6 +327,11 @@ class Poller(threading.Thread):
         # it was before this existed behaves exactly as it did.
         self.watcher = watcher            # alarms.Watcher, or None
         self.indoor = indoor              # homey.Homey, or None
+        # Kept apart from last_error on purpose: one means "the pump did not
+        # answer", the other "the pump answered and the database would not take
+        # it". They call for different fixes and only one of them stops the
+        # heating being watched.
+        self.last_store_error: str | None = None
         self.last_watch_error: str | None = None
         self.last_indoor_error: str | None = None
         self._last_indoor_at: int | None = None
@@ -300,17 +350,30 @@ class Poller(threading.Thread):
             polled = False
             try:
                 data = self.pump.read_many(self.addresses)
-                self.latest = data
-                self.last_ok = time.time()
-                self.last_error = None
-                self.store.record(data)
-                backoff = self.seconds
-                polled = True
             except Exception as exc:                       # noqa: BLE001
                 self.last_error = str(exc)
                 log.warning("poll failed: %s", exc)
                 # The pump drops sessions now and then; back off rather than hammer.
                 backoff = min(backoff * 2, 600)
+            else:
+                self.latest = data
+                self.last_ok = time.time()
+                self.last_error = None
+                backoff = self.seconds
+                polled = True
+                # Storing is a separate failure from reading, and used to be
+                # the same one. A locked or full database put the sqlite
+                # message in `last_error`, doubled the poll interval to ten
+                # minutes though the pump was answering perfectly, handed the
+                # alarm watcher an empty dict -- so alarms went unnoticed --
+                # and suppressed the daily backup. The reading is in hand;
+                # losing a row of history is the smallest of those.
+                try:
+                    self.store.record(data)
+                    self.last_store_error = None
+                except Exception as exc:                   # noqa: BLE001
+                    self.last_store_error = str(exc)
+                    log.warning("poll stored nothing: %s", exc)
             # The optional passengers run after the pump and never before it,
             # each behind its own guard. This loop is what keeps the history
             # and the web app's freshness alive; an integration that throws

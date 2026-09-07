@@ -8,11 +8,13 @@ once. The rest cover what a credential must never do, which is appear in a
 message on that page.
 """
 import copy
+import http.client
 import os
 import sys
 import threading
 import time
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -249,6 +251,73 @@ class Configuration(unittest.TestCase):
         homey = Homey.from_config({})
         self.assertFalse(homey.configured)
         self.assertEqual(homey.max_age_minutes, 60.0)
+
+
+class AHomeyThatAnswersHalfARespone(unittest.TestCase):
+    """BadStatusLine and IncompleteRead are neither OSError nor URLError.
+
+    http.client raises its own exception hierarchy, and _get() caught the two
+    urllib ones plus OSError -- so a Homey that accepts the connection and then
+    sends a truncated response threw straight past _get(). snapshot()'s own
+    catch-all then caught it, and that path does not write the cache: the
+    result was a device on the LAN being re-asked on every single call, with
+    every /api/indoor and every poll paying a fresh timeout, instead of once
+    per cache window like every other failure here.
+    """
+
+    def _client(self, exc, cache_seconds=120.0):
+        homey = Homey(host="192.0.2.20", token="abc123",
+                      cache_seconds=cache_seconds)
+        calls = []
+
+        class Opener:
+            def open(self, req, timeout=None):
+                calls.append(1)
+                raise exc
+
+        def build_opener(*handlers):
+            return Opener()
+
+        patched = unittest.mock.patch(
+            "nibelokal.homey.urllib.request.build_opener", build_opener)
+        patched.start()
+        self.addCleanup(patched.stop)
+        return homey, calls
+
+    def test_a_truncated_status_line_is_a_swedish_sentence(self):
+        homey, _ = self._client(http.client.BadStatusLine("\x16\x03\x01"))
+        snap = homey.snapshot()
+        self.assertFalse(snap["ok"])
+        self.assertIn("Homey", snap["error"])
+
+    def test_and_it_is_remembered_like_every_other_failure(self):
+        homey, calls = self._client(http.client.BadStatusLine("garbage"))
+        homey.snapshot()
+        homey.snapshot()
+        homey.snapshot()
+        self.assertEqual(len(calls), 1,
+                         "a half-answering Homey was re-asked on every call")
+
+    def test_an_incomplete_read_too(self):
+        homey, calls = self._client(http.client.IncompleteRead(b"{", 400))
+        self.assertFalse(homey.snapshot()["ok"])
+        homey.snapshot()
+        self.assertEqual(len(calls), 1)
+
+    def test_the_token_is_not_in_the_message(self):
+        # The exception text can quote the bytes that were being sent.
+        homey, _ = self._client(http.client.BadStatusLine("Bearer abc123"))
+        self.assertNotIn("abc123", homey.snapshot()["error"])
+
+    def test_nothing_escapes_snapshot_whatever_http_client_raises(self):
+        for exc in (http.client.BadStatusLine("x"),
+                    http.client.IncompleteRead(b"", 1),
+                    http.client.LineTooLong("header line"),
+                    http.client.RemoteDisconnected("closed")):
+            homey, _ = self._client(exc)
+            snap = homey.snapshot()
+            self.assertFalse(snap["ok"], repr(exc))
+            self.assertTrue(snap["error"].strip(), repr(exc))
 
 
 if __name__ == "__main__":

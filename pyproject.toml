@@ -1,6 +1,9 @@
 [project]
 name = "nibe-lokal"
-version = "0.3.1"
+# One version string, in nibelokal/__init__.py. Three copies of it disagreed
+# once (package 0.2.1, wheel 0.3.0, git tag v0.3.1) and SMHI was told the
+# oldest of them; read it from the package instead of retyping it here.
+dynamic = ["version"]
 description = "Local Modbus TCP web app for NIBE S-series heat pumps, without the cloud subscription"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +27,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["nibelokal"]
+
+[tool.setuptools.dynamic]
+version = {attr = "nibelokal.__version__"}
 
 # NIBE's alarm-code table ships with the package; without this an installed
 # wheel would omit it and every alarm would read as an unknown number.

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import http.client
 import json
 import logging
 import re
@@ -44,6 +45,7 @@ import time
 import urllib.error
 import urllib.request
 
+from . import sv_number
 from .config import header_safe, scrub
 
 log = logging.getLogger("nibelokal.homey")
@@ -289,9 +291,9 @@ class Homey:
             )
         elif out["average"] is None:
             warnings.append(
-                "Alla avläsningar är äldre än %g minuter, så inget medelvärde "
+                "Alla avläsningar är äldre än %s minuter, så inget medelvärde "
                 "beräknas. Kontrollera batterierna i givarna."
-                % self.max_age_minutes
+                % sv_number(self.max_age_minutes, None)
             )
         unknown = [n for n in self.whitelist if n not in matched]
         if unknown:
@@ -374,10 +376,16 @@ class Homey:
             return None, ("Kunde inte nå Homey på %s (%s). Kontrollera adressen "
                           "och att den svarar på nätverket."
                           % (self.base, self._safe(exc.reason)))
-        except (OSError, ValueError) as exc:
-            # scrub() as well as the header_safe check in __init__: this string
-            # is printed on the page, and a message that quotes the request is
-            # exactly how an API key gets published to whoever is looking.
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            # http.client.HTTPException -- BadStatusLine, IncompleteRead -- is
+            # not an OSError and is not a URLError, so it used to escape this
+            # method entirely. snapshot() then caught it in its own catch-all,
+            # which does not write the cache: a Homey answering half a response
+            # was re-asked on every single call instead of once per cache
+            # window. scrub() as well as the header_safe check in __init__:
+            # this string is printed on the page, and a message that quotes the
+            # request is exactly how an API key gets published to whoever is
+            # looking.
             return None, ("Kunde inte nå Homey på %s (%s)."
                           % (self.base, self._safe(exc)))
         try:

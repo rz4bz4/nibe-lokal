@@ -11,8 +11,26 @@ holding register; subtract 40001 for the wire address).
 
 ## Everyday
 
-Written without ceremony. These are reversible, bounded, and the pump undoes
-most of them by itself.
+Accepted by `/api/write` without `confirm: true`. These are reversible,
+bounded, and the pump undoes most of them by itself.
+
+That is a rule about `/api/write`, and it is where the project's "no write
+without an explicit confirm" is spent rather than where it is upheld. Written
+out as it actually behaves: everything that goes through `/api/write` — the
+heating step, every row in the settings list — opens a dialog first and sends
+`confirm: true` whatever tier it is. Extra hot water and the ventilation boost
+do not; they are one tap, they post to `/api/hotwater` and `/api/ventilation`,
+and they write these registers with no confirm at all. Both expire by
+themselves, which is the property that earns them the shortcut: the tap is the
+confirm, and a dialog on a self-cancelling boost only teaches people to dismiss
+dialogs.
+
+So the promise is that nothing with consequences is written without an explicit
+confirm, and this table is the list of registers this project has decided have
+none. It is also what lets something which is not the web app (a script, a
+Homey flow, `curl`) start a ventilation boost without asserting that it has
+understood consequences it does not have. Everything else is guarded, and there
+the assertion is the point.
 
 | Register | Setting | Why it is safe |
 |---|---|---|
@@ -22,7 +40,6 @@ most of them by itself.
 | 40116–40119 | Return time for fan modes 4–1 | Bounded 1–24 h. This is what makes a ventilation boost self-cancelling. |
 | 40207–40210 | Room setpoint per climate system | Ordinary thermostat behaviour, range-checked. |
 | 40067 | Periodic hot water interval | Days between legionella cycles. |
-| 40761 | SG Ready | Designed to be driven externally. |
 
 ## Guarded
 
@@ -42,12 +59,32 @@ against the register's own min/max, and land in the write log.
 | 40059–40065 | Hot water start/stop temperatures | Above roughly 50–55 °C the compressor cannot get there alone and the immersion heater finishes the job every cycle. |
 | 45010 | Supply line setpoint override | Overrides the calculated supply temperature outright. 80 °C is a legal value here. |
 | 40035 / 40039 | Min / max supply temperature | The ceiling that keeps 45010 and a bad curve in check. |
+| 41053 | Max internal additional heat while SG Ready is running | What 40103 is, under another name, while SG Ready is running. |
 
 **Affect the house rather than the bill**
 
 | Register | Setting | What goes wrong |
 |---|---|---|
 | 40106–40110 | Fan speed per ventilation mode, in percent | On an exhaust-air pump the ventilation *is* the heat source. See the warning below. |
+
+**SG Ready**
+
+Every S-series map titles **40761** *Heating (SG Ready)*, u8 0/1, default 1, and
+gives **40762** *Cooling (SG Ready)* and **40763** *Hot water (SG Ready)* the
+same shape. They are the pump's own SG Ready menu — *may the SG Ready input
+affect the heating, the cooling, the hot water* — and not that input. 40761 sat
+in the everyday tier until 2026-09-07, described as "SG Ready / smart grid
+input" and as "designed to be driven externally", which is a description of a
+different register. The result was that the one of the three that switches the
+heating influence off was written without a confirm while its two siblings, one
+address away and identical, needed one.
+
+| Register | Setting | What goes wrong |
+|---|---|---|
+| 40761 / 40762 / 40763 | Let SG Ready affect heating, cooling, hot water | Setting 40761 to 0 makes an SG Ready installation silently stop affecting the heating, and nothing in this app would say so. |
+| 48282 | The same as 40761, on an SMO 20/40 and the F generation | Titled *SG Ready heating* there. Guarded on all seventeen of those maps. |
+| 43033 | Activate SG Ready via API | This *is* the SG Ready input, over Modbus. |
+| 46009 | Requested operating mode (SG Ready), 0–3 | Which SG Ready state to ask for. The map publishes no enumeration for the four values. |
 
 ## Blocked
 
@@ -64,6 +101,7 @@ test is what keeps the two in step.
 |---|---|---|
 | 40089 / 40090 | Min / max compressor frequency | Outside the compressor's designed window: wear, then alarms. |
 | 40096 | Heating medium pump operating mode | Stopping circulation while the compressor runs is a high-pressure alarm. |
+| 40097 | Brine pump operating mode | The same selector on the cold side, on an S1155/S1255 and S1156/S1256. Same u8, same enumeration — the F-series map spells it out in the info text of the twin at 47139: *10=Intermittent 20=Continuous 30=Economy 40=Auto* — and the same failure with the pressures the other way up. Blocked on 2026-09-07; it had been guarded only because the category was written as "heating medium pump" rather than as "the circulation pump the compressor depends on". |
 | 40219 / 40696 | Circulation pump speed for heating, manual heating medium pump speed | Same failure, by a different route. |
 | 40104 / 40981 | Main fuse rating, current transformer ratio | Together these are the current limiting. Raising the fuse or misstating the transformer ratio removes the protection that keeps the house's main fuse intact. |
 | 40212–40216, 40768, 41556–41558 | AUX input function selectors (AUX1–AUX9) | The same selector as 42741. Function ids 4 and 5 block the compressor. |
@@ -71,7 +109,7 @@ test is what keeps the two in step.
 | 40121–40135 | Floor drying programme | Runs 20–70 °C for weeks. Never from a phone. |
 | 40904 / 40905 | Initiate inverter, force initiated inverter | Service registers for commissioning the inverter, not settings. |
 | 40943–40948, 44158–44175, 45296–45297 | Compressor frequency blocking bands | Same category as the frequency limits. Three separate runs because the maps put the built-in compressor (EB101), EB102 and the S1155/S1255's start/stop pair in three different places. |
-| 41100–41105 | Reduced ventilation, high outdoor temperature, OEK, smart home room control, standby speed for the brine pump (EP14) | Not dangerous in themselves. Blocked because on the measured S735 the register map and the pump disagree here — 41100 is typed 0–1 and reads 25, and 41103 answers a Modbus exception. A map that is wrong about a register's type is not one to write through. This is the one place the gate knowingly costs a working feature: 41104, the brine pump's standby speed, is writable on an S1155/S1255 and S1156/S1256 and is blocked only because it shares a block this app does not trust. Set it on the pump's display, or move it out of the range in `safety.py`. |
+| 41100–41102 | Reduced ventilation, high outdoor temperature, OEK | Not dangerous in themselves. Blocked because on the measured S735 the register map and the pump disagree here — 41100 is typed 0–1 and reads 25. A map that is wrong about a register's type is not one to write through. All three are writable on the S735 and S735C and on no other map the `nibe` package ships, so the measurement covers exactly the models the block reaches. |
 | 41106–41140, 41173–41176, 41209–41212, 41245–41248, 41281–41284, 41327–41328 | Smart energy source / electricity price control | Misconfigured, this is constant additional heat. Not contiguous: the tariff calendars sit in four separate quads, and 41327–41328 sit forty addresses past the last of them. Those two are the degree-minute differences at which the pump hands over to a lower-priority energy source — on most installations, the immersion heater. They are titled *Max difference, SES priority 1 energy source*, so a search for “smart energy source” does not find them; they are writable on every S-series map including the S735 these tiers were written against. |
 | 42743 | Start guide state | Writing 0 leaves the pump's display stuck in the start guide. |
 | 43029 / 43059 | Immersion heater power and additional heat step, emergency mode | What the pump falls back to when everything else has failed. Not a setting to get wrong from a phone. |
@@ -90,6 +128,7 @@ leaving one open costs the model that does implement it.
 | Register | Setting | Which models use it |
 |---|---|---|
 | 40683, 47138, 48085, 48130, 48456 | Heating medium pump operating mode and manual speed | 40683 on an SMO S40 and VVM S500. 47138 is the F-generation numbering and is on all seventeen of those maps — the F series, the SMO 20 and SMO 40, and the VVM 225/310/320/325/500 — of which only the two SMOs can be reached over TCP. 48085 and 48130 are on the SMO 20, SMO 40, VVM 310 and VVM 500, and are two writable registers for the same speed. 48456 is the same operating mode again, for cooling, with the same two settings — 10 intermittent, 20 continuous — and exists only on the F series. |
+| 47139 | Brine pump operating mode | 40097 in the F-generation numbering, on the six F1x45/F1x55 maps and nowhere else. This app cannot reach an F-series pump, and blocks it for the reason 48567/48568 are blocked: half a pair is not a rule. Its info text is where the enumeration 40097 shares is actually written down. |
 | 47214 / 48755 | Main fuse rating, transformer ratio | The F-generation numbering, so the same seventeen maps as 47138 for the fuse; 48755 is on sixteen of them, every one except the SMO 20. Of those the SMO 20 and SMO 40 are the ones this app can reach. |
 | 47276–47291 | Floor drying programme, plus its timer | Again all seventeen F-generation maps, the SMO 20 and SMO 40 among them. |
 | 48567 / 48568 | Initiate inverter, force inverter initiation | F750 only, and the same pair as 40904 / 40905 above. This app cannot reach an F-series pump at all — they need a MODBUS 40 over RS485 rather than the TCP this speaks — but the rule reads better with no exceptions than with one, and blocking one of two registers that do the same job is worse than blocking neither. |
@@ -98,30 +137,55 @@ leaving one open costs the model that does implement it.
 **Anything not listed anywhere is treated as guarded**, not as free. A register
 nobody has thought about is not a register to write casually.
 
-Four that stay **guarded** although they are close relatives of blocked ones,
+Six that stay **guarded** although they are close relatives of blocked ones,
 because blocking them would cost a working feature and the risk is not the same:
-40767 *Set compressor frequency, cooling* (a bounded 1–100 % setpoint, not a
-limit on the compressor's window), 45344 *Silent mode, max. frequency 2 (EB101)*
-on an S2125 (a comfort setting with its own menu), 42756 *Inverter fault reset*
-(a recovery action rather than a way to force the inverter on), and 40859
-*Maximum speed of circulation pump for heating*. That last one is the closest
-call: it is the same pump as the blocked 40219, but its own range starts at
-50 %, so unlike 40219 — which goes down to 1 % — it cannot be used to stop the
-circulation the compressor depends on.
+40767 *Set compressor frequency, cooling* (the map gives it the unit `%` and the
+range 1–100: a bounded setpoint, not a limit on the compressor's window like
+40089/40090), 45344 *Silent mode, max. frequency 2 (EB101)* on an S2125 (a
+comfort setting with its own menu), 42756 *Inverter fault reset* (a recovery
+action rather than a way to force the inverter on), 41103 *Smart home room
+control*, 41104 *Speed, brine pump, standby mode (EP14)*, and 40859 *Maximum
+speed of circulation pump for heating*.
+
+41103 and 41104 were blocked until 2026-09-07 and should not have been. They sat
+inside the 41100–41105 range above, whose reason is a measurement of one S735 —
+and neither of them is what was measured. 41103 is writable on twelve maps and
+is the same feature this file already leaves deliberately guarded at 48976 on an
+SMO 40; blocking it on the S-series and guarding it on the F-generation was the
+model blindness this whole document is about, pointing the other way. 41104 is
+writable on four, and the brine pump's two other speeds on those same four
+models — 40223 *Speed, brine pump* and 40860 *Speed, brine pump, passive
+cooling* — were guarded the whole time. Blocking one of three is not a gate. On
+an S735 41103 answers a Modbus exception, so a write to it there fails at the
+pump with the pump's own error, which is a better answer than a refusal quoting
+a reason about a different register.
+
+40859 is the closest call of the six: it is the same pump as the blocked 40219,
+but its own range starts at 50 %, so unlike 40219 — which goes down to 1 % — it
+cannot be used to stop the circulation the compressor depends on.
 
 One more family stays **guarded**, and that one is a judgement call rather than a
 clear reading. On an S320/S325, S330/S332, S2125, SMO S40 and the VVM S series,
 each connected heat pump has its own circulation pump operating mode: 40784 and
 40783 for heating, 40800 and 40799 for hot water, 40816 for pool, 40833 and 40832
-for cooling. By title they belong with the blocked 40096. By content they may
-not. 40096 runs 10–40, the four values NIBE documents as intermittent,
-continuous, economy and auto; these are a plain 0–1 with no mapping and no info
-text in any map the `nibe` package ships, and nothing there says whether 0 means
-*off* or *intermittent*. Those two readings differ by exactly the hazard 40096 is
-blocked for. Blocking on the worse one would cost a working setting on models the
-author does not own, so they are guarded rather than blocked: `confirm: true`,
-range-checked, logged. If you know which it is on an S320, that is a good issue to
-open.
+for cooling. The charge pumps are the same shape and belong in the same
+paragraph, which an earlier version of it did not say: 40749 and 40748 *Op. mode
+charge pump (EB101)* and *(EB102)*, 40876 and 40875 for cooling, and on an
+SMO 20/40 and the F-generation VVMs the whole run 48228–48235 and 48468–48475,
+one per climate system.
+
+By title they belong with the blocked 40096. By content they may not. 40096 runs
+10–40, and the F-series map writes the four values out in the info text of its
+twin 47138: intermittent, continuous, economy, auto. These are a plain 0–1 with
+no mapping and no info text in any map the `nibe` package ships — checked on
+every one — and nothing there says whether 0 means *off* or *intermittent*. Those
+two readings differ by exactly the hazard 40096 is blocked for. Blocking on the
+worse one would cost a working setting on models the author does not own, and
+there are more than thirty of these registers across the maps, so blocking one of
+them because a reviewer happened to name it would be worse than blocking none.
+They are guarded rather than blocked: `confirm: true`, range-checked, logged. If
+you know which it is on an S320, that is a good issue to open — it is the single
+question that would move this family.
 
 ## Two things the tiers cannot protect you from
 
@@ -291,3 +355,62 @@ already on the pump's own display. Nothing was written to any of these registers
 to find this out.
 
 If you know what the unit of 46015 is, that is a good issue to open.
+
+## Appendix: SG Ready, and why the price plan does not use it either
+
+`nibelokal/spot.py` shifts heating with the heating offset and says in its
+docstring that SG Ready is deliberately not used for it. That decision stands.
+The reason it gave until 2026-09-07 rested partly on a misreading — it named
+register **40761** as "the SG Ready input" — so this is the same conclusion
+argued from what the maps actually say.
+
+**SG Ready on an S-series pump is nine registers, six rows of the table below,
+and only two of them are anything this app could drive.**
+
+| Register | What the map calls it | Read/write | Where |
+|---|---|---|---|
+| 31912 | Operating mode (SG Ready) | read-only | 14 of the 15 S-series maps |
+| 31913 / 31914 | SG ready, input A / input B | read-only | all 15 |
+| 40761 / 40762 / 40763 | Heating / Cooling / Hot water (SG Ready) | writable, u8 0/1, default 1 | 40761 on all 15; the other two on five |
+| 41053 | Max. internal additional heat SG Ready | writable, kW | all 15 |
+| 43033 | Activate SG Ready via API | writable, u8 0/1, default 0 | 10 |
+| 46009 | Requested operating mode (SG Ready), 0–3 | writable | 3: S1156, S1256, SMO S40 |
+
+31913 and 31914 are the two physical terminals SG Ready is normally wired to,
+and they are read-only — the four SG Ready states are the four combinations of
+those two contacts. 43033 and 46009 are the way to say the same thing over
+Modbus instead: arm it, then request a state. 40761–40763 are not that. They are
+the pump's own menu deciding **what SG Ready is allowed to touch**, and 41053 is
+how much additional heat it may use while it does. Writing 40761 does not put
+the pump in a low-price state; it decides whether a low-price state would reach
+the heating at all.
+
+**Three reasons the price plan uses the offset instead**, and the first is new
+here because it only shows up when you read the maps model by model:
+
+- **On an S735 the request register does not exist.** 43033 is writable there,
+  46009 is not on that map at all. So on the pump this project was written
+  against you can arm SG Ready over Modbus and then have no addressable way to
+  say which of the four states you want. Two of the three influence switches,
+  40762 and 40763, are missing there too, so an S735's whole writable SG Ready
+  menu is three registers: 43033 to arm it, 40761 to say whether it may touch
+  the heating, and 41053 for how much additional heat it may use while it
+  does.
+- **What a state does is configured off Modbus.** What NIBE calls low-price and
+  over-capacity mode do — the parallel displacement of the heating curve, the
+  hot water start-temperature offset — are set in the pump's own SG Ready menu.
+  Two identical S735s with different installers answer the same request by
+  different amounts, and neither reports the amount. The knobs this app *can*
+  reach, 40761–40763 and 41053, say only whether and how much additional heat,
+  not how far.
+- **It is not reversible in units anyone reads.** A ±1 heating offset is
+  bounded, symmetric, instantly undone, visible in menu 1.1.1, and expressed in
+  the unit the household already uses when the house feels cold. When it does
+  something wrong it is obvious what and by how much. That is the property that
+  decided this, and it is the property SG Ready does not have.
+
+So 40761, 40762, 40763, 48282, 43033, 46009 and 41053 are all **guarded**:
+writable with `confirm: true`, range-checked, logged. Nothing here is blocked —
+SG Ready is a reasonable thing to run, and this app will not stand in the way of
+someone who has read their own installer's settings. It just will not drive it
+on a price signal while it cannot read back what it did.

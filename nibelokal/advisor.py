@@ -29,10 +29,18 @@ This is not a model and not a prediction. It is two things:
 Every suggestion is one step. One step, then wait a day: the building's thermal
 mass means a change made at breakfast is not visible until the evening, and
 stacking three changes before the first has landed is how people end up lost.
+
+
+This module takes no weather forecast. It works from the pump's own outdoor
+sensor and the recorded history, and nothing here looks further ahead than
+the reading in front of it. The README once claimed otherwise; if a forecast
+input is ever wired in, that paragraph has to come back with it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from . import sv_number
 
 # Registers this module reasons about.
 R_CURVE = 40027            # heating curve, climate system 1 (0 = own curve)
@@ -80,6 +88,11 @@ EMITTERS = {
     "floor": {
         "name": "golvvärme",
         "wait": "två dygn",
+        # The same wait as a number, for the code that needs to compute with
+        # it. autotune used to derive it by matching the Swedish string
+        # ("två dygn" -> 48), which turns a wording change into a silently
+        # wrong answer about how long to wait before judging a change.
+        "wait_hours": 48,
         "point_step": 1,
         "note": "Golvvärme är trög: en ändring på morgonen syns i rummet först "
                 "nästa kväll, ibland dagen därpå. Vänta ut den innan du rör "
@@ -88,12 +101,14 @@ EMITTERS = {
     "radiators": {
         "name": "radiatorer",
         "wait": "ett dygn",
+        "wait_hours": 24,
         "point_step": 2,
         "note": "",
     },
     "mixed": {
         "name": "golvvärme och radiatorer",
         "wait": "två dygn",
+        "wait_hours": 48,
         "point_step": 1,
         "note": "Du har golvvärme och radiatorer på samma kurva, vilket alltid är "
                 "en kompromiss: golvet vill ha låg framledning, elementen högre. "
@@ -202,7 +217,9 @@ def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
             notes.append(
                 "Kurvan står på 0, vilket betyder egen kurva: pumpen följer dina egna "
                 "punkter (%s) i stället för en av de numrerade kurvorna."
-                % ", ".join("%+d °C ute → %g °C fram" % (t, p) for t, p in pairs)
+                % ", ".join("%s °C ute → %s °C fram"
+                            % (sv_number(t, None, sign=True), sv_number(p, None))
+                            for t, p in pairs)
             )
         else:
             notes.append("Kurvan står på 0 (egen kurva), men punkterna gick inte att läsa.")
@@ -222,9 +239,9 @@ def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
     max_supply = out["max_supply"]
     if supply is not None and max_supply is not None and supply >= max_supply - 1:
         warnings.append(
-            "Framledningen (%g °C) ligger i taket för max framledning (%g °C). "
+            "Framledningen (%s °C) ligger i taket för max framledning (%s °C). "
             "Att höja värmen mer får ingen effekt förrän taket höjs."
-            % (supply, max_supply)
+            % (sv_number(supply, None), sv_number(max_supply, None))
         )
 
     if out["additional_heat_kw"]:
@@ -232,14 +249,15 @@ def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
         if isinstance(out["priority"], str):
             why = " Pumpen prioriterar just nu: %s." % out["priority"]
         warnings.append(
-            "Elpatronen går just nu (%g kW).%s Höj inte värmen förrän du vet varför — "
+            "Tillskottet går just nu (%s kW).%s Höj inte värmen förrän du vet varför — "
             "annars betalar du för direktverkande el."
-            % (out["additional_heat_kw"], why)
+            % (sv_number(out["additional_heat_kw"], None), why)
         )
 
     if out["outdoor"] is not None:
-        notes.append("Ute %g °C, framledning %s °C, retur %s °C."
-                     % (out["outdoor"], _fmt(out["supply"]), _fmt(out["return"])))
+        notes.append("Ute %s °C, framledning %s °C, retur %s °C."
+                     % (sv_number(out["outdoor"], None), _fmt(out["supply"]),
+                        _fmt(out["return"])))
 
     if store is not None:
         hours = _history_hours(store)
@@ -284,13 +302,13 @@ def advise(pump, feeling: str, when: str, store=None,
         priority = state.get("priority")
         if isinstance(priority, str) and "water" in priority.lower():
             advice.blocked = (
-                "Elpatronen går, men för varmvatten (pumpen prioriterar %s just nu), "
+                "Tillskottet går, men för varmvatten (pumpen prioriterar %s just nu), "
                 "inte för värmen. Kom tillbaka om en halvtimme när laddningen är "
                 "klar, så blir svaret rättvisande." % priority
             )
         else:
             advice.blocked = (
-                "Elpatronen går just nu%s. Att höja värmen då gör tillskottet större, "
+                "Tillskottet går just nu%s. Att höja värmen då gör det större, "
                 "inte värmepumpen effektivare. Ta reda på varför den går först — "
                 "vanligast är varmvattenladdning eller att kurvan redan ligger för "
                 "högt för utetemperaturen."
@@ -305,8 +323,8 @@ def advise(pump, feeling: str, when: str, store=None,
             return advice
         if not OFFSET_MIN <= offset + direction <= OFFSET_MAX:
             advice.blocked = (
-                "Offset står redan på %g, som är gränsen. Behöver du mer värme än så "
-                "är det kurvan som ligger fel, inte offset." % offset
+                "Offset står redan på %s, som är gränsen. Behöver du mer värme än så "
+                "är det kurvan som ligger fel, inte offset." % sv_number(offset, None)
             )
             return advice
         advice.suggestions.append(Suggestion(
@@ -356,16 +374,17 @@ def advise(pump, feeling: str, when: str, store=None,
                     continue
             advice.suggestions.append(Suggestion(
                 address=R_OWN_CURVE[i],
-                title="Egen kurva, punkt P%d (%+d °C ute)" % (i + 1, OWN_CURVE_OUTDOOR[i]),
+                title="Egen kurva, punkt P%d (%s °C ute)"
+                      % (i + 1, sv_number(OWN_CURVE_OUTDOOR[i], None, sign=True)),
                 current=current,
                 proposed=proposed,
                 unit="°C",
                 group="own_curve",
                 why="Du kör egen kurva, så det är punkterna som formar den. P%d är "
-                    "punkten för %+d °C ute, alltså den som gäller %s. %d grad%s "
+                    "punkten för %s °C ute, alltså den som gäller %s. %d grad%s "
                     "framledning där ändrar värmen i just det vädret, utan att röra "
                     "resten av kurvan."
-                    % (i + 1, OWN_CURVE_OUTDOOR[i],
+                    % (i + 1, sv_number(OWN_CURVE_OUTDOOR[i], None, sign=True),
                        "när det är kallt" if cold_end else "i milt väder",
                        em["point_step"], "er" if em["point_step"] != 1 else ""),
             ))
@@ -510,23 +529,36 @@ def _points_for(when: str, outdoor) -> list[int]:
 def _curve_limit(curve: float, proposed: float) -> str:
     if proposed < CURVE_MIN:
         return (
-            "Kurvan står redan på %g, och nästa steg nedåt är 0 — vilket inte är en "
+            "Kurvan står redan på %s, och nästa steg nedåt är 0 — vilket inte är en "
             "flackare kurva utan byter pumpen till egen kurva med helt andra "
             "punkter. Sänk hellre offset, eller justera egen kurva medvetet från "
-            "pumpens display." % curve
+            "pumpens display." % sv_number(curve, None)
         )
-    return "Kurvan står redan på %g, som är den brantaste pumpen har." % curve
+    return ("Kurvan står redan på %s, som är den brantaste pumpen har."
+            % sv_number(curve, None))
 
 
 def _fmt(v) -> str:
-    return "–" if v is None else ("%g" % v)
+    """A number in a Swedish sentence. Decimal comma, real minus sign."""
+    return sv_number(v, None)
 
 
 def _history_hours(store) -> float:
-    stats = store.stats()
-    if not stats.get("first") or not stats.get("last"):
+    """How long the history reaches back, in hours.
+
+    store.span(), not store.stats(): this is on the path of every /api/heating,
+    /api/advice and /api/autotune request, and the count of rows that stats()
+    used to fetch alongside the two timestamps cost a full table scan under the
+    store's lock -- with the poller waiting behind it.
+    """
+    if hasattr(store, "span"):
+        first, last = store.span()
+    else:                                        # a store from an older build
+        stats = store.stats()
+        first, last = stats.get("first"), stats.get("last")
+    if not first or not last:
         return 0.0
-    return max(0.0, (stats["last"] - stats["first"]) / 3600.0)
+    return max(0.0, (last - first) / 3600.0)
 
 
 def _duration(hours: float) -> str:

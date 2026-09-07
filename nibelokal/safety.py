@@ -6,14 +6,41 @@ heat pump into a very expensive electric radiator. So the gate lives here.
 
 Three tiers:
 
-  EVERYDAY  - the things you actually want from a phone. Written freely.
+  EVERYDAY  - the things you actually want from a phone. Accepted without
+              confirm=true.
   GUARDED   - real settings with real consequences. Require an explicit
               confirm=true on the request, and are logged.
   BLOCKED   - never written by this app, at any tier. Change these on the
               pump's own display, where you can see what you are doing.
 
+This file is a rule about /api/write: what it will accept, and with what
+ceremony. The project's principle is "no write to the pump without an explicit
+confirm", and the everyday tier is where that principle is spent, not where it
+is upheld by some second layer. An earlier version of this docstring claimed
+the second layer existed; it does not.
+
+What is actually true of the app, checked against web/index.html rather than
+remembered: every write that goes through /api/write - the heating step, every
+row in the settings list - opens a dialog first, showing the register, the old
+and the new value and how long to wait, and sends confirm=true whatever tier
+the register is in. Two buttons do not: extra hot water and the ventilation
+boost are one tap and no dialog, and they post to /api/hotwater and
+/api/ventilation, which write 40226/40698 and 40105/40116-40119 with
+confirmed=False. Those are everyday registers, and that is exactly what the
+everyday tier is for: a boost that expires by itself, where the tap *is* the
+confirm and a second dialog would only teach people to dismiss dialogs.
+
+So the honest sentence is: nothing with consequences is written without an
+explicit confirm. The everyday tier is the list of registers this project has
+decided have none - which is also what lets something that is not the web app,
+a script or a Homey flow or curl, start a ventilation boost without asserting
+that it has understood consequences it does not have. Anything else is guarded,
+and there the assertion is the point.
+
 Addresses are NIBE coil addresses (4xxxx = holding). Sources for the risk
-assessment are in docs/registers.md.
+assessment are in docs/registers.md, including the registers that are close
+relatives of blocked ones and stay guarded anyway - the 0/1 per-heat-pump
+circulation and charge pump modes (40749, 40784 and their siblings) and 40767.
 
 The tiers were first written against one S735, but this app supports the whole
 S series and the models do not agree on addresses: the same setting sits at
@@ -26,6 +53,8 @@ tests/test_safety.py, which walks every map the `nibe` package ships and fails
 if a category is blocked on one model and reachable on another.
 """
 from __future__ import annotations
+
+from . import sv_number
 
 # --- tier 1: everyday -------------------------------------------------------
 
@@ -42,7 +71,6 @@ EVERYDAY: dict[int, str] = {
     40208: "room setpoint, climate system 2",
     40209: "room setpoint, climate system 3",
     40210: "room setpoint, climate system 4",
-    40761: "SG Ready / smart grid input",
     40067: "periodic hot water interval, days",
 }
 
@@ -81,6 +109,33 @@ GUARDED: dict[int, str] = {
     40108: "exhaust air fan speed, mode 2 (%)",
     40109: "exhaust air fan speed, mode 1 (%)",
     40110: "exhaust air fan speed, normal (%)",
+    # SG Ready, all of it, and none of it is an input this app should write
+    # freely. 40761/40762/40763 are the pump's own SG Ready *menu* - "may SG
+    # Ready affect the heating / the cooling / the hot water", u8 0/1, default
+    # 1 on every S-series map. They decide what the SG Ready input is allowed
+    # to touch; they are not that input. Until 2026-09-07 40761 sat in
+    # EVERYDAY described as "SG Ready / smart grid input", so the one register
+    # of the three that turns the heating influence off was the one written
+    # without a confirm, while its two siblings needed one. Same feature, same
+    # tier now.
+    40761: "let SG Ready affect the heating (0/1) - the pump's own SG Ready menu, "
+           "not the SG Ready input; 0 makes the input a no-op for heating",
+    40762: "let SG Ready affect the cooling - sibling of 40761",
+    40763: "let SG Ready affect the hot water - sibling of 40761",
+    48282: "let SG Ready affect the heating - 40761 on an SMO 20/40 and the whole "
+           "F generation, where the title reads 'SG Ready heating'",
+    # The input itself. 43033 arms SG Ready over Modbus at all and 46009 says
+    # which of the four SG Ready states to request. These are what an
+    # electricity-price signal would actually drive, and what spot.py means
+    # when it says the effect depends on settings this app cannot read back:
+    # the amounts live behind 40761-40763 and 41053 and in menus that are not
+    # on Modbus at all.
+    43033: "activate SG Ready over Modbus - this is the SG Ready input, and what "
+           "the pump does with it is configured on its own display",
+    46009: "requested SG Ready operating mode, 0-3 - the state the input asks for; "
+           "the map publishes no enumeration for it",
+    41053: "max internal additional heat while SG Ready is running (kW) - the "
+           "immersion heater ceiling 40103 is, under another name",
 }
 
 # --- tier 3: blocked --------------------------------------------------------
@@ -90,6 +145,10 @@ BLOCKED: dict[int, str] = {
     40090: "max compressor frequency - same",
     40096: "heating medium pump operating mode - stopping circulation during compressor "
            "operation triggers high-pressure alarms",
+    40097: "brine pump operating mode - the same selector on the cold side, on an "
+           "S1155/S1255 and S1156/S1256. Same u8, same enumeration the F-series map "
+           "spells out for its twin 47139 (10 intermittent, 20 continuous, "
+           "30 economy, 40 auto), same failure with the pressures the other way up",
     40696: "manual heating medium pump speed - same risk",
     42741: "AUX function selector via Modbus - can silently block the compressor",
     42742: "AUX on/off via Modbus - same",
@@ -128,6 +187,10 @@ BLOCKED: dict[int, str] = {
            "pair 48567 is the first half of. Blocking one of two registers that do "
            "the same job is the mistake this whole section is about",
     48755: "current transformer ratio - 40981 on an SMO 40",
+    47139: "brine pump operating mode - 40097 in the F-generation numbering, on the "
+           "six F1x45/F1x55 maps. Unreachable over TCP like the rest of the F "
+           "series, and blocked for the same reason 48567/48568 are: half a pair "
+           "is not a rule",
 }
 
 # Ranges of addresses that are blocked wholesale.
@@ -209,11 +272,25 @@ BLOCKED_RANGES: list[tuple[int, int, str]] = [
     (49208, 49209, "smart energy source, the differences at which it hands over to a "
                    "lower-priority source, at the addresses the VVM map uses"),
 
-    # 41100-41105 were blocked by accident and stay blocked on purpose. On the
+    # 41100-41102 were blocked by accident and stay blocked on purpose. On the
     # measured S735 the map and the pump disagree here: 41100 is typed u8 with
-    # range 0-1 and reads 25, and 41103 answers a Modbus exception. A register
-    # whose map cannot even be trusted about its own type is not one to write.
-    (41100, 41105, "the register map and the pump disagree in this block on the measured "
+    # range 0-1 and reads 25. A register whose map cannot even be trusted about
+    # its own type is not one to write. Those three - Reduced ventilation, High
+    # outdoor temperature, OEK - exist as writable registers on the S735 and
+    # S735C and nowhere else, so the measured reason covers exactly the models
+    # the range now reaches.
+    #
+    # The range ran to 41105 until 2026-09-07, and that stretched one pump's
+    # measurement over two registers it does not describe. 41103 "Smart home
+    # room control" is writable on twelve maps and 41104 "Speed, brine pump,
+    # standby mode (EP14)" on four; the S735 quirk is not why either was
+    # blocked there. Both are now guarded, which is what the same features are
+    # already at their other addresses: Smart home room control is 48976 on an
+    # SMO 40 and left guarded on purpose (see the note under 48979 below), and
+    # the brine pump's other two speeds, 40223 and 40860, are guarded on the
+    # very models 41104 is writable on. 41105 is not writable on any map the
+    # package ships, so releasing it releases nothing.
+    (41100, 41102, "the register map and the pump disagree in this block on the measured "
                    "S735 - wrong type, wrong range, or not implemented at all"),
 
     # NIBE's own Smart Price Adaption. 46015-46061 (stride 2) are 24 hourly
@@ -286,23 +363,30 @@ def reason(address: int) -> str:
 
 
 def check(address: int, confirmed: bool, allow_guarded: bool = True) -> None:
-    """Raise Refused unless this write is permitted."""
+    """Raise Refused unless this write is permitted.
+
+    The refusal text is Swedish because it is not a log line: it goes straight
+    into a toast on the phone of whoever just pressed the button. The reason
+    itself stays English -- it is the tier tables above, which are the file a
+    person edits, and translating those would leave the code and the message
+    disagreeing about what a register is called.
+    """
     t = tier(address)
     if t == "blocked":
         raise Refused(
-            "Register %d is blocked by this app: %s. Change it on the pump's display."
+            "Register %d är spärrat i den här appen: %s. Ändra det på pumpens display."
             % (address, reason(address))
         )
     if t == "guarded":
         if not allow_guarded:
             raise Refused(
-                "Register %d is a protected setting (%s) and guarded writes are disabled "
-                "in config.yaml." % (address, reason(address))
+                "Register %d är en skyddad inställning (%s) och skyddade skrivningar är "
+                "avstängda i config.yaml." % (address, reason(address))
             )
         if not confirmed:
             raise Refused(
-                "Register %d is a protected setting: %s. Send confirm=true if you really "
-                "mean it." % (address, reason(address))
+                "Register %d är en skyddad inställning: %s. Skicka confirm=true om du "
+                "verkligen menar det." % (address, reason(address))
             )
 
 
@@ -310,10 +394,12 @@ def clamp(register, value: float) -> float:
     """Keep a numeric value inside the register's own documented range."""
     if register.min is not None and value < register.min:
         raise Refused(
-            "%s: %s is below the pump's minimum of %s" % (register.title, value, register.min)
+            "%s: %s är under pumpens minimum på %s"
+            % (register.title, sv_number(value, None), sv_number(register.min, None))
         )
     if register.max is not None and value > register.max:
         raise Refused(
-            "%s: %s is above the pump's maximum of %s" % (register.title, value, register.max)
+            "%s: %s är över pumpens maximum på %s"
+            % (register.title, sv_number(value, None), sv_number(register.max, None))
         )
     return value

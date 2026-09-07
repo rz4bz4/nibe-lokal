@@ -50,6 +50,18 @@ allow_any_host: false
 poll_seconds: 60      # NIBE allows 100 registers/s; 60 s is the community norm
 history_days: 400     # older readings are pruned daily
 
+# What those two cost on disk, because it is more than it looks. One row per
+# register per poll, about 57 bytes a row once the indexes are counted, and the
+# shipped dashboard is 25 registers:
+#
+#     rows = 25 x 86400 / poll_seconds x days
+#
+# At the two values above that is 36 000 rows a day -- roughly 21 MB per ten
+# days, 750 MB and 13 million rows a year, and about 830 MB in the steady state
+# once the 400-day prune starts biting. SQLite is fine with that; an SD card in
+# a Pi is the thing to think about. Halving it is one of: fewer days here, a
+# longer poll_seconds above, or a shorter DASHBOARD in nibelokal/pump.py.
+
 # A full snapshot of every setting, taken automatically this often. A backup you
 # have to remember to take is one you will not have when you need it -- and you
 # need it right after changing something you should not have. 0 turns it off.

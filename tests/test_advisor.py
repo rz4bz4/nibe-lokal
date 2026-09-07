@@ -192,7 +192,9 @@ class Guards(unittest.TestCase):
         a = advisor.advise(numbered_pump(over={advisor.R_ADD_HEAT_POWER: 3.0}),
                            "warmer", "always")
         self.assertFalse(a.suggestions)
-        self.assertIn("Elpatronen", a.blocked)
+        # "Tillskott" and not "elpatron": it is the word on the pump's own
+        # display and the word the page uses everywhere else.
+        self.assertIn("Tillskottet", a.blocked)
 
     def test_lowering_heat_is_still_allowed_then(self):
         a = advisor.advise(numbered_pump(over={advisor.R_ADD_HEAT_POWER: 3.0}),
@@ -246,6 +248,105 @@ class Diagnose(unittest.TestCase):
         note = " ".join(state["observations"])
         self.assertIn("ute", note)
         self.assertIn("fram", note)
+
+
+class SwedishSentencesAreWrittenInSwedish(unittest.TestCase):
+    """Numbers formatted with %g and %+d, printed verbatim by the page.
+
+    Every number the web app formats itself uses a decimal comma and U+2212,
+    and NIBE's own manual writes "2,5 °C". "Framledningen (38.4 °C)" and "punkt
+    P3 (-10 °C ute)" sat next to those -- and the second one is a *title*, so
+    it landed in the proposal heading, in the confirm dialog and in the toast.
+    autotune had a _sv() helper for exactly this; the helper now lives in the
+    package root and everything uses it.
+    """
+
+    def _text(self, thing):
+        return " ".join(thing if isinstance(thing, list) else [thing])
+
+    def test_a_supply_temperature_in_a_warning(self):
+        # The warning judges the *calculated* supply, which is the number a
+        # curve change actually moves.
+        out = advisor.diagnose(numbered_pump(
+            over={advisor.R_CALC_SUPPLY: 59.4, advisor.R_MAX_SUPPLY: 60.0}))
+        warning = next(w for w in out["warnings"] if "Framledningen" in w)
+        self.assertIn("59,4", warning)
+        self.assertNotIn("59.4", warning)
+
+    def test_the_own_curve_points_note(self):
+        out = advisor.diagnose(own_curve_pump(points=(45.5, 45, 45, 37, 33, 23, 15)))
+        note = next(n for n in out["observations"] if "egen kurva" in n)
+        # A real minus sign for the cold end, and no hyphen-minus anywhere.
+        self.assertIn("\u221230 °C ute", note)
+        self.assertNotIn("-30", note)
+        self.assertIn("45,5", note)
+        self.assertNotIn("45.5", note)
+
+    def test_the_own_curve_suggestion_title_which_the_page_puts_in_a_heading(self):
+        a = advisor.advise(own_curve_pump(), "colder", "cold_outside")
+        titles = [s.title for s in a.suggestions if s.group == "own_curve"]
+        self.assertTrue(titles)
+        for title in titles:
+            # "(-10 °C ute)" was the shipped form. A hyphen-minus in a title
+            # the page puts in a heading, a dialog and a toast.
+            self.assertNotIn("(-", title, title)
+            self.assertNotIn("-1", title, title)
+        self.assertTrue(any("\u2212" in t for t in titles)
+                        or any("+" in t for t in titles), titles)
+
+    def test_and_the_why_underneath_it(self):
+        a = advisor.advise(own_curve_pump(), "colder", "cold_outside")
+        for s in a.suggestions:
+            if s.group == "own_curve":
+                self.assertNotIn(" -1", s.why)
+                self.assertNotIn(" -2", s.why)
+
+    def test_an_outdoor_temperature_below_zero(self):
+        out = advisor.diagnose(numbered_pump(over={advisor.R_OUTDOOR: -7.5}))
+        note = next(n for n in out["observations"] if n.startswith("Ute"))
+        self.assertIn("\u22127,5", note)
+        self.assertNotIn("-7.5", note)
+
+    def test_a_whole_number_does_not_grow_a_decimal(self):
+        # "kurvan står på 5", not "kurvan står på 5,0": %g's one good habit.
+        a = advisor.advise(numbered_pump(curve=15), "warmer", "cold_outside")
+        text = (a.blocked or "") + " ".join(s.why for s in a.suggestions)
+        self.assertNotIn("15,0", text)
+
+
+class TheWordForTheImmersionHeater(unittest.TestCase):
+    """The pump's own display says "tillskott", and so does the page.
+
+    "Elpatronen" is also wrong on its own terms on a pump that has an external
+    additional heat source, which the register (43084) does not distinguish.
+    """
+
+    def test_the_blocked_message_says_tillskott(self):
+        a = advisor.advise(numbered_pump(over={advisor.R_ADD_HEAT_POWER: 3.0}),
+                           "warmer", "always")
+        self.assertIn("Tillskottet", a.blocked)
+        self.assertNotIn("Elpatron", a.blocked)
+
+    def test_the_hot_water_variant_too(self):
+        a = advisor.advise(
+            numbered_pump(over={advisor.R_ADD_HEAT_POWER: 3.0,
+                                advisor.R_PRIORITY: "Hot Water"}),
+            "warmer", "always")
+        self.assertIn("Tillskottet", a.blocked)
+        self.assertNotIn("Elpatron", a.blocked)
+
+    def test_the_diagnose_warning_too(self):
+        out = advisor.diagnose(numbered_pump(over={advisor.R_ADD_HEAT_POWER: 3.0}))
+        warning = next(w for w in out["warnings"] if "illskott" in w)
+        self.assertNotIn("Elpatron", warning)
+        # And the kilowatts in it are Swedish as well.
+        self.assertNotIn("3.0", warning)
+
+    def test_the_word_is_gone_from_the_module_altogether(self):
+        import inspect
+        source = inspect.getsource(advisor)
+        self.assertNotIn("Elpatron", source)
+        self.assertNotIn("elpatron", source)
 
 
 if __name__ == "__main__":

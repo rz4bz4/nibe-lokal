@@ -264,12 +264,16 @@ class Weather:
             snap = _build(payload, now)
         except Exception as exc:                           # noqa: BLE001
             log.warning("SMHI answered something unparseable: %s", exc)
-            return {"ok": False, "error":
-                    "SMHI svarade med data som inte gick att tolka som en prognos."}
+            # Remembered, like every other failure here. An answer this app
+            # cannot parse is the most repeatable failure of the lot -- the
+            # next fetch gets the same bytes -- and without this it was the one
+            # failure that re-asked SMHI on every page load.
+            return self._remember_failure(now, {"ok": False, "error":
+                    "SMHI svarade med data som inte gick att tolka som en prognos."})
 
         if not snap["hourly"]:
-            return {"ok": False, "error":
-                    "SMHI svarade utan några prognostimmar för den platsen."}
+            return self._remember_failure(now, {"ok": False, "error":
+                    "SMHI svarade utan några prognostimmar för den platsen."})
 
         self._cached = snap
         self._fetched = now
@@ -280,6 +284,35 @@ class Weather:
         # bandwidth for nothing.
         self._expires = now + max(self.ttl, max_age)
         return copy.deepcopy(snap)
+
+    def cached_snapshot(self, now: float | None = None) -> dict | None:
+        """The last answer, exactly as /api/weather would serve it now.
+
+        Never fetches, and None means "nothing has been fetched yet".
+
+        /api/status used to read `_cached` straight off the object. `_cached`
+        is only ever replaced by a *successful* fetch, while the stale marking
+        -- `stale`, and the `note` saying when the numbers are from and why
+        they have not been updated -- lives on the failure copy. So with SMHI
+        down for a day, /api/weather said ok: false while the status header
+        cheerfully reported yesterday's temperature as today's.
+        """
+        at = time.time() if now is None else float(now)
+        with self._lock:
+            if (self._failure is not None
+                    and 0 <= at - self._failure_at < self.failure_seconds):
+                return copy.deepcopy(self._failure)
+            if self._cached is None:
+                return None
+            if at < self._expires and at >= self._fetched:
+                return copy.deepcopy(self._cached)
+            # Past its TTL and nothing newer has arrived: the numbers are still
+            # the last ones we had, and they are old. Said, not implied.
+            stale = copy.deepcopy(self._cached)
+            stale["stale"] = True
+            stale["note"] = ("Prognosen är från %s och har inte uppdaterats sedan "
+                             "dess." % _local_iso(self._fetched))
+            return stale
 
     def _remember_failure(self, now: float, result: dict) -> dict:
         """Keep a failed answer, so the next page load does not re-ask SMHI."""

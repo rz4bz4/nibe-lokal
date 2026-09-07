@@ -53,7 +53,7 @@ temperature ("a curve offset of +2 steps increases the supply temperature by
 docs/registers.md. One step is therefore the whole budget, not the unit of a
 scale, and `spot_max_offset` is clamped to 1 no matter what the config says.
 
-**SG Ready (register 40761) is deliberately not used for this.** It is a
+**SG Ready is deliberately not used for this.** It is a
 tempting shortcut -- it exists precisely to be driven by an electricity price
 signal -- and it is the wrong instrument here. What SG Ready's "low price" mode
 actually *does* depends on settings this app does not control and cannot read
@@ -75,10 +75,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 import time
 import urllib.error
 import urllib.request
 
+from . import sv_number
 from .config import header_safe, scrub
 
 log = logging.getLogger("nibelokal.spot")
@@ -88,8 +90,15 @@ API_URL = "https://api.tibber.com/v1-beta/gql"
 #: The register this module reasons about. Guarded in safety.py, and rightly so.
 R_OFFSET = 40031
 
-#: Named only to say it is not used. See the module docstring.
-R_SG_READY = 40761
+#: Named only to say they are not used. 43033 arms SG Ready over Modbus and
+#: 46009 requests one of its four states. 40761 is neither -- it is the pump's
+#: own menu setting for whether SG Ready may affect the heating at all, which
+#: is why safety.py guards it alongside 40762 and 40763 rather than treating it
+#: as an input. And on an S735 you can arm SG Ready and then have no
+#: addressable way to request a state, because 46009 is not on that map.
+#: See "Appendix: SG Ready" in docs/registers.md.
+R_SG_READY_ACTIVATE = 43033
+R_SG_READY_REQUEST = 46009
 
 BAND_CHEAP = "billig"
 BAND_NORMAL = "normal"
@@ -192,6 +201,12 @@ class Tibber:
                 "att den är klistrad in i en rad i config.yaml. Ingen "
                 "förfrågan skickas förrän den är rättad."
             )
+        # One request at a time. The web server runs a thread per request on
+        # top of the polling thread, so two tabs arriving at an expired cache
+        # made two Tibber requests -- against an API that rate-limits, for
+        # prices that change twice a day. weather.py has had this from the
+        # start; this had the caches and not the lock.
+        self._lock = threading.Lock()
         self._cached: dict | None = None
         self._cached_at = 0.0
         # Failures are remembered too. Without this a dead token or a 429 is
@@ -284,6 +299,10 @@ class Tibber:
     def snapshot(self, now: float | None = None) -> dict:
         """Prices for the horizon we can see, banded. Never raises."""
         at = time.time() if now is None else float(now)
+        with self._lock:
+            return self._snapshot(at)
+
+    def _snapshot(self, at: float) -> dict:
         if not self.configured:
             return {
                 "ok": False,
@@ -813,7 +832,8 @@ def _median(values: list) -> float:
 
 
 def _price(value: float) -> str:
-    return "%.2f kr/kWh" % value
+    """A price in a Swedish sentence: "0,42 kr/kWh", not "0.42 kr/kWh"."""
+    return "%s kr/kWh" % sv_number(value, 2)
 
 
 def _empty_plan(at: float, error: str) -> dict:

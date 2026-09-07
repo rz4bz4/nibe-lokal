@@ -12,7 +12,9 @@ import logging
 import mimetypes
 import os
 import posixpath
+import re
 import secrets
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +30,57 @@ from .store import Poller, Store
 from .weather import Weather
 
 log = logging.getLogger("nibelokal.server")
+
+
+#: ?token=... in a URL. Written into the DEBUG request log under -v, and log
+#: files are what people paste into bug reports.
+_TOKEN_IN_URL = re.compile(r"([?&]token=)[^&\s]*")
+
+
+def _redact(text: str) -> str:
+    return _TOKEN_IN_URL.sub(r"\1<dold>", text)
+
+
+def _as_int(value, name: str, default=None, low=None, high=None) -> int:
+    """An integer out of a request, or a ValueError the router turns into 400.
+
+    int(None) is a TypeError and int("2e9") a ValueError, and both reached the
+    catch-all as a 502 with a stack trace -- `{"minutes": null}` is a bad
+    request, not a broken server. The bounds are here too, because
+    `?limit=100000000000000000000` is an integer Python is perfectly happy with
+    and SQLite is not (OverflowError, once, deep inside the query).
+    """
+    if value is None or value == "":
+        if default is None:
+            raise ValueError("%s is required" % name)
+        return int(default)
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s must be a whole number (got %r)" % (name, value))
+    if low is not None and number < low:
+        raise ValueError("%s must be at least %d" % (name, low))
+    if high is not None and number > high:
+        raise ValueError("%s may be at most %d" % (name, high))
+    return number
+
+
+def _field_int(body: dict, name: str, default=None, low=None, high=None) -> int:
+    """An integer field out of a JSON body. Absent is not the same as null.
+
+    A key that is not there means "I did not say", and the default is the right
+    answer. A key that is there holding null means the client thinks it *is*
+    saying something -- and quietly reading `{"minutes": null}` as three hours
+    of extra hot water is not it. It used to be neither: body.get() flattened
+    the two together and int(None) then left as a 502 with a stack trace.
+    """
+    if name not in body:
+        if default is None:
+            raise ValueError("%s is required" % name)
+        return int(default)
+    if body[name] is None:
+        raise ValueError("%s must be a whole number, not null" % name)
+    return _as_int(body[name], name, default, low, high)
 
 
 def _flag(value) -> bool:
@@ -109,12 +162,46 @@ def _is_ip_literal(host: str) -> bool:
         return False
 
 
+#: Seconds a request may spend not sending. BaseHTTPRequestHandler sets no
+#: timeout at all, so a phone that drops WiFi in the middle of a POST leaves
+#: its thread parked in rfile.read() with its socket open -- for ever. This
+#: server runs a thread per request behind no proxy, so that is a thread and
+#: two file descriptors per dropped connection, which is the same
+#: descriptor-exhaustion failure an earlier release shipped with the sqlite
+#: connections. Measured before the fix: the thread count grew and never fell.
+REQUEST_TIMEOUT = 30.0
+
+#: The largest JSON body any endpoint here has a use for. The biggest real one
+#: is a write_all of a handful of registers; a kilobyte would do. This is the
+#: cap that makes Content-Length something we can trust before reading it.
+MAX_BODY_BYTES = 64 * 1024
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "nibe-lokal"
     ctx: dict = {}
+    #: socketserver sets this on the connection before the first line is read.
+    timeout = REQUEST_TIMEOUT
 
     def log_message(self, fmt, *args):
-        log.debug("%s %s", self.address_string(), fmt % args)
+        # The query string can carry ?token=..., which is how the auth token
+        # ends up in a log file under -v -- and log files get pasted into bug
+        # reports. Everything else about the request is kept.
+        log.debug("%s %s", self.address_string(), _redact(fmt % args))
+
+    def handle_one_request(self):
+        """As the base class, but a timed-out connection is closed, not logged.
+
+        Without an override, a socket that goes quiet raises a timeout out of
+        the base class's readline and BaseHTTPRequestHandler turns it into a
+        traceback in the log; the thread is then finished either way. This just
+        says so quietly and lets the thread end.
+        """
+        try:
+            super().handle_one_request()
+        except (TimeoutError, socket.timeout):
+            self.close_connection = True
+            log.debug("connection from %s timed out", self.address_string())
 
     # -- helpers ---------------------------------------------------------
 
@@ -134,7 +221,13 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("X-Auth-Token") or ""
         if not given:
             given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
-        return secrets.compare_digest(given, token)
+        # Bytes, not str: compare_digest raises TypeError on a str with a
+        # character above U+00FF, and this is called outside the try that turns
+        # exceptions into responses -- so a token with an emoji in it dropped
+        # the connection with a traceback instead of answering 401. Comparing
+        # the UTF-8 encodings is the same comparison, in constant time, for
+        # every string a client can send.
+        return secrets.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
 
     def _same_origin(self) -> bool:
         """Refuse requests a foreign web page made on the browser's behalf.
@@ -161,13 +254,47 @@ class Handler(BaseHTTPRequestHandler):
         return _is_ip_literal(host)
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
+        """The JSON body, as a dict. Anything else is a bad request.
+
+        Three things this has to survive, all of them reproduced:
+
+        * `Content-Length: -1` -- int() accepts it and rfile.read(-1) then
+          reads until the client closes the connection, which a client that
+          never closes never does.
+        * A length that lies: 500 announced, two bytes sent. read(500) blocks
+          on the rest until the socket timeout (see REQUEST_TIMEOUT) rather
+          than for ever, and a short read is a bad request, not an empty body.
+        * A body that is valid JSON but not an object -- `[1,2]`, `"hi"`,
+          `null`. Every caller below does body.get(...), so a list arrived as
+          an AttributeError and left as a 502 with a stack trace.
+        """
+        raw = self.headers.get("Content-Length")
+        try:
+            length = int(raw or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Content-Length is not a number")
+        if length < 0:
+            raise ValueError("Content-Length may not be negative")
+        if length > MAX_BODY_BYTES:
+            raise ValueError("the body is larger than %d bytes" % MAX_BODY_BYTES)
         if not length:
             return {}
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            data = self.rfile.read(length)
+        except (TimeoutError, socket.timeout, OSError) as exc:
+            # The socket timeout from REQUEST_TIMEOUT, nearly always: the
+            # client announced a body and stopped sending. Said as the bad
+            # request it is rather than as a 502 blaming the pump.
+            raise ValueError("the request body did not arrive (%s)" % exc)
+        if len(data) < length:
+            raise ValueError("the request body was shorter than Content-Length said")
+        try:
+            body = json.loads(data or b"{}")
         except ValueError:
             return {}
+        if not isinstance(body, dict):
+            raise ValueError("the request body must be a JSON object")
+        return body
 
     # -- routing ---------------------------------------------------------
 
@@ -242,6 +369,15 @@ class Handler(BaseHTTPRequestHandler):
                 "register_map": pump.registry.source,
                 "polled_at": poller.last_ok,
                 "poll_error": poller.last_error,
+                # A database that will not take the readings is its own
+                # failure, and no longer reported as the pump having failed.
+                "store_error": getattr(poller, "last_store_error", None),
+                # Registers this pump refused, and is therefore not being
+                # polled for -- until they are retried, see pump.missing().
+                # Without this a register that quietly dropped out of every
+                # poll was invisible, and 31976 dropping out means the alarm
+                # watching has stopped.
+                "missing_registers": pump.missing() if hasattr(pump, "missing") else [],
                 "registers": out,
             }
             body.update(self._summaries())
@@ -273,20 +409,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json([dict(r.as_dict(), tier=tier(r.address)) for r in hits])
 
         if path.startswith("/api/register/"):
-            address = int(path.rsplit("/", 1)[1])
+            address = _as_int(path.rsplit("/", 1)[1], "address")
             reg = pump.registry.get(address)
             if reg is None:
                 return self._json({"error": "no such register"}, 404)
             return self._json(dict(reg.as_dict(), value=pump.read(address), tier=tier(address)))
 
         if path == "/api/history":
-            address = int(q.get("address", ["30009"])[0])
-            hours = max(1, min(24 * 400, int(q.get("hours", ["24"])[0])))
+            address = _as_int(q.get("address", ["30009"])[0], "address")
+            hours = _as_int(q.get("hours", ["24"])[0], "hours", 24, 1, 24 * 400)
             return self._json({"address": address, "hours": hours,
                                "points": store.series(address, hours)})
 
         if path == "/api/log":
-            return self._json(store.last_writes(int(q.get("limit", ["50"])[0])))
+            limit = _as_int(q.get("limit", ["50"])[0], "limit", 50, 1, 500)
+            return self._json(store.last_writes(limit))
 
         if path == "/api/backups":
             directory = self.ctx["backup_dir"]
@@ -347,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
             if watcher is None:
                 return self._json(_not_started("Larmbevakningen",
                                                self._provider_error("watcher")))
-            limit = max(1, min(500, int(q.get("limit", ["50"])[0])))
+            limit = _as_int(q.get("limit", ["50"])[0], "limit", 50, 1, 500)
             return self._json({
                 "ok": True,
                 "active": watcher.active(),
@@ -378,7 +515,8 @@ class Handler(BaseHTTPRequestHandler):
         """The curve analysis, over stored history. Never raises past here."""
         pump = self.ctx["pump"]
         store: Store = self.ctx["store"]
-        days = max(1, min(400, int(q.get("days", [str(self.ctx["autotune_days"])])[0])))
+        days = _as_int(q.get("days", [str(self.ctx["autotune_days"])])[0],
+                       "days", self.ctx["autotune_days"], 1, 400)
 
         # The pump's current settings are what lets a proposal name a register
         # and a from-value. A pump that does not answer is not a reason to
@@ -480,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
     def _weather_summary(self, weather) -> dict:
         empty = {"ok": False, "configured": False, "t": None, "effective": None,
                  "symbol_sv": "", "min_24h": None, "trend": "", "at": None,
-                 "error": None}
+                 "stale": False, "error": None}
         if weather is None or not weather.configured:
             return empty
         # Unlike Homey, this one is never fetched from here. Homey is on the
@@ -488,7 +626,15 @@ class Handler(BaseHTTPRequestHandler):
         # by nobody, so a cold cache would make one status call an hour wait
         # out the timeout of the endpoint everything else polls. Only what has
         # already been fetched by /api/weather is summarised.
-        snap = getattr(weather, "_cached", None)          # noqa: SLF001
+        #
+        # cached_snapshot(), not `_cached`: `_cached` holds the last SUCCESSFUL
+        # fetch and nothing else, so with SMHI down for a day this header went
+        # on reporting yesterday's temperature as today's while /api/weather
+        # said ok: false. cached_snapshot() answers with what /api/weather
+        # would answer -- the failure, or the old forecast marked stale.
+        snap = (weather.cached_snapshot()
+                if hasattr(weather, "cached_snapshot")
+                else getattr(weather, "_cached", None))   # noqa: SLF001
         if not isinstance(snap, dict):
             return dict(empty, configured=True,
                         error="Prognosen är inte hämtad ännu.")
@@ -503,7 +649,12 @@ class Handler(BaseHTTPRequestHandler):
             "min_24h": summary.get("min_24h"),
             "trend": summary.get("trend") or "",
             "at": snap.get("at"),
-            "error": snap.get("note"),
+            # Additive: true when these numbers are the last forecast rather
+            # than the current one. `error` carries the Swedish sentence saying
+            # so, as it always has, whether it came from a failure or from the
+            # stale marking.
+            "stale": bool(snap.get("stale")),
+            "error": snap.get("note") or snap.get("error"),
         }
 
     def _alarm_summary(self, watcher) -> dict:
@@ -544,14 +695,15 @@ class Handler(BaseHTTPRequestHandler):
         path = route.path
 
         if path == "/api/hotwater":
-            result = pump.extra_hot_water(int(body.get("minutes", 180)),
-                                          _flag(body.get("off")))
+            result = pump.extra_hot_water(
+                _field_int(body, "minutes", 180),
+                _flag(body.get("off")))
             result["logged"] = _log_writes(store, result["writes"])
             return self._json(result)
 
         if path == "/api/ventilation":
-            result = pump.ventilate(str(body.get("direction", "up")),
-                                    int(body.get("hours", 3)),
+            result = pump.ventilate(str(body.get("direction") or "up"),
+                                    _field_int(body, "hours", 3),
                                     body.get("mode"))
             result["logged"] = _log_writes(store, result["writes"])
             return self._json(result)
@@ -570,7 +722,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(result)
             if "address" not in body:
                 raise ValueError("address is required")
-            result = pump.write(int(body["address"]), body.get("value"),
+            result = pump.write(_field_int(body, "address"), body.get("value"),
                                 _flag(body.get("confirm")),
                                 body.get("expect"))
             result["logged"] = _log_writes(store, [result])

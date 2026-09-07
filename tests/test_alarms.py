@@ -125,6 +125,61 @@ class TestTable(AlarmTestCase):
         self.assertTrue(alarms.describe(163)["known"])
 
 
+class TestCodesWithoutAText(AlarmTestCase):
+    """Eleven codes in NIBE's table carry a severity and no text at all.
+
+    Regression: they came back known: True with text "", which put an empty
+    line in the notification and an empty line on the page. The number and the
+    fact that NIBE publishes nothing for it is what the owner can actually use.
+    """
+
+    def _textless(self):
+        return sorted(int(c) for c, e in alarms.load_table()["codes"].items()
+                      if not (e.get("sv") or "").strip())
+
+    def test_the_table_still_has_some(self):
+        self.assertTrue(self._textless(), "the table changed shape; check this")
+
+    def test_they_are_not_reported_as_known_with_an_empty_text(self):
+        for code in self._textless():
+            info = alarms.describe(code)
+            self.assertTrue(info["text"].strip(), code)
+            self.assertIn(str(code), info["text"], code)
+            self.assertFalse(info["known"], code)
+
+    def test_nibes_own_action_is_still_kept_where_there_is_one(self):
+        with_action = [c for c in self._textless()
+                       if alarms.load_table()["codes"][str(c)].get("action")]
+        self.assertTrue(with_action)
+        for code in with_action:
+            self.assertEqual(alarms.describe(code)["action"],
+                             alarms.load_table()["codes"][str(code)]["action"])
+
+
+class TestSelfClearingCodes(AlarmTestCase):
+    """A fault that clears itself must not repeat until acknowledged.
+
+    183 is "Tillfälligt kom.fel mot klimatsystem 2", and NIBE's own text says
+    the disturbance passes and the message resets itself. It was classed
+    `alarm`, so it went out at Pushover priority 2 -- which repeats every five
+    minutes until somebody acknowledges it -- for a fault that goes away on
+    its own.
+    """
+
+    def test_183_is_not_an_alarm(self):
+        self.assertEqual(alarms.describe(183)["severity"], "info")
+
+    def test_and_so_it_does_not_wake_anybody_at_the_default_setting(self):
+        w = self.watcher()          # alarm_min_severity defaults to "warning"
+        w.poll(reading(183))
+        self.assertEqual(self.notifier.sent, [])
+
+    def test_a_real_alarm_still_does(self):
+        w = self.watcher()
+        w.poll(reading(163))
+        self.assertEqual(self.notifier.sent[0]["priority"], 2)
+
+
 class TestEdgeTriggering(AlarmTestCase):
     def test_standing_alarm_notifies_once(self):
         w = self.watcher()
@@ -504,6 +559,55 @@ class TestDebounce(AlarmTestCase):
         self.assertGreater(spent, 0)
         self.assertLessEqual(len(notifier.sent), alarms.NOTIFY_BURST,
                              "a restart handed the flap a fresh allowance")
+
+    def test_a_flap_that_ends_cleared_still_sends_its_all_clear(self):
+        """The mirror of test_the_current_state_is_what_finally_goes_out.
+
+        Regression, and the worst kind: the pushes went *larmar / borta /
+        larmar* and then stopped, with the pump no longer alarming and the
+        owner's phone still saying it was. The final all-clear was held by the
+        flap budget, and when the window rolled over _worth_sending() looked at
+        the raise it belonged to, found it marked sent = 2 (superseded by the
+        flap guard itself), read that as "nobody was told" and dropped the
+        clear -- so `held` was never reported either.
+        """
+        w = self.watcher({"alarm_debounce_seconds": 900})
+        at = self._flap(w, 6, start=1000.0)          # ends on a clear
+        for _ in range(60):                          # an hour of nothing wrong
+            w.poll(reading(0), at)
+            at += 60
+        self.assertIn("borta", self.notifier.sent[-1]["title"].lower(),
+                      "the last thing the phone was told is that it alarms")
+        self.assertIn("växlat", self.notifier.sent[-1]["message"],
+                      "and it says how many transitions it stands for")
+
+    def test_the_all_clear_of_a_flap_is_sent_once_not_once_per_poll(self):
+        w = self.watcher({"alarm_debounce_seconds": 900})
+        at = self._flap(w, 6, start=1000.0)
+        for _ in range(120):
+            w.poll(reading(0), at)
+            at += 60
+        clears = [m for m in self.notifier.sent if "borta" in m["title"].lower()]
+        self.assertLessEqual(len(clears), alarms.NOTIFY_BURST)
+
+    def test_a_flap_below_the_threshold_still_says_nothing(self):
+        # The other half of the bargain: an all-clear for an alarm nobody was
+        # ever told about is a message with no referent, whatever the flap
+        # guard did with it.
+        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+                             if e["severity"] == "info"))
+        w = self.watcher({"alarm_min_severity": "alarm",
+                          "alarm_debounce_seconds": 900})
+        at = 1000.0
+        for _ in range(6):
+            w.poll(reading(info_code), at)
+            at += 60
+            w.poll(reading(0), at)
+            at += 60
+        for _ in range(60):
+            w.poll(reading(0), at)
+            at += 60
+        self.assertEqual(self.notifier.sent, [])
 
     def test_a_debounce_of_zero_is_the_old_behaviour(self):
         w = self.watcher({"alarm_debounce_seconds": 0})

@@ -48,6 +48,7 @@ import math
 import time
 from dataclasses import dataclass, field
 
+from . import sv_number
 from .advisor import (
     CURVE_MAX,
     CURVE_MIN,
@@ -445,7 +446,10 @@ def _analyse(history, target_indoor, settings, emitter_kind, now, heating_stop_c
     res = _Result()
     now = time.time() if now is None else float(now)
     em = emitters(emitter_kind)
-    wait_hours = 48 if em["wait"] == "två dygn" else 24
+    # From the emitter table, not from matching its Swedish prose: reading
+    # "två dygn" to mean 48 made the advice depend on the wording of a
+    # sentence, and a reworded sentence would have quietly halved the wait.
+    wait_hours = int(em.get("wait_hours", 24))
 
     samples, rejected = usable_samples(history, heating_stop_c, night_hours)
     res.rejected = rejected
@@ -469,9 +473,15 @@ def _analyse(history, target_indoor, settings, emitter_kind, now, heating_stop_c
     f = fit([(n.outdoor, n.error) for n in nights])
     if f.level is not None:
         res.offset_error_c = round(f.level, 2)
-    # A slope is reported as a number only when it is both identifiable and
-    # real. Reporting "0.01 C/C" from four nights in still weather would be a
-    # measurement of nothing, dressed as a measurement.
+    # A slope is reported as a number as soon as it is *identifiable*: enough
+    # nights, over a wide enough spread of outdoor temperatures, that the fit
+    # has something to fit. Whether it is also *real* -- big enough to clear
+    # its own standard error and the deadband -- decides whether it is acted
+    # on, further down, not whether it is shown. The distinction matters to
+    # the reader: a measured slope of 0,02 C/C means "the curve's slope is
+    # fine", and null means "the weather has not varied enough to say", which
+    # is what the page prints under it. Reporting nothing in the first case
+    # would turn a real result into a shrug.
     slope_identifiable = (len(nights) >= MIN_NIGHTS_SLOPE
                           and f.span >= SPAN_MIN_SLOPE_C
                           and f.slope_se is not None)
@@ -568,10 +578,13 @@ def _offset_answer(res, f, settings, em, wait_hours, slope_identifiable):
     if not OFFSET_MIN <= target <= OFFSET_MAX:
         res.proposal = None
         res.notes_sv.append(
-            "Offset står redan på %g, som är gränsen (%d..%d). Behöver huset mer "
-            "än så är det kurvan som ligger fel, inte offset — och den ändringen "
-            "är för stor för att föreslås automatiskt."
-            % (_reg(offset), OFFSET_MIN, OFFSET_MAX))
+            # "(-10..10)" was a range written for a programmer: a hyphen where
+            # the rest of the page has a minus sign, and two dots where Swedish
+            # prose says "till".
+            "Offset står redan på %s, som är gränsen (%s till %s). Behöver huset "
+            "mer än så är det kurvan som ligger fel, inte offset — och den "
+            "ändringen är för stor för att föreslås automatiskt."
+            % (_sv(_reg(offset), None), _sv(OFFSET_MIN, None), _sv(OFFSET_MAX, None)))
         return res
 
     steps_needed = abs(f.level) / INDOOR_C_PER_OFFSET_STEP
@@ -661,17 +674,17 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
         if worst_x > other_x:
             res.notes_sv.append(
                 "Felet är störst i milt väder och pumpen kör en numrerad kurva "
-                "(%g). Det kräver att kurvan flackas och offset höjs samtidigt, "
+                "(%s). Det kräver att kurvan flackas och offset höjs samtidigt, "
                 "alltså två ändringar på en gång — det föreslås inte härifrån."
-                % _reg(curve))
+                % _sv(_reg(curve), None))
             return res
         step = 1 if worst_err < 0 else -1
         target = curve + step
         if not CURVE_MIN <= target <= CURVE_MAX:
             res.notes_sv.append(
-                "Kurvan står på %g och nästa steg åt rätt håll ligger utanför "
+                "Kurvan står på %s och nästa steg åt rätt håll ligger utanför "
                 "1–15. Ändringen får göras på pumpens display, medvetet."
-                % _reg(curve))
+                % _sv(_reg(curve), None))
             return res
         res.proposal = {
             "register": R_CURVE,
@@ -740,10 +753,11 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
         "from": current,
         "to": round(target, 1),
         "why_sv": ("Du kör egen kurva, så lutningen sitter i punkterna. P%d är "
-                   "punkten för %+d °C ute, den som styr vädret där felet är "
+                   "punkten för %s °C ute, den som styr vädret där felet är "
                    "störst (%s °C ute). Att flytta den ändrar kurvan just där "
                    "och lämnar den andra änden i fred — vilket offset inte gör."
-                   % (idx + 1, OWN_CURVE_OUTDOOR[idx], _sv(worst_x, 0))),
+                   % (idx + 1, _sv(OWN_CURVE_OUTDOOR[idx], None, sign=True),
+                      _sv(worst_x, 0))),
         "expected_sv": ("%s °C framledning motsvarar ungefär %s °C inomhus i det "
                         "vädret.%s Beräknad framledning (31018) rampar under "
                         "cirka fem minuter efter ändringen. Döm om huset efter "
@@ -1003,16 +1017,14 @@ def _fmt(v) -> str:
 
 
 def _sv(v, dec: int = 1, sign: bool = False) -> str:
-    """A number as Swedish prose: decimal comma, not decimal point.
+    """A number as Swedish prose: decimal comma and a real minus sign.
 
-    Every user-facing string in this module is Swedish, and "1.2 °C" in the
-    middle of a Swedish sentence reads as a typo -- particularly next to NIBE's
-    own "2,5 °C" from the manual.
+    Kept as a name in this module because every line below uses it, but the
+    implementation now lives in the package root, where advisor, spot, homey
+    and pump reach it too -- they were all still printing "38.4" and "-10" into
+    Swedish sentences the page renders verbatim.
     """
-    if v is None:
-        return "–"
-    text = ("%+.*f" if sign else "%.*f") % (dec, v)
-    return text.replace(".", ",")
+    return sv_number(v, dec, sign)
 
 
 def _reg(v):

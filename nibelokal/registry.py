@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 import struct
 from dataclasses import dataclass, field
@@ -135,6 +136,13 @@ class Register:
         """
         if value is None:
             raise ValueError("%s: a value is required" % self.title)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and not math.isfinite(value):
+            # json.loads("1e999") is float("inf"), and int(round(inf)) is an
+            # OverflowError -- which escaped encode() as a 502 with a stack
+            # trace. A value the register cannot hold is a bad request.
+            raise ValueError("%s: %r is not a number this register can hold"
+                             % (self.title, value))
         if self.mappings:
             if isinstance(value, str) and not value.strip().lstrip("-").isdigit():
                 for k, v in self.mappings.items():
@@ -144,7 +152,11 @@ class Register:
                     "%r is not a valid value for %s. Allowed: %s"
                     % (value, self.title, ", ".join(sorted(self.mappings.values())))
                 )
-            key = int(float(value))
+            try:
+                key = int(float(value))
+            except (OverflowError, ValueError):
+                raise ValueError("%r is not a valid value for %s"
+                                 % (value, self.title))
             if str(key) not in self.mappings:
                 raise ValueError(
                     "%s is not a valid value for %s. Allowed: %s"
@@ -152,7 +164,11 @@ class Register:
                        ", ".join("%s (%s)" % (k, v) for k, v in sorted(self.mappings.items())))
                 )
             return key
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("%s: %r is not a number this register can hold"
+                             % (self.title, value))
+        return number
 
     def encode(self, value) -> list[int]:
         """Real value -> raw 16-bit words, ready for FC16.
@@ -161,7 +177,16 @@ class Register:
         minutes of extra hot water into 65535 -- a write the pump accepts and
         then runs for six weeks.
         """
-        raw = int(round(float(value) * (self.factor if self.factor else 1)))
+        try:
+            raw = int(round(float(value) * (self.factor if self.factor else 1)))
+        except (OverflowError, TypeError, ValueError):
+            # int(round(inf)) is an OverflowError, and OverflowError is not a
+            # ValueError -- so it went out of the web app as a 502 blaming the
+            # pump for what is a bad request. coerce() catches this first on
+            # every path the server takes, but encode() is public and a
+            # register is not the place to find out that a caller skipped it.
+            raise ValueError("%s: %r is not a number this register can hold"
+                             % (self.title, value))
         lo, hi = LIMITS.get(self.size, (-0x8000, 0x7FFF))
         if not lo <= raw <= hi:
             raise ValueError(

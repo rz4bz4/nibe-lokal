@@ -12,6 +12,9 @@ this decides what is *offered*, never what is *allowed*.
 
 Registers a given pump does not implement drop out automatically: the group is
 built from what answered, not from this list.
+
+Where each of these is rendered is data here rather than a list in the page.
+See `home` on every group and `RENDERED_ELSEWHERE` below.
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from __future__ import annotations
 GROUPS: list[dict] = [
     {
         "key": "curve",
+        "home": "set",
         "title": "Värmekurvan",
         "intro": "Kurvan bestämmer hur varmt vatten pumpen skickar ut vid en given "
                  "utetemperatur. Det är den som avgör husets temperatur — inte "
@@ -53,6 +57,7 @@ GROUPS: list[dict] = [
     },
     {
         "key": "limits",
+        "home": "set",
         "title": "Gränser och säsong",
         "intro": "Taket och golvet för framledningen, och när pumpen slutar värma "
                  "för säsongen.",
@@ -77,12 +82,14 @@ GROUPS: list[dict] = [
     },
     {
         "key": "hotwater",
+        "home": "water",
         "title": "Varmvatten",
         "intro": "Temperaturerna avgör hur mycket varmvatten du får och hur ofta "
-                 "elpatronen behöver hjälpa till. Över ungefär 50–55 °C når "
+                 "tillskottet behöver hjälpa till. Över ungefär 50–55 °C når "
                  "kompressorn inte hela vägen själv.",
         "registers": [
-            (40057, "Varmvattenkomfort", "Small, Medium, Large eller Smart Control."),
+            (40057, "Varmvattenkomfort",
+             "Litet, medel, stort eller Smart Control. Pumpen skriver lägena på engelska\n             i registerkartan; appen visar pumpens egna ord."),
             (40064, "Stopptemperatur, normal", "När laddningen slutar i normalläge."),
             (40063, "Stopptemperatur, hög", "Samma, för läget hög."),
             (40065, "Stopptemperatur, låg", "Samma, för läget låg."),
@@ -96,16 +103,17 @@ GROUPS: list[dict] = [
     },
     {
         "key": "additional",
-        "title": "Tillskott (elpatron)",
+        "home": "set",
+        "title": "Tillskott",
         "intro": "Det här är den dyra värmen. Varje kilowattimme här är direktverkande el.",
         "registers": [
-            (40103, "Max effekt, intern elpatron",
-             "Hur många kilowatt elpatronen får ta. Lägre gör det svårare för "
+            (40103, "Max effekt, internt tillskott",
+             "Hur många kilowatt tillskottet får ta. Lägre gör det svårare för "
              "pumpen att klara riktig kyla, men dyrare misstag mindre dyra."),
             (40181, "Tillåt tillskott för värme",
-             "0 stänger av elpatronen för husvärmen helt. Varmvattnet påverkas inte."),
+             "0 stänger av tillskottet för husvärmen helt. Varmvattnet påverkas inte."),
             (40186, "Tillskottsstopp, utetemperatur",
-             "Över den här utetemperaturen får elpatronen inte hjälpa till med värmen."),
+             "Över den här utetemperaturen får tillskottet inte hjälpa till med värmen."),
             (40189, "Max skillnad framledning, tillskott",
              "Hur långt under börvärdet framledningen får ligga innan tillskottet går in."),
             (40188, "Max skillnad framledning, kompressor",
@@ -114,6 +122,7 @@ GROUPS: list[dict] = [
     },
     {
         "key": "room",
+        "home": "set",
         "title": "Rumsgivare",
         "intro": "Fungerar bara om det finns en rumsgivare kopplad. Saknas den är "
                  "börvärdet ett tal utan verkan.",
@@ -127,6 +136,7 @@ GROUPS: list[dict] = [
     },
     {
         "key": "other",
+        "home": "set",
         "title": "Övrigt",
         "intro": "",
         "registers": [
@@ -141,6 +151,45 @@ GROUPS: list[dict] = [
         ],
     },
 ]
+
+#: Which tab a group is rendered on, when it is not the settings list.
+#:
+#: `home` on a group and `home` on a row both name a view in web/index.html:
+#: "set" is the settings list, "water" the Vatten & luft tab, "heat" the Värme
+#: tab. Until 2026-09-07 none of this was here and the page carried the
+#: knowledge instead -- a hardcoded group key for the hot water group, a
+#: hardcoded list of thirteen addresses for the ones that moved to Värme →
+#: Avancerat, and two group intros rewritten client-side with a sentence saying
+#: where the missing rows went. The page was patching prose to cover for a
+#: layout the server did not describe.
+#:
+#: A key on the group alone would not have been enough, which is worth saying
+#: because it is the obvious shape and it is wrong. Only the hot water group
+#: moves whole; the curve and limits groups are *split*. Of the eleven rows
+#: under Värmekurvan, ten belong under Avancerat next to the picture of the
+#: curve -- the seven own-curve points, the two point-offset registers and the
+#: curve number itself -- and exactly one, the heating offset, stays in the
+#: settings list, because it is the knob the everyday advice moves. Gränser och
+#: säsong splits three and two the same way. So the unit that has a home is the
+#: row, and the group's `home` is only the default for rows that do not say
+#: otherwise.
+RENDERED_ELSEWHERE: dict[int, str] = {
+    # The own curve, P1 (coldest) .. P7, and the two point-offset registers.
+    # Seven numbered registers in a row is not a curve; the picture on the
+    # Värme tab is.
+    40046: "heat", 40045: "heat", 40044: "heat", 40043: "heat",
+    40042: "heat", 40041: "heat", 40040: "heat",
+    40047: "heat", 40048: "heat",
+    # The curve number itself, and the floor and ceiling and the seasonal stop
+    # that bound it. They are read while looking at that same picture.
+    40027: "heat", 40035: "heat", 40039: "heat", 40185: "heat",
+}
+
+
+def home(group: dict, address: int) -> str:
+    """Which view renders this row: the row's own home, else the group's."""
+    return RENDERED_ELSEWHERE.get(address, group.get("home", "set"))
+
 
 #: Every address this module offers, in the order the groups list them.
 ADDRESSES = [addr for g in GROUPS for addr, _, _ in g["registers"]]
@@ -177,8 +226,10 @@ def build(pump, values: dict) -> list[dict]:
                 "options": (sorted(reg.mappings.items(), key=lambda kv: int(kv[0]))
                             if reg.mappings else None),
                 "tier": safety.tier(address),
+                "home": home(group, address),
             })
         if rows:
             out.append({"key": group["key"], "title": group["title"],
-                        "intro": group["intro"], "rows": rows})
+                        "intro": group["intro"],
+                        "home": group.get("home", "set"), "rows": rows})
     return out

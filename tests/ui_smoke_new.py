@@ -1,23 +1,53 @@
-"""Stubbad UI-rok: kor hela appen mot pahittad men realistisk JSON.
+"""Stubbad UI-rok: kor hela appen mot en pahittad men *aktig* S735.
 
-Ingen pump, ingen Homey, ingen Tibber och inget SMHI behovs. Servern harinne
-svarar pa allt appen fragar efter och kan stallas i tre lagen:
+Den har filen ar inte bara en skarmbildstagare. Den ar den enda platsen dar
+appens JavaScript motter samma data som en riktig varmepump skickar, och den
+har tidigare ljugit om precis de detaljer som gjorde appen trasig i verkliga
+livet:
 
-    full   -- alla integrationer konfigurerade, larm aktivt, plan for dygnet
-    quiet  -- allt konfigurerat men urlakat: inga larm, platt elpris, for lite
-              underlag for kalibrering, en givare som slutat svara
-    off    -- ingen integration konfigurerad (features=false + ok:false).
-              Da ska ingenting av det nya synas alls -- varken fel eller
-              tomma rutor -- utom tipset under Installningar.
-    curve  -- agarens riktiga kurva: P1-P3 alla 45, P7 under min framledning,
-              offset -1. Flat kallande och en punkt under golvet ska synas i
-              bilden av kurvan.
-    unreach -- allt konfigurerat men ingen integration svarar (Homey 502,
-              SMHI/Tibber/larm ok:false). Kortet ska saga vad som ar fel.
-    slow   -- servern svarar, men langsamt. Skelettet ska sta kvar tills
-              svaret kommer, och ingenting far krascha under tiden.
-    heat502 -- /api/heating svarar 502. Varmefliken ska saga att pumpen inte
-              gar att lasa, inte sta kvar med streck.
+  * Registervarden hittades pa for hand. Pa en riktig S735 kommer 32196 som
+    stangen "No alarm" och inte som 0, 31029 som "Heat" och 40057 som "Medium"
+    -- for att registerkartan mappar dem, och kartan ar engelsk. Stubben
+    svarade 0, "Heating" och 1, och lat darfor bade det falska larmet (varje
+    kall start) och de fyra "-" i installningslistan passera.
+  * Enheterna var redan oversatta. Gradminuterna heter "DM" i kartan, inte
+    "GM", och intervallet for periodisk varmvattenhojning "days", inte "dygn".
+  * De svenska meningarna var handskrivna och snyggare an de riktiga.
+
+Darfor: registerkartan kommer nu ur `nibe`-paketet (samma Model.S735.
+get_coil_data() som appen kor mot i skarpt lage), varje varde gar genom
+registrets egen encode/decode, och /api/heating, /api/advice, /api/settings
+och /api/spot byggs av `nibelokal.advisor`, `nibelokal.settings` och
+`nibelokal.spot` -- alltsa av samma kod som svarar pa riktigt. Det som star pa
+skarmen ar det servern faktiskt skriver, med sina egna minustecken och
+decimalkomman.
+
+Lagen:
+
+    full     -- alla integrationer konfigurerade, larm aktivt (31976 = 175,
+                32196 = "Alarm"), extra varmvatten igang, plan for dygnet
+    quiet    -- allt konfigurerat men urlakat: inga larm, platt elpris, for
+                lite underlag for kalibrering, givare som slutat svara
+    off      -- inget *valfritt* konfigurerat. Larmbevakningen ar PASLAGEN:
+                den behover inga nycklar, server.py bygger alltid Watcher och
+                features.alarms ar sann sa fort den gick att bygga. Det ar
+                notiserna som saknas. Ingenting annat nytt ska synas.
+    fallback -- larmbevakningen kunde INTE byggas. Det ar det enda satt
+                features.alarms blir falsk pa en riktig server: Watcher
+                skriver sina tabeller i historikdatabasen, och pa en skrivskyd-
+                dad disk kastar konstruktorn. /api/alarms svarar da med
+                serverns _not_started-kropp, och larmnumret i register 31976
+                ar allt appen har.
+    alarmdown-- pumpen svarar, larmbevakningen gor det inte: /api/alarms drojer
+                och svarar sedan 502, med 31976 = 0 och 32196 = "No alarm".
+                Det ar bade den kalla starten (svaret har inte kommit an) och
+                det permanenta felet (svaret kommer aldrig) -- de tva
+                tillstand dar appen tidigare malade ett rott larm ur ingenting.
+    curve    -- agarens riktiga kurva: P1-P3 alla 45, P7 (15) under min
+                framledning (26), punktforskjutning -2/+3, offset -1.
+    unreach  -- allt konfigurerat men ingen integration svarar.
+    slow     -- servern svarar, men langsamt.
+    heat502  -- /api/heating svarar 502.
 
 Kor allt (startar servern sjalv, tar skarmbilder i _shots/):
 
@@ -33,7 +63,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import pathlib
 import socket
 import sys
@@ -47,101 +76,162 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 sys.path.insert(0, str(ROOT))
 
-from nibelokal import settings as nsettings          # noqa: E402
-from nibelokal import safety                          # noqa: E402
+from nibelokal import advisor                             # noqa: E402
+from nibelokal import settings as nsettings               # noqa: E402
+from nibelokal import spot as nspot                       # noqa: E402
+from nibelokal.homey import Homey                         # noqa: E402
+from nibelokal.pump import DASHBOARD, FAN_SPEED_REGISTER  # noqa: E402
+from nibelokal.registry import Registry                   # noqa: E402
+from nibelokal.weather import Weather                     # noqa: E402
 
 NOW = time.time()
 
+#: Samma karta appen kor mot i skarpt lage. Inte en handskriven kopia av den:
+#: titlar, enheter, storlekar, skalfaktorer och mappningar kommer harifran, och
+#: det ar mappningarna som gor att ett halvt dussin register svarar med ord.
+REGISTRY = Registry.load("S735")
+
 
 # --------------------------------------------------------------------------
-# pahittad pumpdata
+# pumpen
 # --------------------------------------------------------------------------
-REGISTERS = [
-    (30002, "Outdoor temperature BT1", "°C", -4.2),
-    (30006, "Supply line BT2", "°C", 38.4),
-    (30008, "Return line BT3", "°C", 33.1),
-    (30009, "Hot water top BT7", "°C", 52.6),
-    (30010, "Hot water charging BT6", "°C", 47.9),
-    (30020, "Exhaust air BT20", "°C", 21.4),
-    (30117, "Room temperature BT50", "°C", None),
-    (31018, "Calculated supply", "°C", 39.0),
-    (31026, "Runtime additional heat", "h", 112),
-    (31028, "Internal electrical addition", "kW", 0.0),
-    (31047, "Compressor frequency", "Hz", 43),
-    (31079, "Temporary lux status", "", 0),
-    (31088, "Compressor runtime", "h", 18422),
-    (31092, "Hot water runtime", "h", 2611),
-    (31535, "Compressor starts", "", 9741),
-    (31975, "Fan speed", "%", 30),
-    (31976, "Alarm number", "", None),   # satts av lage
-    (32196, "Class 1 alarm", "", 0),     # pump.py lade till den i DASHBOARD
-    (31029, "Priority", "", "Heating"),  # och den har -- bada ska heta nagot
-                                         # svenskt i listan "Alla avlasta varden"
-    (32134, "Exhaust air fan", "%", 30),
-    (40012, "Degree minutes", "GM", -142),
-    (40031, "Heat offset", "", 2),
-    (40057, "Hot water comfort", "", 1),
-    (40105, "Ventilation mode", "", 0),
-    (40110, "Fan speed normal", "%", 30),
-    (40226, "Temporary lux minutes", "min", 0),
-]
-
-SETTING_VALUES = {
-    40027: 0, 40031: 2, 40046: 46, 40045: 42, 40044: 37, 40043: 32, 40042: 26,
-    40041: 21, 40040: 20, 40047: 0, 40048: 0,
+#: Vad pumpen *haller*, i samma form som en skrivning tar emot: tal, och for
+#: ett mappat register nyckeln. Vad appen far se avgor registret sjalv, genom
+#: att koda och avkoda vardet precis som en riktig lasning gor -- sa 31029: 30
+#: kommer fram som "Heat" och 40057: 1 som "Medium", vare sig vi vill det eller
+#: inte. Det ar hela poangen med den har filen.
+PUMP: dict[int, float] = {
+    30002: -4.2,    # utetemperatur BT1
+    30006: 38.4,    # framledning BT2
+    30008: 33.1,    # retur BT3
+    30009: 52.6,    # varmvatten topp BT7
+    30010: 47.9,    # varmvatten laddning BT6
+    30020: 21.4,    # franluft BT20
+    # 30117 (rumsgivare BT50) svarar inte: huset har ingen. Registret utelamnas
+    # helt, vilket ar vad pumpen gor -- inte "0 grader inne".
+    31018: 39.0,    # berknad framledning
+    31026: 112,     # drifttid tillskott
+    31028: 0.0,     # tillskott just nu, kW
+    31029: 30,      # prioritet -> "Heat"
+    31047: 43,      # kompressorfrekvens
+    31079: 0,       # extra varmvatten, status
+    31088: 18422,   # drifttid kompressor
+    31092: 2611,    # drifttid varmvatten
+    31535: 9741,    # kompressorstarter
+    31975: 30,      # flaktvarvtal
+    31976: 0,       # larmnummer
+    32134: 30,      # franluftsflakt
+    32196: 0,       # larm av klass 1 -> "No alarm"
+    40012: -142,    # gradminuter, enhet DM i kartan
+    40020: -1,
+    40027: 0,       # kurva 0 = egen kurva
+    40031: 2,       # varmeoffset
     40035: 20, 40039: 55, 40185: 17, 40167: 1, 40094: 60,
-    40057: 1, 40064: 47, 40063: 52, 40065: 42, 40062: 55, 40067: 14, 40077: 5,
-    40103: 6.0, 40181: 1, 40186: 15, 40189: 4, 40188: 6,
+    40040: 20, 40041: 21, 40042: 26, 40043: 32,
+    40044: 37, 40045: 42, 40046: 46,
+    40047: 0, 40048: 0,
+    40057: 1,       # varmvattenkomfort -> "Medium"
+    40062: 55, 40063: 52, 40064: 47, 40065: 42,
+    40067: 14,      # periodisk hojning, enhet "days" i kartan
+    40077: 5,
+    40103: 6.0, 40181: 1, 40186: 15, 40188: 6, 40189: 4,
+    40105: 0,       # ventilationslage: normal
+    # Flaktprocent per lage. Lagena ar INTE ordnade lagt till hogt: lage 1 ar
+    # 0 %, vilket ar precis den vag appen medvetet lagger en varning framfor.
+    40110: 30, 40109: 0, 40108: 40, 40107: 55, 40106: 70,
     40203: 0, 40207: 21, 40211: 2,
-    40020: -1, 40228: 0, 40229: 24, 40012: -142, 40182: 1,
+    40226: 0,       # extra varmvatten, minuter kvar
+    40228: 0, 40229: 24, 40182: 1,
 }
-# Uppmatt pa agarens egen S735. P1-P3 ar alla 45: kurvan ar platt fran -30 till
-# -10 fast taket ligger pa 58, och P7 (15) ligger under min framledning (26).
-OWNER_VALUES = {
-    40027: 0, 40031: -1, 40046: 45, 40045: 45, 40044: 45, 40043: 37, 40042: 33,
-    40041: 23, 40040: 15, 40047: -2, 40048: 3,
+
+#: Uppmatt pa agarens egen S735. P1-P3 ar alla 45: kurvan ar platt fran -30 till
+#: -10 fast taket ligger pa 58, och P7 (15) ligger under min framledning (26).
+OWNER = {
+    40027: 0, 40031: -1,
+    40046: 45, 40045: 45, 40044: 45, 40043: 37, 40042: 33, 40041: 23, 40040: 15,
+    40047: -2, 40048: 3,
     40035: 26, 40039: 58, 40185: 23,
 }
 
-SETTING_UNITS = {40031: "", 40035: "°C", 40039: "°C", 40185: "°C", 40103: "kW",
-                 40207: "°C", 40229: "°C", 40012: "GM", 40094: "min", 40067: "dygn"}
-SETTING_OPTIONS = {
-    40057: [["0", "Small"], ["1", "Medium"], ["2", "Large"], ["3", "Smart control"]],
-    40181: [["0", "Nej"], ["1", "Ja"]],
-    40182: [["0", "Nej"], ["1", "Ja"]],
-    40203: [["0", "Av"], ["1", "På"]],
-    40228: [["0", "Av"], ["1", "På"]],
-}
+#: Vilket klimatsystem huset har. Styr vantetiden advisor raknar med, och den
+#: ska inte vara samma i alla lagen -- 36 timmars kalibreringsforslag mot ett
+#: dygns kurvandring ar hela poangen med att appen valjer den langsta.
+EMITTERS = {"quiet": "mixed"}
 
 
-def hour_iso(dt: datetime) -> str:
-    return dt.replace(minute=0, second=0, microsecond=0).astimezone().isoformat()
-
-
-def build_settings(mode: str = "full") -> list:
-    values = dict(SETTING_VALUES)
+def pump_values(mode: str) -> dict:
+    v = dict(PUMP)
     if mode == "curve":
-        values.update(OWNER_VALUES)
-    out = []
-    for g in nsettings.GROUPS:
-        rows = []
-        for address, label, why in g["registers"]:
-            if address not in values:
+        v.update(OWNER)
+    if mode in ("full", "fallback"):
+        v[31976] = 175          # larmnummer
+        v[32196] = 1            # -> "Alarm"
+    if mode == "full":
+        v[40226] = 27           # extra varmvatten pagar: ett kakel till
+    if mode == "quiet":
+        v[40057] = 4            # -> "Smart Control"
+    return v
+
+
+class FakePump:
+    """Samma yta mot advisor/settings som nibelokal.pump.Pump har.
+
+    read_many kodar och avkodar varje varde genom registret, sa mappade
+    register kommer ut som de strangar kartan sager och skalfaktorerna
+    tillampas -- det ar skillnaden mellan att testa appen och att testa sin
+    egen fantasi om pumpen.
+    """
+
+    host = "192.168.1.40"
+    port = 502
+
+    def __init__(self, mode: str):
+        self.registry = REGISTRY
+        self.values = pump_values(mode)
+
+    def _read(self, address: int):
+        reg = self.registry.get(address)
+        return reg.decode(reg.encode(self.values[address]))
+
+    def read(self, address: int):
+        return self._read(address)
+
+    def read_many(self, addresses) -> dict:
+        out = {}
+        for a in addresses:
+            if self.registry.get(a) is None or a not in self.values:
                 continue
-            rows.append({
-                "address": address,
-                "label": label,
-                "why": why,
-                "value": values[address],
-                "unit": SETTING_UNITS.get(address, "°C" if 40040 <= address <= 40048 else ""),
-                "min": 0 if address not in (40031, 40020, 40012, 40047, 40048) else -10,
-                "max": 100 if address != 40012 else 3000,
-                "default": None,
-                "options": SETTING_OPTIONS.get(address),
-                "tier": safety.tier(address),
-            })
-        if rows:
-            out.append({"key": g["key"], "title": g["title"], "intro": g["intro"], "rows": rows})
+            out[a] = {"value": self._read(a)}
+        return out
+
+    def missing(self) -> list:
+        return []
+
+    def fan_speeds(self) -> dict:
+        data = self.read_many(list(FAN_SPEED_REGISTER.values()))
+        return {mode: data.get(addr, {}).get("value")
+                for mode, addr in FAN_SPEED_REGISTER.items()}
+
+
+class FakeStore:
+    """Bara det advisor fragar efter: hur langt tillbaka historiken racker."""
+
+    def span(self):
+        return (NOW - 30 * 86400, NOW)
+
+
+def status_registers(pump: FakePump) -> list:
+    """Samma rader som server.py bygger i /api/status: titel och enhet ur
+    kartan, alltsa engelska bada tva, och vardet som pumpen svarade."""
+    data = pump.read_many(DASHBOARD)
+    out = []
+    for address, row in sorted(data.items()):
+        reg = pump.registry.get(address)
+        out.append({"address": address,
+                    "title": reg.title if reg else str(address),
+                    "unit": reg.unit if reg else "",
+                    "value": row.get("value"),
+                    "error": row.get("error")})
     return out
 
 
@@ -156,8 +246,12 @@ def history(address: int, hours: int) -> list:
     return pts
 
 
+def hour_iso(dt: datetime) -> str:
+    return dt.replace(minute=0, second=0, microsecond=0).astimezone().isoformat()
+
+
 # --------------------------------------------------------------------------
-# pahittad integrationsdata
+# integrationer
 # --------------------------------------------------------------------------
 UNREACH = {
     "indoor": "Homey svarade inte inom 5 sekunder (192.168.1.20).",
@@ -167,12 +261,25 @@ UNREACH = {
     "autotune": "Kalibreringen kunde inte lasa historiken.",
 }
 
+#: Vad servern svarar nar en provider inte gick att bygga. Ordagrant serverns
+#: egen _not_started -- det ar den meningen appen ska rendera.
+WATCHER_WHY = ("attempt to write a readonly database: historiken ligger pa en "
+               "disk som inte gar att skriva till")
+
+
+def not_started(feature: str, why: str) -> dict:
+    return {"ok": False,
+            "error": "%s kunde inte startas: %s. Kontrollera inställningarna i "
+                     "config.yaml." % (feature, why)}
+
 
 def indoor(mode: str) -> dict:
     if mode == "unreach":
         return {"ok": False, "error": UNREACH["indoor"]}
-    if mode == "off":
-        return {"ok": False, "error": "Homey är inte konfigurerad (homey_host saknas i config.yaml)."}
+    if mode in ("off", "fallback"):
+        # Homey-objektet byggs alltid; det ar det som svarar nar inget star i
+        # config.yaml, och meningen kommer darfor fran homey.py sjalv.
+        return Homey.from_config({}).snapshot()
     sensors = [
         {"id": "a1", "name": "Vardagsrum", "zone": "Nere", "value": 20.9, "age_minutes": 3, "stale": False},
         {"id": "a2", "name": "Kök", "zone": "Nere", "value": 20.7, "age_minutes": 6, "stale": False},
@@ -200,8 +307,8 @@ def indoor(mode: str) -> dict:
 def weather(mode: str) -> dict:
     if mode == "unreach":
         return {"ok": False, "error": UNREACH["weather"]}
-    if mode == "off":
-        return {"ok": False, "error": "Ingen plats angiven — sätt weather_lat och weather_lon i config.yaml."}
+    if mode in ("off", "fallback"):
+        return Weather({}).snapshot()
     start = datetime.now().replace(minute=0, second=0, microsecond=0)
     hourly = []
     for i in range(48):
@@ -244,76 +351,53 @@ def weather(mode: str) -> dict:
     return out
 
 
-def spot(mode: str) -> dict:
-    if mode == "unreach":
-        return {"ok": False, "error": UNREACH["spot"],
-                "prices": {"ok": False, "error": UNREACH["spot"]},
-                "plan": {"ok": False, "error": "Utan priser finns ingen plan."}}
-    if mode == "off":
-        return {"prices": {"ok": False,
-                           "error": "Ingen Tibber-token i config.yaml, så priserna kan inte hämtas."},
-                "plan": {"ok": False, "error": "Utan priser finns ingen plan."}}
+#: Tibber-formade prisrader, som de kommer ur GraphQL-svaret. De gar sedan
+#: genom spot.Tibber._build och spot.Plan, sa banden, statistiken och planens
+#: svenska mening ar serverns egna och inte handskrivna har.
+def _tibber_rows(flat: bool) -> tuple[list, list]:
     start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    flat = mode == "quiet"
-    hours = []
-    for i in range(48 if not flat else 24):
+    today, tomorrow = [], []
+    span = 24 if flat else 48
+    for i in range(span):
         t = start + timedelta(hours=i)
         if flat:
             total = 0.62 + 0.02 * math.sin(i / 3.0)
         else:
-            total = 0.35 + 0.95 * max(0.0, math.sin((t.hour - 5) / 24.0 * 2 * math.pi)) \
-                    + (1.15 if t.hour in (7, 8, 17, 18, 19) else 0.0) + 0.05 * (i // 24)
-        hours.append({"starts_at": hour_iso(t), "day": t.date().isoformat(),
-                      "total": round(total, 3), "level": "NORMAL", "rank": 0, "band": "normal"})
-    ordered = sorted(hours, key=lambda h: h["total"])
-    for rank, h in enumerate(ordered):
-        h["rank"] = rank
-        if not flat:
-            share = rank / max(1, len(ordered) - 1)
-            h["band"] = "billig" if share < 0.3 else ("dyr" if share > 0.75 else "normal")
-            h["level"] = {"billig": "CHEAP", "normal": "NORMAL", "dyr": "EXPENSIVE"}[h["band"]]
+            total = (0.35
+                     + 0.95 * max(0.0, math.sin((t.hour - 5) / 24.0 * 2 * math.pi))
+                     + (1.15 if t.hour in (7, 8, 17, 18, 19) else 0.0)
+                     + 0.05 * (i // 24))
+        row = {"startsAt": hour_iso(t), "total": round(total, 3), "level": "NORMAL"}
+        (today if i < 24 else tomorrow).append(row)
+    return today, tomorrow
+
+
+def spot(mode: str) -> dict:
+    tibber = nspot.Tibber({"tibber_token": "stub-token"})
+    plan = nspot.Plan({})
+    if mode == "unreach":
+        prices = {"ok": False, "configured": True, "at": NOW, "error": UNREACH["spot"]}
+        return {"ok": False, "prices": prices, "plan": plan.build(prices),
+                "error": UNREACH["spot"]}
+    if mode in ("off", "fallback"):
+        prices = nspot.Tibber({}).snapshot()
+        return {"ok": False, "prices": prices, "plan": plan.build(prices),
+                "error": prices.get("error")}
+    today, tomorrow = _tibber_rows(mode == "quiet")
     now_key = hour_iso(datetime.now())
-    now_row = next((h for h in hours if h["starts_at"] == now_key), hours[0])
-    totals = [h["total"] for h in hours]
-    prices = {
-        "ok": True, "currency": "SEK",
-        "now": {"total": now_row["total"], "level": now_row["level"],
-                "starts_at": now_row["starts_at"], "band": now_row["band"]},
-        "hours": hours,
-        "stats": {"min": round(min(totals), 3), "max": round(max(totals), 3),
-                  "mean": round(sum(totals) / len(totals), 3),
-                  "median": round(sorted(totals)[len(totals) // 2], 3),
-                  "spread": round(max(totals) - min(totals), 3), "flat": flat},
-        "has_tomorrow": not flat,
-    }
-    if flat:
-        return {"prices": prices,
-                "plan": {"ok": True, "advisory": True, "register": 40031, "hours": [], "days": [],
-                         "summary": "Prisskillnaden i dag är 4 öre. Det är för lite för att "
-                                    "vara värt att flytta värmen — planen gör ingenting."}}
-    plan_hours = []
-    for h in hours[:24]:
-        hh = datetime.fromisoformat(h["starts_at"]).hour
-        if hh in (2, 3, 4):
-            plan_hours.append({"starts_at": h["starts_at"], "offset_delta": 1,
-                               "why": "Nattens billigaste timmar — ta värmen här i stället."})
-        elif hh in (17, 18, 19):
-            plan_hours.append({"starts_at": h["starts_at"], "offset_delta": -1,
-                               "why": "Dygnets dyraste timmar. Huset har redan värmen i sig."})
-        else:
-            plan_hours.append({"starts_at": h["starts_at"], "offset_delta": 0, "why": ""})
-    return {"prices": prices,
-            "plan": {"ok": True, "advisory": True, "register": 40031, "hours": plan_hours,
-                     "days": [{"day": start.date().isoformat(), "net": 0, "spread": 1.94,
-                               "pairs": 3, "reason": "Tre par: natten mot kvällen."}],
-                     "summary": "Tre timmar upp i natt, tre timmar ner i kväll. Summan är noll."}}
+    current = next((r for r in today if r["startsAt"] == now_key), today[0])
+    info = {"today": today, "tomorrow": tomorrow,
+            "current": dict(current, currency="SEK")}
+    prices = tibber._build(info, NOW)
+    return {"ok": True, "prices": prices, "plan": plan.build(prices, NOW)}
 
 
 def alarms(mode: str) -> dict:
     if mode == "unreach":
         return {"ok": False, "error": UNREACH["alarms"]}
-    if mode == "off":
-        return {"ok": False, "error": "Larmbevakningen är inte påslagen i config.yaml."}
+    if mode == "fallback":
+        # Det enda satt features.alarms blir falsk pa en riktig server.
+        return not_started("Larmbevakningen", WATCHER_WHY)
     hist = [
         {"code": 163, "text": "Kommunikationsfel med rumsenhet", "severity": "warning",
          "action": "Kontrollera kabeln till rumsenheten.", "known": True,
@@ -325,17 +409,24 @@ def alarms(mode: str) -> dict:
          "action": "Slå upp koden på pumpens display.", "known": False,
          "since": int(NOW - 86400 * 40)},
     ]
+    if mode == "off":
+        # Larmbevakningen behover inga nycklar och ar darfor pa: registret
+        # pollas anda. En nyinstallation har bara ingen historik an, och inga
+        # notiser eftersom Pushover inte ar ifyllt.
+        return {"ok": True, "active": [], "history": [], "notify": False,
+                "notify_error": None, "last_error": None}
     if mode == "quiet":
         # Nycklarna finns, men Pushover avvisade dem: "notiser på" och "notiserna
         # når inte fram" är båda sanna samtidigt, och appen ska säga båda.
-        return {"active": [], "history": hist, "notify": True,
+        return {"ok": True, "active": [], "history": hist, "notify": True,
                 "notify_error": "Pushover avvisade token (401). Kontrollera "
                                 "pushover_token och pushover_user.",
                 "last_error": None}
     if mode != "full":
-        return {"active": [], "history": hist, "notify": False,
+        return {"ok": True, "active": [], "history": hist, "notify": False,
                 "notify_error": None, "last_error": None}
     return {
+        "ok": True,
         "active": [
             {"code": 175, "text": "Kompressorn blockerad av högt kondensortryck", "severity": "alarm",
              "action": "Kontrollera att framledningen kommer fram: stängda radiatorventiler eller "
@@ -352,8 +443,9 @@ def alarms(mode: str) -> dict:
 def autotune(mode: str) -> dict:
     if mode == "unreach":
         return {"ok": False, "error": UNREACH["autotune"]}
-    if mode == "off":
-        return {"ok": False, "error": "Kalibreringen är avstängd i config.yaml."}
+    if mode in ("off", "fallback"):
+        return {"ok": False, "error": "Kalibreringen behöver en inomhustemperatur att "
+                                      "jämföra kurvan mot. Sätt homey_host i config.yaml."}
     if mode == "quiet":
         return {
             "ok": True, "state": "insufficient",
@@ -396,6 +488,10 @@ class Stub(SimpleHTTPRequestHandler):
     #: Sekunder att sova innan varje svar. "slow" satter den; da ska appen visa
     #: skelett och inte krascha, i stallet for att blinka fram tomma kort.
     delay = 0.0
+    #: Extra fordrojning bara pa /api/alarms, och sedan ett fel. Det ar den
+    #: kalla starten: pumpen svarar, larmbevakningen har inte svarat an.
+    alarm_delay = 0.0
+    alarm_status = 200
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -411,12 +507,16 @@ class Stub(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except BrokenPipeError:                            # fliken stangdes
+            pass
 
     def do_POST(self):                                     # noqa: N802
         route = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}")
+        pump = FakePump(self.mode)
         if route.path == "/api/write":
             if "changes" in body:
                 return self._json({"changes": [
@@ -427,8 +527,11 @@ class Stub(SimpleHTTPRequestHandler):
         if route.path == "/api/hotwater":
             return self._json({"minutes": body.get("minutes", 0), "off": body.get("off", False)})
         if route.path == "/api/ventilation":
-            return self._json({"mode": body.get("mode", 0), "percent": 55,
-                               "normal_percent": 30, "hours": body.get("hours", 3)})
+            speeds = pump.fan_speeds()
+            mode = int(body.get("mode", 0) or 0)
+            return self._json({"mode": mode, "percent": speeds.get(mode),
+                               "normal_percent": speeds.get(0),
+                               "hours": body.get("hours", 3)})
         if route.path == "/api/alarms/test":
             if self.mode == "quiet":
                 return self._json({"ok": False, "sent": False, "notify": True,
@@ -444,21 +547,30 @@ class Stub(SimpleHTTPRequestHandler):
         if not path.startswith("/api/"):
             return super().do_GET()
         m = self.mode
-        # "unreach" ar konfigurerat men nabart av ingenting: features ar sanna,
-        # svaren ar ok:false. Det ar skillnaden mellan avstangt och trasigt.
+        pump = FakePump(m)
+        store = FakeStore()
+        emitters = EMITTERS.get(m, "radiators")
+        # "off" och "fallback" ar bada okonfigurerade -- men larmbevakningen
+        # behover inget att konfigurera, sa den star pa i alla lagen utom det
+        # dar dess konstruktor kastade.
         on = m not in ("off", "fallback")
+        alarms_on = m != "fallback"
 
         if path == "/api/status":
             return self._json({
-                "pump": {"host": "192.168.1.40", "port": 502},
-                "register_map": "S735 (stub)",
-                "polled_at": int(NOW - 20),
+                "pump": {"host": pump.host, "port": pump.port},
+                "register_map": REGISTRY.source,
+                # Pollern gar; svaret ska darfor vara farskt varje gang och
+                # inte aldras genom testkorningen -- "4 min sedan" i rubriken
+                # ar en egenskap hos stubben, inte hos appen.
+                "polled_at": int(time.time() - 20),
                 "poll_error": None,
+                "store_error": None,
+                "missing_registers": [],
                 "features": {"indoor": on, "weather": on, "spot": on,
-                             "alarms": on, "notify": m == "full", "autotune": on},
-                # Sammanfattningarna som riktiga /api/status ocksa skickar med.
-                # Larmsiffran ar den appen anvander for att slippa hamta hela
-                # larmlistan varje varv.
+                             "alarms": alarms_on,
+                             "notify": m == "full" or m == "quiet",
+                             "autotune": on},
                 "indoor": ({"ok": True, "configured": True, "average": 21.1,
                             "at": int(NOW), "sensors": 5, "stale": 1, "error": None}
                            if on else {"ok": False, "configured": False, "average": None,
@@ -467,95 +579,29 @@ class Stub(SimpleHTTPRequestHandler):
                            "code": 175 if m == "full" else None,
                            "text": "", "severity": "alarm" if m == "full" else None,
                            "notify": m == "full", "error": None}
-                          if on else {"ok": False, "active": 0, "code": None, "text": "",
-                                      "severity": None, "notify": False, "error": None}),
-                "registers": [
-                    {"address": a, "title": t, "unit": u,
-                     "value": (175 if m in ("full", "fallback") else 0) if a == 31976 else v,
-                     "error": None}
-                    for a, t, u, v in REGISTERS],
+                          if alarms_on else {"ok": False, "active": 0, "code": None, "text": "",
+                                             "severity": None, "notify": False,
+                                             "error": WATCHER_WHY}),
+                "registers": status_registers(pump),
             })
         if path == "/api/heating":
             if m == "heat502":
                 return self._json({"error": "Pumpen svarar inte pa 192.168.1.40:502 "
                                             "(anslutningen nekades)."}, 502)
-            if m == "curve":
-                return self._json({
-                    "curve": 0, "offset": -1, "min_supply": 26, "max_supply": 58,
-                    "room_setpoint": 21, "room_temp": None, "outdoor": -4.2, "supply": 38.4,
-                    "return": 33.1, "degree_minutes": -142, "additional_heat_kw": 0.0,
-                    "calculated_supply": 45.0, "priority": "V\u00e4rme",
-                    "own_curve": [45, 45, 45, 37, 33, 23, 15],
-                    "has_room_sensor": False, "uses_own_curve": True,
-                    "emitters": "radiators", "emitters_name": "radiatorer",
-                    "wait": "ett dygn",
-                    "warnings": [
-                        "Ingen rumsgivare svarar (BT50). Rumsb\u00f6rv\u00e4rdet går att skriva men "
-                        "pumpen har inget att reglera mot.",
-                    ],
-                    "observations": [
-                        "Kurvan står på 0, vilket betyder egen kurva: pumpen f\u00f6ljer dina egna "
-                        "punkter (\u221230 \u00b0C ute \u2192 45 \u00b0C fram, \u221220 \u2192 45, \u221210 \u2192 45, 0 \u2192 37, "
-                        "+10 \u2192 33) i st\u00e4llet f\u00f6r en av de numrerade kurvorna.",
-                    ],
-                })
-            return self._json({
-                "curve": 0, "offset": 2, "min_supply": 20, "max_supply": 55,
-                "room_setpoint": 21, "room_temp": None, "outdoor": -4.2, "supply": 38.4,
-                "return": 33.1, "degree_minutes": -142, "additional_heat_kw": 0.0,
-                "calculated_supply": 39.0, "priority": "Värme",
-                "own_curve": [46, 42, 37, 32, 26, 21, 20],
-                "has_room_sensor": False, "uses_own_curve": True,
-                "emitters": "mixed", "emitters_name": "golvvärme och radiatorer",
-                "wait": "ett dygn",
-                "warnings": [
-                    "Ingen rumsgivare svarar (BT50). Rumsbörvärdet går att skriva men pumpen har "
-                    "inget att reglera mot, så det påverkar troligen ingenting.",
-                    "Framledningen ligger nära taket (55 °C). Ytterligare höjningar av kurvan "
-                    "gör ingenting förrän taket höjs.",
-                ],
-                "observations": [
-                    "Kurvan står på 0, vilket betyder egen kurva: pumpen följer dina egna punkter "
-                    "(−30 °C ute → 46 °C fram, −20 → 42, −10 → 37, 0 → 32, +10 → 26) i stället för "
-                    "en av de numrerade kurvorna.",
-                    "Huset har både golvvärme och radiatorer på samma krets, vilket alltid är en "
-                    "kompromiss: golvet vill ha lågt och jämnt, radiatorerna högt och snabbt.",
-                ],
-            })
+            return self._json(advisor.diagnose(pump, store, emitters))
         if path == "/api/advice":
-            if m == "curve" and q.get("when", ["always"])[0] == "cold_outside":
-                return self._json({
-                    "observations": [],
-                    "warnings": [],
-                    "suggestions": [
-                        {"address": 40044, "title": "Egen kurva, punkt P3 (\u221210 \u00b0C ute)",
-                         "current": 45, "proposed": 47, "unit": "\u00b0C", "group": "own_curve",
-                         "why": "Du k\u00f6r egen kurva, så det \u00e4r punkterna som formar den. P3 \u00e4r "
-                                "punkten f\u00f6r \u221210 \u00b0C ute, alltså den som g\u00e4ller n\u00e4r det \u00e4r kallt. "
-                                "2 grader framledning d\u00e4r \u00e4ndrar v\u00e4rmen i just det v\u00e4dret, utan "
-                                "att r\u00f6ra resten av kurvan.",
-                         "confirm_required": True},
-                        {"address": 40043, "title": "Egen kurva, punkt P4 (+0 \u00b0C ute)",
-                         "current": 37, "proposed": 39, "unit": "\u00b0C", "group": "own_curve",
-                         "why": "P4 \u00e4r den andra punkten som br\u00e4ckar dagens utetemperatur.",
-                         "confirm_required": True},
-                    ],
-                    "blocked": "", "wait": "ett dygn",
-                })
-            return self._json({
-                "observations": [],
-                "warnings": ["Ingen rumsgivare, så förslaget bygger på kurvan och din egen känsla."],
-                "suggestions": [{"address": 40031, "title": "Värmeoffset", "current": 2,
-                                 "proposed": 3, "unit": "", "group": "warmer",
-                                 "why": "Ett steg upp lyfter hela kurvan ungefär en grad inne. "
-                                        "Vänta ett dygn innan du bedömer.",
-                                 "confirm_required": True}],
-                "blocked": "", "wait": "ett dygn",
-            })
+            return self._json(advisor.advise(
+                pump,
+                q.get("feeling", ["warmer"])[0],
+                q.get("when", ["always"])[0],
+                store,
+                emitters,
+            ).as_dict())
         if path == "/api/settings":
-            return self._json({"groups": build_settings(m)})
+            values = pump.read_many(nsettings.ADDRESSES)
+            return self._json({"groups": nsettings.build(pump, values)})
         if path == "/api/fan":
-            return self._json({"speeds": {"0": 30, "1": 0, "2": 40, "3": 55, "4": 70}})
+            return self._json({"speeds": pump.fan_speeds()})
         if path == "/api/history":
             addr = int(q.get("address", ["30009"])[0])
             hrs = int(q.get("hours", ["24"])[0])
@@ -576,14 +622,21 @@ class Stub(SimpleHTTPRequestHandler):
                 "auto": True, "auto_every_hours": 24,
             })
         if path == "/api/indoor":
-            if m == "unreach":
-                return self._json(indoor(m), 502)
+            # HTTP 200 aven nar Homey inte svarar. Servern gor likadant: en
+            # integration som inte gar att na ar inte ett serverfel, och en
+            # 502 har lade dessutom ett rott "Failed to load resource" i
+            # webblasarens konsol -- ett fel appen inte hade.
             return self._json(indoor(m))
         if path == "/api/weather":
             return self._json(weather(m))
         if path == "/api/spot":
             return self._json(spot(m))
         if path == "/api/alarms":
+            if self.alarm_delay:
+                time.sleep(self.alarm_delay)
+            if self.alarm_status != 200:
+                return self._json({"error": "Larmbevakningen svarar inte."},
+                                  self.alarm_status)
             return self._json(alarms(m))
         if path == "/api/autotune":
             return self._json(autotune(m))
@@ -598,8 +651,18 @@ def free_port() -> int:
     return port
 
 
-def start(mode: str, port: int, delay: float = 0.0) -> ThreadingHTTPServer:
-    handler = type("StubMode", (Stub,), {"mode": mode, "delay": delay})
+#: mode -> (delay pa allt, extra delay pa /api/alarms, status pa /api/alarms)
+TIMING = {
+    "slow": (1.1, 0.0, 200),
+    "alarmdown": (0.0, 2.5, 502),
+}
+
+
+def start(mode: str, port: int) -> ThreadingHTTPServer:
+    delay, alarm_delay, alarm_status = TIMING.get(mode, (0.0, 0.0, 200))
+    handler = type("StubMode", (Stub,), {"mode": mode, "delay": delay,
+                                         "alarm_delay": alarm_delay,
+                                         "alarm_status": alarm_status})
     srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
@@ -617,9 +680,6 @@ def check(ok, msg):
         fel.append(msg)
 
 
-# Flikens namn och vyns rubrik ar samma ord. Elpriset har en egen flik nar det
-# ar konfigurerat och ar borta nar det inte ar det, sa antalet flikar ar 4 eller
-# 5 -- inte alltid 5.
 TABS = [("now", "Just nu"), ("heat", "Värme"), ("price", "Elpris"),
         ("water", "Vatten & luft"), ("hist", "Historik")]
 
@@ -631,6 +691,110 @@ def shoot(page, out: pathlib.Path, name: str):
 
 def visible_tabs(page):
     return [b for b in page.locator("nav button").all() if b.is_visible()]
+
+
+def all_values(page) -> dict:
+    """Vardekolumnen i "Alla avlasta varden", per registernummer.
+
+    Bara vardet: radens undertext ar registrets egen titel ur kartan, och den
+    ar engelsk av samma skal som registernumret ar ett nummer -- det ar
+    registrets identitet, inte en mening till hushallet.
+    """
+    return page.evaluate("""() => Object.fromEntries(
+      [...document.querySelectorAll('#all tr')].map(tr => [
+        (tr.children[0].querySelector('.addr') || {textContent: ''})
+          .textContent.split('·')[0].trim(),
+        tr.children[1].textContent.trim()]))""")
+
+
+def tile_map(page) -> dict:
+    # Mjuka bindestreck bort: kakelrubriken bar ett i sammansattningsfogen sa
+    # att "Varmvattenkomfort" bryts som en svensk lasare skulle bryta det, och
+    # det tecknet ar inte en del av ordet.
+    return page.evaluate("""() => Object.fromEntries(
+      [...document.querySelectorAll('#tiles .tile')].map(t => [
+        t.querySelector('.k').textContent.replace(/\u00AD/g, '').trim(),
+        t.querySelector('.v').textContent.trim()]))""")
+
+
+def setrow_value(page, address) -> str | None:
+    return page.evaluate("""a => {
+      const b = document.querySelector('[data-edit="' + a + '"]');
+      return b ? b.closest('.setrow').querySelector('.val').textContent.trim() : null;
+    }""", str(address))
+
+
+#: Ord som bara kan komma fran registerkartan, alltsa fran pumpen. Star nagot
+#: av dem i en vardekolumn har appen slutat oversatta.
+ENGLISH_VALUES = ["No alarm", "Alarm", "Heat", "Hot Water", "Cooling",
+                  "Small", "Medium", "Large", "DM", "days"]
+
+
+def pump_words(page, mode: str):
+    """Defekt 1 och 7: pumpens egna ord, som de nar skarmen."""
+    vals = all_values(page)
+    leaks = {a: v for a, v in vals.items()
+             if any(w in v for w in ENGLISH_VALUES)}
+    check(not leaks, "inga engelska registervarden i tabellen (%s)" % leaks)
+
+    check(vals.get("31029") == "värme",
+          "prioriteringen star pa svenska: %r" % vals.get("31029"))
+    check(vals.get("32196") == ("larm" if mode == "full" else "inget larm"),
+          "klass 1-flaggan star pa svenska: %r" % vals.get("32196"))
+    check("»" not in (vals.get("31029") or "") and "»" not in (vals.get("32196") or ""),
+          "ett ord appen kan oversatta citeras inte")
+    hw = vals.get("40057") or ""
+    check(hw in ("Medel", "Smart Control"),
+          "varmvattenkomforten visas som ord, inte som '–' eller nyckel: %r" % hw)
+    gm = vals.get("40012") or ""
+    check("GM" in gm and "DM" not in gm, "gradminuterna far svensk enhet: %r" % gm)
+    check((vals.get("40067") or "").endswith("dygn"),
+          "intervallet raknas i dygn, inte 'days': %r" % vals.get("40067"))
+
+    tiles = tile_map(page)
+    check(tiles.get("Varmvattenkomfort") in ("Medel", "Smart Control"),
+          "kaklet sager samma sak: %r" % tiles.get("Varmvattenkomfort"))
+
+    # Regeln sjalv, provad direkt: ett mappat ord ar aldrig sant i sig.
+    rules = page.evaluate("""() => ({
+      noAlarm: flagOn('No alarm'), alarm: flagOn('Alarm'), zero: flagOn(0),
+      one: flagOn(1), rubbish: flagOn('Vilostäge'),
+      num: regNum('No alarm'), unknown: mappedHtml(31029, 'Silent mode'),
+      dm: unitSv('DM'), days: unitSv('days'), c: unitSv('°C')})""")
+    check(rules["noAlarm"] is False and rules["alarm"] is True
+          and rules["zero"] is False and rules["one"] is True,
+          "flagOn tolkar bade talet och det mappade ordet (%s)" % rules)
+    check(rules["rubbish"] is False, "ett okant ord ar inte ett larm")
+    check(rules["num"] is None, "regNum gor inte tal av ett ord")
+    check("asis" in rules["unknown"], "ett ord utan svensk oversattning markeras som citat")
+    check(rules["dm"] == "GM" and rules["days"] == "dygn" and rules["c"] == "°C",
+          "enhetstabellen oversatter bara det den kanner igen (%s)" % rules)
+
+
+def tiles_twelve(page, mode: str):
+    """Defekt 6: tolv rutor, och urvalet ar bestamt -- inte avhugget."""
+    tiles = tile_map(page)
+    check(len(tiles) == 12, "tolv kakel pa Just nu (%d)" % len(tiles))
+    if mode == "full":
+        check("Extra varmvatten" in tiles,
+              "en pagaende boost ligger forst (%s)" % list(tiles)[:2])
+        check("Drifttid" not in tiles,
+              "och tar da platsen fran den sista rutan, avsiktligt")
+    else:
+        check("Drifttid" in tiles, "Drifttid far plats nar ingen boost pagar")
+
+
+def settings_headings(page):
+    """Defekt 3: varje grupp har sin rubrik."""
+    heads = page.locator("#settings .setgroup h3").all_inner_texts()
+    groups = page.locator("#settings .setgroup").count()
+    check(groups == len(heads) and groups >= 5,
+          "varje installningsgrupp har en rubrik (%d grupper, %d rubriker)"
+          % (groups, len(heads)))
+    for want in ("Gränser och säsong", "Tillskott", "Rumsgivare", "Övrigt"):
+        check(any(want in h for h in heads), "rubriken %r finns (%s)" % (want, heads))
+    check(page.locator("#setWater .setgroup h3").count() == 0,
+          "varmvattnet star pa sin egen flik och behover ingen rubrik dar")
 
 
 def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
@@ -655,9 +819,18 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
               "fliken %s heter samma sak som vyn" % name)
         shoot(page, out, "%s-%s-%s" % (mode, label, name))
 
+    page.locator('nav button[data-view="now"]').click()
+    page.wait_for_timeout(700)
+    pump_words(page, mode)
+    tiles_twelve(page, mode)
+
     page.locator("#goSettings").click()
     page.wait_for_timeout(2500)
     check(page.locator("#viewTitle").inner_text() == "Inställningar", "instaellningsvyn")
+    settings_headings(page)
+    body = page.locator("body").inner_text()
+    check("timmer" not in body, "ingen 'timmer' pa sidan")
+    check("var 24:e timme" in body, "backupintervallet star pa svenska")
     shoot(page, out, "%s-%s-set" % (mode, label))
 
     # -- avancerat: kurvan som bild, bakom en hopfalld lucka ---------------
@@ -666,10 +839,14 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     check(page.locator("#advCard").is_visible(), "avancerat-kortet finns pa Varme")
     check(not page.locator("#advBox").evaluate("e => e.open"),
           "avancerat ar hopfallt fran start")
+    sumtxt = page.locator("#advSum").inner_text().strip()
+    check(sumtxt.startswith("Öppna"), "luckan sager vad ett klick gor: %r" % sumtxt)
     check(not page.locator("#advBody .ptrow").first.is_visible(),
           "punkterna syns inte forran man oppnar")
     page.locator("#advSum").click()
     page.wait_for_timeout(700)
+    check(page.locator("#advSum").inner_text().strip() == "Avancerade värmeinställningar",
+          "och bara rubriken nar den redan ar oppen: %r" % page.locator("#advSum").inner_text())
     pts = page.locator('#advBody .ptrow[data-pt]').count()
     check(pts == 7, "sju punkter i listan (%d)" % pts)
     check(page.locator("#curveChart").count() == 1, "kurvan ritas som bild")
@@ -690,14 +867,18 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     vis = lambda sel: page.locator(sel).is_visible()          # noqa: E731
     if mode == "off":
         for sel in ["#indoorCard", "#weatherCard", "#spotCard", "#tuneCard",
-                    "#alarmHistWrap", "#alarmBanner"]:
+                    "#alarmBanner"]:
             check(not vis(sel), "%s renderas inte alls" % sel)
+        check(not vis("#alarmHistWrap"),
+              "larmbevakningen ar pa, men en nyinstallation har ingen historik an")
         page.locator("#goSettings").click()
         page.wait_for_timeout(1200)
         check(vis("#featHint"), "tipset om config.yaml finns under Installningar")
         txt = page.locator("#featHintList").inner_text()
         check("homey_host" in txt and "tibber_token" in txt and "weather_lat" in txt,
               "tipset namnger nycklarna")
+        check("pushover_token" in txt,
+              "och sager att det ar notiserna som saknas, inte larmbevakningen")
         check('homey_devices: "Sovrum, Vardagsrum"' in txt,
               "homey_devices star som strang, precis som config.example.yaml vill ha den")
         check("autotune_target_indoor" in txt,
@@ -705,6 +886,11 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
         check("Inget att fylla i" not in txt,
               "tipset lovar inte att kalibreringen slar pa sig sjalv")
         check(page.locator("#featHint .cfg").count() >= 3, "nycklarna visas som kod")
+        page.locator('nav button[data-view="heat"]').click()
+        page.wait_for_timeout(1000)
+        lead = page.locator("#adviceLead").inner_text()
+        check("Två källor" not in lead,
+              "utan kalibrering lovar ingressen inte tva kallor: %r" % lead[:70])
         over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
         check(over <= 1, "ingen horisontell scroll (%d px over)" % over)
         return
@@ -733,6 +919,8 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     check("48 h" not in wx and "-" not in wx.replace("−", ""),
           "inga engelska minustecken eller '48 h' i vaderkortet")
     check("i dag" in wx or "i morgon" in wx, "tidsaxeln sager vilken dag")
+    check("om två dygn" not in wx,
+          "48-timmarslagsta ar inte 'kallast om tva dygn'")
     low = page.locator("#weatherBody .metric .n").first.inner_text()
     check(low not in ("", "–"), "kommande lagsta temperatur visas: %r" % low)
 
@@ -756,6 +944,8 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
         page.wait_for_timeout(600)
     else:
         check(not vis("#alarmBanner"), "ingen larmruta nar inget larmar")
+        check("larm" not in page.locator("#freshness").inner_text().lower(),
+              "och rubrikraden sager inte larm heller")
     check(vis("#alarmHistWrap"), "larmhistoriken finns bakom en knapp")
     page.locator("#alarmHistSum").click()
     page.wait_for_timeout(400)
@@ -763,9 +953,6 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     # "information" innehaller "info", sa leta efter de engelska orden som de star.
     check("warning" not in hist_txt and "severity" not in hist_txt,
           "inga engelska allvarsgrader i larmhistoriken")
-    # Tre rader i historiken: varning, information, varning. Allvarsgraden ska
-    # sta en gang per rad, inte tva (den stod forr bade i undertexten och i
-    # kolumnen, och pa engelska bada gangerna).
     check(hist_txt.count("varning") == 2 and hist_txt.count("information") == 1,
           "allvarsgraden star pa svenska, en gang per rad (%d/%d)"
           % (hist_txt.count("varning"), hist_txt.count("information")))
@@ -792,7 +979,7 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
     check(page.locator("#spotBody .barwrap .yax span").count() == 3,
           "staplarna har en y-axel att lasa av")
     txt = page.locator("#spotBody").inner_text()
-    if mode in ("full", "curve", "slow", "heat502"):
+    if mode != "quiet":
         check(txt.count("gör ingenting av det här själv") == 1,
               "planen sager en gang att appen inte agerar sjalv")
         rows = page.locator("#spotBody .planrow").count()
@@ -835,6 +1022,9 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
               "forslaget kallar det Varmeoffset, inte 'Register 40031'")
     check("-0.6" not in ttxt and "+0.02" not in ttxt,
           "inga engelska decimalpunkter i kalibreringskortet")
+    lead = page.locator("#adviceLead").inner_text()
+    check("Två källor" in lead,
+          "med kalibreringen igang finns det tva kallor: %r" % lead[:60])
     shoot(page, out, "%s-%s-heat-nedre" % (mode, label))
 
     over = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
@@ -846,9 +1036,10 @@ def rows_flat(page):
     return "för jämnt" in t or "för lite" in t or "för liten" in t
 
 
-def register_fallback(page, url):
-    """Utan larmbevakning finns bara larmnumret i register 31976. Da ska den
-    gamla, samre rutan visas anda -- ett larm ar viktigare an snyggheten."""
+def register_fallback(page, url, out):
+    """Larmbevakningen kunde inte startas. Da finns bara larmnumret i register
+    31976, och den samre rutan ska visas anda -- ett larm ar viktigare an
+    snyggheten."""
     print("\n=== larm utan larmbevakning ===")
     page.goto(url, wait_until="networkidle")
     page.wait_for_timeout(2400)
@@ -857,9 +1048,112 @@ def register_fallback(page, url):
     check("175" in txt, "larmnumret star i rutan: %r" % txt[:60])
     check(not page.locator("#alarmHistWrap").is_visible(), "ingen larmhistorik utan bevakning")
     check(not page.locator("#indoorCard").is_visible(), "inget annat nytt renderas")
+    shoot(page, out, "fallback-registerlarm")
     page.locator('nav button[data-view="heat"]').click()
     page.wait_for_timeout(800)
     check(page.locator("#alarmBanner").is_visible(), "och det foljer med till Varme")
+
+
+def alarm_never_invented(page, url, out):
+    """Det falska larmet: 32196 svarar "No alarm", vilket ar sant i JavaScript.
+
+    Tva tillstand i ett lage. Forst den kalla starten -- /api/status har svarat,
+    /api/alarms har inte -- och sedan det permanenta: /api/alarms svarar 502.
+    I bada agde registerfallbacken larmrutan, och i bada malade den rott.
+    """
+    print("\n=== larm ur ingenting ===")
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_timeout(1300)                 # /api/alarms droejer 2,5 s
+    check(page.locator("#tiles .tile").count() >= 6,
+          "pumpens varden har hunnit fram (%d kakel)" % page.locator("#tiles .tile").count())
+    for when in ("kall start", "larmbevakningen svarar inte"):
+        check(page.locator("#alarmBanner").is_hidden(),
+              "ingen larmruta: %s" % when)
+        fresh = page.locator("#freshness").inner_text().lower()
+        check("larm" not in fresh, "rubrikraden sager inte larm (%s): %r" % (when, fresh))
+        cls = page.locator("#statusWrap").get_attribute("class") or ""
+        check("alarm" not in cls, "rubrikraden ar inte rod (%s): %r" % (when, cls))
+        vals = all_values(page)
+        check(vals.get("32196") == "inget larm",
+              "och registret sager just det: %r" % vals.get("32196"))
+        shoot(page, out, "alarmdown-%s" % when.split()[0])
+        page.wait_for_timeout(3200)             # nu har 502 kommit
+
+
+def mapped_setting(page, url, out):
+    """Ett mappat register, hela vagen: raden, valjaren, rutan och kvittensen."""
+    print("\n=== mappad installning ===")
+    page.goto(url + "#water", wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    check(setrow_value(page, 40057) == "Medel",
+          "raden visar ordet, inte '–': %r" % setrow_value(page, 40057))
+    check((setrow_value(page, 40067) or "").endswith("dygn"),
+          "och grannen raknar i dygn: %r" % setrow_value(page, 40067))
+    rng = page.evaluate("""() => document.querySelector('[data-edit="40067"]')
+      .closest('.setrow').querySelector('.addr').textContent""")
+    check("dygn" in rng and "days" not in rng, "aven i intervallet: %r" % rng)
+
+    page.locator('[data-edit="40057"]').click()
+    page.wait_for_timeout(400)
+    opts = page.locator("#sv-40057 option").all_inner_texts()
+    check(opts[:3] == ["Litet", "Medel", "Stort"],
+          "valjaren star pa svenska: %s" % opts)
+    sel = page.locator("#sv-40057").input_value()
+    check(sel == "1", "och forvaljer det pumpen star pa (%r)" % sel)
+    shoot(page, out, "mappad-valjare")
+    page.locator("#sv-40057").select_option("2")
+    page.locator('[data-save="40057"]').click()
+    page.wait_for_timeout(600)
+    check(page.locator("#modal").is_visible(), "bekraftelserutan oppnas")
+    mtxt = page.locator("#modalBody").inner_text()
+    # Sjalva andringsraden, inte hela rutan: registrets `why` kommer ur
+    # nibelokal/settings.py och rakar rakna upp kartans engelska nycklar
+    # ("Small, Medium, Large eller Smart Control") -- det ar en mening i
+    # backend, inte appens oversattning, och hor inte hemma i det har testet.
+    arrow = page.locator("#modalBody .arrow").first.inner_text()
+    arrow = " ".join(arrow.split())
+    check(arrow == "Medel → Stort", "rutan sager 'Medel → Stort': %r" % arrow)
+    check("Medium" not in arrow and "→ 2" not in arrow,
+          "inte 'Medium → 2': %r" % arrow)
+    check("nästa varmvattenladdning" in mtxt,
+          "och vantetiden galler varmvatten, inte huset: %r"
+          % mtxt.replace("\n", " ")[-120:])
+    check("ett dygn" not in mtxt and "två dygn" not in mtxt,
+          "ingen dygnsvantan for en varmvatteninstallning")
+    shoot(page, out, "mappad-bekraftelse")
+    page.locator("#modalYes").click()
+    page.wait_for_timeout(1500)
+    t = page.locator("#toast .toast").first.inner_text()
+    check("Medel" in t and "Stort" in t and "Medium" not in t,
+          "kvittensen sager samma sak: %r" % t)
+    check("Känn efter" not in t, "och ber ingen kanna efter i huset: %r" % t)
+
+
+def ventilation_down(page, url, out):
+    """Vagen appen medvetet lagger en varning framfor -- och som var dod."""
+    print("\n=== mindre luft an normalt ===")
+    posts = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+    errs = []
+    page.on("pageerror", lambda e: errs.append(str(e)))
+    page.goto(url + "#water", wait_until="networkidle")
+    page.wait_for_timeout(2600)
+    opts = page.locator("#ventMode option").all_inner_texts()
+    check(any("MINDRE luft" in o for o in opts),
+          "ett lage under normalt finns i listan: %s" % opts)
+    page.locator("#ventMode").select_option("1")
+    page.locator("#ventSet").click()
+    page.wait_for_timeout(600)
+    check(page.locator("#modal").is_visible(), "varningen visas")
+    check("Mindre luft" in page.locator("#modalTitle").inner_text(), "och sager vad den galler")
+    shoot(page, out, "ventilation-varning")
+    page.locator("#modalYes").click()
+    page.wait_for_timeout(1800)
+    check(any("/api/ventilation" in u for u in posts),
+          "skrivningen gick i vag (%s)" % posts)
+    check(not errs, "ingen TypeError pa vagen (%s)" % errs[:2])
+    t = page.locator("#toast .toast").first.inner_text()
+    check("Läge 1" in t and "0" in t, "och kvitteras: %r" % t)
 
 
 def owner_curve(page, url, out):
@@ -876,7 +1170,25 @@ def owner_curve(page, url, out):
     check("under min framledning" in body, "P7 under golvet pekas ut")
     check(page.locator("#curveChart path.raw").count() == 1,
           "det pumpen faktiskt skickar ut ritas streckat nar en punkt ligger utanfor")
+    check(page.locator("#curveChart line.shift, #curveChart .shiftpt").count() >= 1,
+          "punktforskjutningen ritas i bilden, inte bara beskrivs under den")
     check("−1" in page.locator("#offsetNow").inner_text(), "offset -1 med riktigt minustecken")
+    rules = page.locator(".rule").inner_text()
+    check(len(rules) > 60 and "inte P5 och P6" in rules,
+          "regeltabellen sager vilket par som faktiskt galler i milt vader: %r" % rules[-220:])
+    # Etiketterna for golv och tak far inte ligga ovanpa punkterna.
+    hit = page.evaluate("""() => {
+      const svg = document.querySelector('#curveChart');
+      const labs = [...svg.querySelectorAll('text')].filter(t => /Min |Max /.test(t.textContent));
+      const dots = [...svg.querySelectorAll('circle')];
+      let worst = 0;
+      for (const l of labs) { const a = l.getBoundingClientRect();
+        for (const d of dots) { const b = d.getBoundingClientRect();
+          const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (ox > 0 && oy > 0) worst = Math.max(worst, Math.min(ox, oy)); } }
+      return worst; }""")
+    check(hit < 1.5, "gransetiketterna krockar inte med kurvans punkter (%.1f px)" % hit)
     shoot(page, out, "curve-avancerat-oppet")
 
     # radgivaren pekar ut punkten, och punkten ritas i kurvan
@@ -903,10 +1215,20 @@ def owner_curve(page, url, out):
     check("40044" in mtxt and "45" in mtxt and "47" in mtxt,
           "rutan visar register och fore -> efter")
     check("ett dygn" in mtxt, "rutan sager hur lange man ska vanta")
+    check("Var för sig gör de fel sak" not in mtxt,
+          "tva egna kurvpunkter gor inte fel sak var for sig")
     shoot(page, out, "curve-bekraftelse")
     page.locator("#modalNo").click()
     page.wait_for_timeout(300)
     check(not page.locator("#modal").is_visible(), "och gar att avbryta")
+
+    # den milda regeln, som backend faktiskt foljer
+    page.locator('#whenTabs [data-when="mild_outside"]').click()
+    page.locator("#adviceGo").click()
+    page.wait_for_timeout(2500)
+    got = page.locator("#adviceOut").inner_text()
+    check("P4" in got and "P5" in got,
+          "och radet landar dar backend brackar: %r" % got[:140].replace("\n", " "))
 
 
 def heat_down(page, url, out):
@@ -930,9 +1252,9 @@ def unreachable(page, url, out):
     for sel, ord_ in [("#indoorCard", "Homey"), ("#weatherCard", "SMHI")]:
         check(page.locator(sel).is_visible(), "%s visas med felet i stallet for att forsvinna" % sel)
         check(ord_ in page.locator(sel).inner_text(), "%s namnger tjansten" % sel)
-    check(not page.locator("#alarmBanner").is_visible() or
-          "175" in page.locator("#alarmBanner").inner_text(),
-          "larmrutan faller tillbaka pa registret nar bevakningen tiger")
+    # Larmbevakningen tiger, men pumpen sager "No alarm": ingen ruta ska malas.
+    check(not page.locator("#alarmBanner").is_visible(),
+          "ingen larmruta ur en tyst larmbevakning och en tyst pump")
     shoot(page, out, "unreach-now")
     page.locator('nav button[data-view="heat"]').click()
     page.wait_for_timeout(1500)
@@ -947,6 +1269,8 @@ def slow_server(page, url, out):
     page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(600)
     check(page.locator(".skel").count() >= 1, "skelett medan svaren droejer")
+    check(not page.locator("#alarmBanner").is_visible(),
+          "och ingen larmruta medan ingenting ar last")
     shoot(page, out, "slow-tidigt")
     page.wait_for_timeout(9000)
     check(page.locator("#tiles .tile").count() >= 6, "och sedan kommer varden")
@@ -1002,19 +1326,21 @@ def stepper_write(page, url):
     page.locator("#modalNo").click()
 
 
+MODES = ["full", "quiet", "off", "fallback", "curve", "unreach",
+         "slow", "heat502", "alarmdown"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--serve", action="store_true", help="bara servern, ingen webblasare")
-    ap.add_argument("--mode", default="full",
-                    choices=["full", "quiet", "off", "fallback", "curve", "unreach",
-                             "slow", "heat502"])
+    ap.add_argument("--mode", default="full", choices=MODES)
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--out", default=str(ROOT / "_shots"))
     args = ap.parse_args()
 
     if args.serve:
         port = args.port or 8377
-        start(args.mode, port, 1.1 if args.mode == "slow" else 0.0)
+        start(args.mode, port)
         print("stub pa http://127.0.0.1:%d/ i lage %s" % (port, args.mode))
         while True:
             time.sleep(3600)
@@ -1022,9 +1348,9 @@ def main():
     from playwright.sync_api import sync_playwright
     out = pathlib.Path(args.out)
     ports = {}
-    for mode in ("full", "quiet", "off", "fallback", "curve", "unreach", "slow", "heat502"):
+    for mode in MODES:
         ports[mode] = free_port()
-        start(mode, ports[mode], 1.1 if mode == "slow" else 0.0)
+        start(mode, ports[mode])
     time.sleep(0.4)
     url = lambda m: "http://127.0.0.1:%d/" % ports[m]        # noqa: E731
 
@@ -1042,17 +1368,16 @@ def main():
                       % (mode, label, (": " + "; ".join(real[:3])) if real else ""))
                 page.close()
 
-        for fn, mode in [(register_fallback, "fallback")]:
-            page = b.new_page(viewport={"width": 390, "height": 844})
-            fn(page, url(mode))
-            page.close()
-        for fn, mode in [(owner_curve, "curve"), (heat_down, "heat502"),
-                         (unreachable, "unreach"), (slow_server, "slow")]:
+        for fn, mode in [(register_fallback, "fallback"), (owner_curve, "curve"),
+                         (heat_down, "heat502"), (unreachable, "unreach"),
+                         (slow_server, "slow"), (alarm_never_invented, "alarmdown"),
+                         (mapped_setting, "full"), (ventilation_down, "full")]:
             page = b.new_page(viewport={"width": 390, "height": 844})
             errs = []
             page.on("pageerror", lambda e: errs.append("pageerror: %s" % e))
             fn(page, url(mode), out)
-            check(not errs, "inga JS-krascher i %s: %s" % (mode, errs[:2]))
+            check(not errs, "inga JS-krascher i %s/%s: %s"
+                  % (mode, fn.__name__, errs[:2]))
             page.close()
 
         for fn in (guarded_write, stepper_write):
@@ -1093,6 +1418,46 @@ def main():
         page.wait_for_timeout(700)
         shoot(page, out, "curve-mork-avancerat")
         page.close()
+
+        # Varje lage i bada bredder och bada temana. De fyra kombinationerna ar
+        # billiga att kora och dyra att missa: en ruta som spricker vid 1280 px
+        # i morkt lage ar precis den sorts fel ingen tittar efter.
+        print("\n=== alla lagen, bada bredder, bada temana ===")
+        for mode in MODES:
+            for scheme in ("light", "dark"):
+                for label, w, h in [("telefon", 390, 844), ("dator", 1280, 900)]:
+                    page = b.new_page(color_scheme=scheme,
+                                      viewport={"width": w, "height": h})
+                    errs = []
+                    page.on("pageerror", lambda e: errs.append(str(e)))
+                    page.on("console",
+                            lambda m: errs.append(m.text) if m.type == "error" else None)
+                    page.goto(url(mode), wait_until="domcontentloaded")
+                    page.wait_for_timeout(9000 if mode in ("slow", "alarmdown") else 3000)
+                    shoot(page, out, "sweep-%s-%s-%s" % (mode, scheme, label))
+                    over = page.evaluate(
+                        "() => document.documentElement.scrollWidth - window.innerWidth")
+                    bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+                    dark = bg not in ("rgba(0, 0, 0, 0)", "rgb(255, 255, 255)")
+                    check(over <= 1, "%s/%s/%s: ingen horisontell scroll (%d px)"
+                          % (mode, scheme, label, over))
+                    check(dark if scheme == "dark" else True,
+                          "%s/%s/%s: temat slar igenom (%s)" % (mode, scheme, label, bg))
+                    # "Failed to load resource" ar webblasarens egen rad om en
+                    # 502, och en 502 fran /api/alarms eller /api/heating ar
+                    # ett riktigt tillstand som servern producerar (server.py
+                    # svarar 502 nar en endpoint kastar). Det appen inte far
+                    # gora ar att kasta sjalv -- det fangas av pageerror.
+                    real = [e for e in errs if "favicon" not in e.lower()
+                            and "failed to load resource" not in e.lower()]
+                    check(not real, "%s/%s/%s: inga konsolfel%s"
+                          % (mode, scheme, label,
+                             (": " + "; ".join(real[:2])) if real else ""))
+                    # Ingen larmruta far uppsta ur ett register som sager "No alarm".
+                    if mode not in ("full", "fallback"):
+                        check(page.locator("#alarmBanner").is_hidden(),
+                              "%s/%s/%s: ingen larmruta ur ingenting" % (mode, scheme, label))
+                    page.close()
         b.close()
 
     print("\nskarmbilder i %s" % out)

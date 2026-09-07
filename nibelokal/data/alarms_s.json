@@ -9,7 +9,7 @@
   "source_note": "NIBE's own alarm-code search on nibe.eu is a Sitevision web app that reads its texts from this route; 'noah' is the S series and 'emmy' the F series. The answer is {\"result\": [{code, text, textLong, extraTextLong}]}. The Swedish strings below are NIBE's own, verbatim: only whitespace was normalised, plus one pilcrow (U+00B6, code 144) and one no-break space turned into a line break and a plain space.",
   "coverage": "Every code NIBE publishes for the S series (S1155, S1156, S1255, S1256, S320, S325, S735, SMO S40, VVM S320, VVM S325 and their accessories). It is the whole series, not just the S735, so codes for accessories a given house does not have can never appear.",
   "text_confidence": "High. `sv` is NIBE's own short display text, fetched verbatim. Where NIBE lists two wordings for one code (different boards) they are joined with ' / '.",
-  "severity_confidence": "Derived, not published. NIBE's endpoint carries no severity field, so each code was classified by a rule over NIBE's own Swedish text: 'info' where the text says operation is unaffected or that the alarm clears itself, 'alarm' where it names larmdrift, hjalpdrift, blocked operation, a permanent alarm, or calling the installer, otherwise 'warning'. So `sv` and `action` are NIBE's words and `severity` is our reading of them: 174 alarm, 294 warning, 10 info.",
+  "severity_confidence": "Derived, not published. NIBE's endpoint carries no severity field, so each code was classified by a rule over NIBE's own Swedish text: 'info' where the text says operation is unaffected or that the alarm clears itself, 'alarm' where it names larmdrift, hjalpdrift, blocked operation, a permanent alarm, or calling the installer, otherwise 'warning'. So `sv` and `action` are NIBE's words and `severity` is our reading of them: 173 alarm, 294 warning, 11 info. Code 183 (\"Tillfalligt kom.fel mot klimatsystem 2\") was classified 'alarm' against that rule: NIBE's own action text says the fault clears itself, which is the file's definition of 'info'. It repeated at Pushover priority 2 until acknowledged for a fault that goes away on its own. Corrected 2026-09-07. Code 187 has the identical wording and is still 'alarm'.",
   "action_note": "`action` is the last sentence of NIBE's longer text that actually tells the owner to do something, quoted verbatim. Nothing here is written by us. 289 of 478 codes have such a sentence; the rest are null, which means 'we do not know', not 'do nothing'.",
   "not_verified": [
    "The severity is not NIBE's -- see severity_confidence.",
@@ -406,7 +406,7 @@
   },
   "183": {
    "sv": "Kommunikationsfel mot tillbehör klimatsystem 2 / Tillfälligt kom.fel mot klimatsystem 2",
-   "severity": "alarm",
+   "severity": "info",
    "action": "Störningen försvinner troligen snart och meddelandet återställs där efter automatiskt."
   },
   "184": {

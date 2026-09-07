@@ -18,7 +18,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import autotune                                 # noqa: E402
-from nibelokal.advisor import R_OFFSET, R_OWN_CURVE            # noqa: E402
+from nibelokal.advisor import (EMITTERS, R_OFFSET,             # noqa: E402
+                               R_OWN_CURVE, emitters)
 
 TARGET = 21.0
 
@@ -525,6 +526,109 @@ class HoursThatAreNotEvidence(unittest.TestCase):
     def test_a_plain_string_still_works_for_a_source_without_the_list(self):
         self.assertTrue(autotune._is_not_heating("Varmvatten"))
         self.assertFalse(autotune._is_not_heating(None))
+
+
+class HowLongToWaitComesFromTheTable(unittest.TestCase):
+    """It used to come from matching a Swedish sentence.
+
+    `wait_hours = 48 if em["wait"] == "två dygn" else 24` made the advice
+    depend on the wording of prose that exists to be read by a person. Reword
+    "två dygn" to "ett par dygn" -- an entirely reasonable edit to a Swedish
+    string -- and every floor-heating house is silently told to judge its
+    change after one day instead of two, which is how a slow system gets
+    adjusted twice for one error.
+    """
+
+    def test_floor_heating_waits_two_days(self):
+        self.assertEqual(emitters("floor")["wait_hours"], 48)
+
+    def test_radiators_wait_one(self):
+        self.assertEqual(emitters("radiators")["wait_hours"], 24)
+
+    def test_every_emitter_kind_carries_a_number(self):
+        for kind, em in EMITTERS.items():
+            self.assertIsInstance(em.get("wait_hours"), int, kind)
+            self.assertGreaterEqual(em["wait_hours"], 24, kind)
+
+    def test_the_number_and_the_sentence_still_agree(self):
+        # Both are shown to the same person on the same panel.
+        for kind, em in EMITTERS.items():
+            expected = 48 if "två" in em["wait"] else 24
+            self.assertEqual(em["wait_hours"], expected, kind)
+
+    def test_rewording_the_sentence_no_longer_changes_the_advice(self):
+        original = EMITTERS["floor"]["wait"]
+        EMITTERS["floor"]["wait"] = "ett par dygn"
+        try:
+            r = autotune.analyse(nights(WIDE, lambda t: -1.2, noise=0.1),
+                                 TARGET, settings(offset=0), emitter_kind="floor")
+            self.assertEqual(r["proposal"]["wait_hours"], 48)
+        finally:
+            EMITTERS["floor"]["wait"] = original
+
+
+class WhatTheSlopeNumberMeans(unittest.TestCase):
+    """The docstring said "identifiable and real"; the code says identifiable.
+
+    The code was right and the comment was wrong, which is the worse way round:
+    a reader trusting the comment reads a reported 0,02 °C/°C as "the fit
+    cleared its own standard error" when it means "the weather varied enough
+    to measure, and the answer is about zero". Those are opposite conclusions
+    about whether to touch the curve. The comment now says what the code does,
+    and this pins the behaviour so the next reader can trust it.
+    """
+
+    def test_a_measured_near_zero_slope_is_reported_as_a_number(self):
+        r = autotune.analyse(nights(WIDE, lambda t: -1.2, noise=0.1),
+                             TARGET, settings(offset=0))
+        self.assertIsNotNone(r["slope_error_c_per_c"],
+                             "a measured slope came back as 'cannot say'")
+        self.assertLess(abs(r["slope_error_c_per_c"]), autotune.SLOPE_MIN_C_PER_C)
+
+    def test_and_it_is_not_acted_on(self):
+        # Reported, but the proposal is the offset one: a slope inside the
+        # deadband is not evidence about the curve.
+        r = autotune.analyse(nights(WIDE, lambda t: -1.2, noise=0.1),
+                             TARGET, settings(offset=0))
+        self.assertEqual(r["proposal"]["register"], R_OFFSET)
+
+    def test_weather_that_never_varied_says_it_cannot_say(self):
+        narrow = [t for t in WIDE if -6 <= t <= -4] or [-5.0] * len(WIDE)
+        r = autotune.analyse(nights(narrow, lambda t: -1.2, noise=0.1),
+                             TARGET, settings(offset=0))
+        self.assertIsNone(r["slope_error_c_per_c"])
+
+
+class TheNumbersInTheProseAreSwedish(unittest.TestCase):
+    """The last four %g / %+d in this module's user-facing strings."""
+
+    def test_a_curve_at_its_limit(self):
+        r = autotune.analyse(nights(WIDE, lambda t: -1.2 - 0.25 * t, noise=0.05),
+                             TARGET, settings(offset=0, curve=15))
+        text = " ".join(r["notes_sv"]) + str(r.get("reason_sv") or "")
+        self.assertNotIn("15.0", text)
+
+    def test_an_offset_at_its_limit(self):
+        r = autotune.analyse(nights(WIDE, lambda t: -1.2, noise=0.1),
+                             TARGET, settings(offset=autotune.OFFSET_MAX))
+        text = " ".join(r["notes_sv"])
+        self.assertIn("gränsen", text)
+        # The range in that sentence used to read "(-10..10)": a hyphen where
+        # the page has a minus sign, and two dots where Swedish says "till".
+        self.assertNotIn("-10", text)
+        self.assertNotIn("..", text)
+        self.assertIn("\u221210 till 10", text)
+
+    def test_no_hyphen_minus_survives_into_any_swedish_string(self):
+        r = autotune.analyse(nights(WIDE, lambda t: -1.2 - 0.25 * t, noise=0.05),
+                             TARGET, settings(offset=0, curve=0))
+        strings = list(r["notes_sv"]) + [r.get("reason_sv") or ""]
+        proposal = r.get("proposal") or {}
+        strings += [str(proposal.get("why_sv") or ""),
+                    str(proposal.get("expected_sv") or "")]
+        for text in strings:
+            for bad in ("-1 °C", "-5 °C", "-10 °C", "-15 °C", "-20 °C"):
+                self.assertNotIn(bad, text, text)
 
 
 if __name__ == "__main__":

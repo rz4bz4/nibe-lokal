@@ -224,7 +224,12 @@ def describe(code) -> dict:
     entry = None
     if number is not None:
         entry = load_table()["codes"].get(str(number))
-    if isinstance(entry, dict):
+    # Eleven codes in NIBE's own table carry a severity and an action but no
+    # text at all. Handing those over as known with text "" put an empty line
+    # in the notification and an empty line on the page; what the owner can
+    # actually use is the number and the fact that the table has nothing to
+    # say about it. Severity and action are still NIBE's, so they are kept.
+    if isinstance(entry, dict) and (entry.get("sv") or "").strip():
         return {
             "code": number,
             "text": entry.get("sv") or "",
@@ -235,6 +240,20 @@ def describe(code) -> dict:
         }
 
     shown = number if number is not None else code
+    fallback_action = ("Slå upp koden på pumpens display eller på "
+                       "nibe.eu/sv-se/support/larmkoder.")
+    if isinstance(entry, dict):
+        # In the table, but without a text. Not the same as unknown, and said
+        # as the different thing it is.
+        return {
+            "code": number,
+            "severity": entry.get("severity") if entry.get("severity") in SEVERITIES
+                        else "warning",
+            "text": "Larm %s. NIBE publicerar ingen larmtext för den koden, så "
+                    "appen kan inte säga vad den betyder." % shown,
+            "action": entry.get("action") or fallback_action,
+            "known": False,
+        }
     return {
         "code": number,
         # Severity "warning" and not "alarm": we do not know which it is, and
@@ -242,8 +261,7 @@ def describe(code) -> dict:
         "severity": "warning",
         "text": "Larm %s. Koden finns inte i appens tabell, så appen kan inte "
                 "säga vad den betyder." % shown,
-        "action": "Slå upp koden på pumpens display eller på "
-                  "nibe.eu/sv-se/support/larmkoder.",
+        "action": fallback_action,
         "known": False,
     }
 
@@ -689,12 +707,30 @@ class Watcher:
             return True
 
     def _raise_was_sent(self, row_id: int, code: int) -> bool:
-        """Did the alarm this all-clear belongs to actually reach anyone?"""
+        """Does somebody still believe this code is alarming?
+
+        The question an all-clear has to answer is not "was the raise it
+        belongs to sent" but "what does the phone in the owner's pocket
+        currently say". Those come apart on a flapping alarm: the flap guard
+        marks the raise it collapsed as sent = 2 (superseded), and reading that
+        as "nobody was told" dropped the final all-clear of a flap that ended
+        clear. The pushes then read *larmar / borta / larmar* and stopped, with
+        the pump no longer alarming and the owner's phone saying it was -- the
+        one outcome the module docstring promises cannot happen.
+
+        So: what actually reached anyone last decides. A raise that reached
+        them means the all-clear is news, whatever became of the raise's own
+        row afterwards.
+        """
         try:
             with self.store._lock, self.store._db as c:   # noqa: SLF001
-                row = c.execute(
-                    "SELECT sent FROM alarm_events WHERE code = ? AND "
+                raised = c.execute(
+                    "SELECT id FROM alarm_events WHERE code = ? AND "
                     "kind = 'alarm' AND id < ? ORDER BY id DESC LIMIT 1",
+                    (code, row_id)).fetchone()
+                told = c.execute(
+                    "SELECT kind FROM alarm_events WHERE code = ? AND id < ? "
+                    "AND sent = 1 ORDER BY id DESC LIMIT 1",
                     (code, row_id)).fetchone()
         except Exception as exc:                          # noqa: BLE001
             log.warning("could not tell whether alarm %d was announced: %s",
@@ -703,7 +739,14 @@ class Watcher:
         # No raise on record at all (a database from an older version, a row
         # pruned away) is not evidence either way, and silence is the worse
         # error of the two.
-        return row is None or row[0] == 1
+        if raised is None:
+            return True
+        # Nothing about this code has ever been sent: the severity filter did
+        # its job on the raise, and "Larmet borta (105)" would be a message
+        # with no referent.
+        if told is None:
+            return False
+        return told[0] == "alarm"
 
     # -- a notification somebody asked for --------------------------------
 

@@ -115,12 +115,18 @@ class FakePump:
         self.values = values or {30002: 3.4, 30006: 32.0, 31976: 0,
                                  40012: -120, 40027: 5, 40031: 0}
         self.reads = 0
+        # Registers this pump is currently refusing, as pump.missing() reports
+        # them to /api/status.
+        self.missing_list: list[dict] = []
 
     def read_many(self, addresses):
         self.reads += 1
         if self.fail:
             raise OSError("pumpen svarar inte")
         return {a: {"value": self.values[a]} for a in addresses if a in self.values}
+
+    def missing(self):
+        return list(self.missing_list)
 
 
 def _cfg(**overrides):
@@ -1049,8 +1055,16 @@ class HistoryForAutotune(unittest.TestCase):
         self.tmp.cleanup()
 
     def _fill(self, days):
-        """Fourteen days of hourly readings, cold and getting colder."""
-        now = int(time.time())
+        """Fourteen days of hourly readings, cold and getting colder.
+
+        Anchored to the top of an hour, and then a minute in, so that the
+        indoor sample written 30 s after each pump reading always lands in the
+        same hour bucket. Anchoring on time.time() itself made this fixture
+        fail for the last half-minute of every hour -- ts + 30 crossed into the
+        next bucket, which has no pump reading, so the newest hour came back
+        with no indoor value and autotune counted a "no_indoor".
+        """
+        now = int(time.time()) // 3600 * 3600 + 60
         for hour in range(days * 24):
             ts = now - hour * 3600
             day = hour // 24
@@ -1140,6 +1154,171 @@ class _handler:
         handler._json = capture                                 # noqa: SLF001
         handler._api_get(urlparse(path))
         return captured["body"], captured["status"]
+
+
+class OneVersionString(unittest.TestCase):
+    """Three copies of the version disagreed, and the oldest one left the house.
+
+    The package said 0.2.1, the wheel 0.3.0 and the git tag v0.3.1 -- and
+    weather.py builds the User-Agent SMHI sees out of the package one, so the
+    only copy anybody outside could observe was the wrong one. There is one
+    now, and pyproject reads it from the package.
+    """
+
+    def test_the_package_is_the_source_of_truth(self):
+        import nibelokal
+        self.assertEqual(nibelokal.__version__, "0.3.2")
+
+    def test_the_wheel_does_not_carry_a_second_copy(self):
+        with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as fh:
+            text = fh.read()
+        project = text.split("[build-system]")[0]
+        for line in project.splitlines():
+            self.assertFalse(line.strip().startswith("version = "),
+                             "pyproject hardcodes a version again: %s" % line)
+        self.assertIn('dynamic = ["version"]', text)
+        self.assertIn('version = {attr = "nibelokal.__version__"}', text)
+
+    def test_and_smhi_is_told_that_one(self):
+        import nibelokal
+        from nibelokal import weather as weather_module
+        self.assertIn(nibelokal.__version__, weather_module.USER_AGENT)
+
+
+class WhatTheStatusEndpointNowSays(unittest.TestCase):
+    """Three additive fields the page may start reading, and one that changed.
+
+    `store_error`, `missing_registers` and `weather.stale` are new keys.
+    Nothing that was there before changed name or meaning; `weather.error` now
+    also carries the note from a stale forecast, which it did not before --
+    that is the fix for the header reporting yesterday's temperature as today's.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        self.pump = FakePump()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _status(self, poller=None, **providers):
+        base = {"homey": None, "weather": None, "tibber": None, "plan": None,
+                "watcher": None, "errors": {}}
+        base.update(providers)
+        poller = poller or Poller(self.pump, self.store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(), self.tmp.name, self.store,
+                                   poller, base)
+        return _handler(ctx).call("/api/status")[0]
+
+    def test_the_keys_the_page_already_reads_are_untouched(self):
+        body = self._status()
+        for key in ("registers", "polled_at", "poll_error", "register_map",
+                    "indoor", "weather", "alarm", "features"):
+            self.assertIn(key, body, key)
+
+    def test_a_database_failure_is_its_own_field(self):
+        poller = Poller(self.pump, self.store, DASHBOARD, 60)
+        poller.last_store_error = "database or disk is full"
+        body = self._status(poller=poller)
+        self.assertEqual(body["store_error"], "database or disk is full")
+        self.assertIsNone(body["poll_error"], "the pump was blamed for the disk")
+
+    def test_registers_the_pump_refused_are_visible(self):
+        # Invisible before: a register that dropped out of every poll left no
+        # trace anywhere, and 31976 dropping out means alarm watching stopped.
+        self.pump.missing_list = [{"address": 31976, "title": "Larmnummer",
+                                   "since": 1.0, "retry_in": 3599.0}]
+        body = self._status()
+        self.assertEqual(body["missing_registers"][0]["address"], 31976)
+
+    def test_and_it_is_an_empty_list_when_all_is_well(self):
+        self.assertEqual(self._status()["missing_registers"], [])
+
+    def test_a_stale_forecast_is_marked_stale_and_not_served_as_now(self):
+        class StaleWeather:
+            configured = True
+
+            def cached_snapshot(self):
+                return {"ok": True, "stale": True, "at": 1788700000,
+                        "note": "Prognosen är från igår och har inte uppdaterats.",
+                        "now": {"t": 3.4, "effective": 1.0, "symbol_sv": "Klart"},
+                        "summary": {"min_24h": -1.0, "trend": "kallare"}}
+
+        body = self._status(weather=StaleWeather())
+        self.assertTrue(body["weather"]["stale"])
+        self.assertIn("uppdaterats", body["weather"]["error"])
+
+    def test_a_fresh_one_is_not(self):
+        class FreshWeather:
+            configured = True
+
+            def cached_snapshot(self):
+                return {"ok": True, "at": 1788700000, "note": None,
+                        "now": {"t": 3.4, "effective": 1.0, "symbol_sv": "Klart"},
+                        "summary": {"min_24h": -1.0, "trend": "kallare"}}
+
+        body = self._status(weather=FreshWeather())
+        self.assertFalse(body["weather"]["stale"])
+        self.assertIsNone(body["weather"]["error"])
+
+    def test_the_unconfigured_shape_carries_the_new_key_too(self):
+        # The page reads the same shape whether or not a feature is set up.
+        self.assertIn("stale", self._status()["weather"])
+
+
+class TheStatusSummariesCostNothing(unittest.TestCase):
+    """The indoor and alarm summaries the page does not read yet.
+
+    /api/status carries them and the page polls /api/indoor and /api/alarms
+    itself, so they are dead weight -- but only if they cost something. They
+    were kept rather than removed, because removing a field the UI may start
+    reading is the more expensive mistake of the two, and made cheap enough
+    that carrying them does not matter: no network (asserted elsewhere), and
+    no query that scans a table.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        self.pump = FakePump()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_status_never_counts_the_rows_of_the_history(self):
+        class NoScans(Store):
+            def stats(self):
+                raise AssertionError("/api/status triggered a full table scan")
+
+        store = NoScans(os.path.join(self.tmp.name, "scan.db"))
+        self.addCleanup(store.close)
+        watcher = alarms.Watcher(store, self.pump, _cfg())
+        poller = Poller(self.pump, store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(), self.tmp.name, store,
+                                   poller, {"watcher": watcher})
+        body = _handler(ctx).call("/api/status")[0]
+        self.assertIn("alarm", body)
+        self.assertIn("indoor", body)
+
+    def test_the_alarm_summary_reads_only_the_standing_alarms(self):
+        # alarm_state holds one row per standing alarm -- nothing on a healthy
+        # pump -- and not the event log, which grows.
+        store = Store(os.path.join(self.tmp.name, "alarm.db"))
+        self.addCleanup(store.close)
+        watcher = alarms.Watcher(store, self.pump, _cfg())
+        for _ in range(50):
+            watcher.poll({alarms.R_ALARM: {"value": 163}})
+            watcher.poll({alarms.R_ALARM: {"value": 0}})
+        poller = Poller(self.pump, store, DASHBOARD, 60)
+        ctx = server.build_context(self.pump, _cfg(), self.tmp.name, store,
+                                   poller, {"watcher": watcher})
+        body = _handler(ctx).call("/api/status")[0]
+        self.assertEqual(body["alarm"]["active"], 0)
+        self.assertTrue(body["alarm"]["ok"])
+
 
 
 if __name__ == "__main__":

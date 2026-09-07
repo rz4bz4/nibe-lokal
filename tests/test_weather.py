@@ -428,5 +428,112 @@ class FailuresAreRemembered(unittest.TestCase):
                          "a negative age read as very fresh and froze the cache")
 
 
+class TheCachedSnapshotTheStatusHeaderReads(unittest.TestCase):
+    """/api/status must not report a day-old forecast as the weather now.
+
+    The status header used to read `_cached` straight off the object. That
+    attribute only ever holds the last *successful* fetch, while the staleness
+    -- the `stale` flag and the note saying when the numbers are from -- lives
+    on the failure copy that snapshot() builds. So with SMHI down for a day,
+    /api/weather said ok: false and the header on the same page cheerfully
+    reported yesterday's temperature as today's.
+
+    cached_snapshot() answers with what /api/weather would answer, and never
+    fetches: the status endpoint is polled every 30 s by the page and must not
+    be able to wait out an SMHI timeout.
+    """
+
+    def test_nothing_fetched_yet_is_none_and_not_a_number(self):
+        self.assertIsNone(fake(FIXTURE).cached_snapshot(now=1000.0))
+
+    def test_a_fresh_forecast_comes_back_fresh(self):
+        w = fake(FIXTURE)
+        w.snapshot(now=1000.0)
+        snap = w.cached_snapshot(now=1000.0 + 60)
+        self.assertTrue(snap["ok"])
+        self.assertFalse(snap.get("stale"))
+
+    def test_a_day_old_forecast_is_marked_stale_not_served_as_now(self):
+        w = fake(FIXTURE)
+        w.snapshot(now=1000.0)
+        snap = w.cached_snapshot(now=1000.0 + 24 * 3600)
+        self.assertTrue(snap["stale"], "the header would have shown this as now")
+        self.assertTrue(snap["note"].strip())
+        self.assertIn("uppdaterats", snap["note"])
+
+    def test_a_remembered_failure_is_what_comes_back_while_it_lasts(self):
+        w = broken(urllib.error.URLError("no route to host"))
+        w.snapshot(now=1000.0)
+        snap = w.cached_snapshot(now=1000.0 + 10)
+        self.assertFalse(snap["ok"])
+        self.assertTrue(snap["error"].strip())
+
+    def test_it_never_fetches(self):
+        w = fake(FIXTURE)
+        w.snapshot(now=1000.0)
+        calls = []
+        w._fetch = lambda: (calls.append(1), (FIXTURE, 0.0))[1]
+        for at in (1000.0 + 60, 1000.0 + 24 * 3600, 1000.0 + 400 * 3600):
+            w.cached_snapshot(now=at)
+        self.assertEqual(calls, [], "the status header went to the network")
+
+    def test_it_is_a_copy(self):
+        w = fake(FIXTURE)
+        w.snapshot(now=1000.0)
+        snap = w.cached_snapshot(now=1000.0 + 60)
+        snap["now"]["t"] = -999
+        self.assertNotEqual(w.cached_snapshot(now=1000.0 + 60)["now"]["t"], -999)
+
+
+class AnUnparseableAnswerIsRememberedToo(unittest.TestCase):
+    """The one failure that used to re-ask SMHI on every page load.
+
+    A payload this app cannot parse is the most repeatable failure of the lot:
+    the next fetch gets the same bytes. Both of the _build failures returned
+    their error without going through _remember_failure, so they were asked
+    again on every /api/weather -- which is how a rate limit becomes a block.
+    """
+
+    def _counting(self, payload):
+        w = weather.Weather(CONFIG)
+        calls = []
+        w._fetch = lambda: (calls.append(1), (payload, 0.0))[1]
+        return w, calls
+
+    def test_an_unparseable_payload_is_fetched_once(self):
+        w, calls = self._counting({"timeSeries": "nej"})
+        first = w.snapshot(now=1000.0)
+        second = w.snapshot(now=1000.0 + 30)
+        self.assertFalse(first["ok"])
+        self.assertEqual(first, second)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_forecast_with_no_hours_in_it_is_fetched_once(self):
+        w, calls = self._counting({"referenceTime": "x", "timeSeries": []})
+        self.assertFalse(w.snapshot(now=1000.0)["ok"])
+        w.snapshot(now=1000.0 + 30)
+        self.assertEqual(len(calls), 1)
+
+    def test_and_it_is_forgotten_again_like_any_other_failure(self):
+        w, calls = self._counting({"timeSeries": "nej"})
+        w.snapshot(now=1000.0)
+        w.snapshot(now=1000.0 + w.failure_seconds + 1)
+        self.assertEqual(len(calls), 2)
+
+
+class TheUserAgentSaysTheRealVersion(unittest.TestCase):
+    """SMHI asks for a contactable User-Agent, and it was three versions old.
+
+    The package said 0.2.1, the wheel 0.3.0 and the git tag v0.3.1. There is
+    one string now, in nibelokal/__init__.py, and this is the line that leaves
+    the house with it.
+    """
+
+    def test_it_carries_the_package_version(self):
+        import nibelokal
+        self.assertIn(nibelokal.__version__, weather.USER_AGENT)
+        self.assertNotIn("0.2.1", weather.USER_AGENT)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,13 +61,36 @@ def all_maps():
 # adds a model that names one of these something new, this test does not catch
 # it -- but it does catch every model the package ships today, which is the
 # failure that was actually there.
+#
+# A pattern has to describe the *category*, not the S735's phrasing of it. The
+# pump-mode pattern below said "heat(ing) medium pump" and nothing else, so it
+# could not see the brine pump's identical selector at 40097 and 47139 even
+# though every map agrees they are the same kind of register with the same
+# enumeration. Widening a pattern is not free: everything it newly matches has
+# to be blocked, or the first test in EveryModel fails. That is the point --
+# widening it is how you find out what the gate was missing.
 CATEGORIES = {
     "compressor frequency window":
         r"^(min|max)\.? compressor frequency$",
     "compressor frequency blocking bands":
         r"blockfreq",
-    "heating medium pump mode and manual speed":
-        r"^(operating|operational) mode heat(ing)? medium pump(, cooling)?$"
+    # Circulation pumps the compressor depends on: the heating medium pump on
+    # the warm side, the brine pump on the cold one. Matched by the shape of
+    # the register rather than by which loop it is in -- "operating mode",
+    # "operational mode" or "op. mode", then the pump. The F-series map spells
+    # out the enumeration these share (10 intermittent, 20 continuous,
+    # 30 economy, 40 auto) in the info text of 47138 and 47139.
+    #
+    # It deliberately does not reach the per-heat-pump circulation and charge
+    # pump modes -- "Operating mode circulation pump heating heat pump 1"
+    # (40784), "Op. mode charge pump (EB101)" (40749) and their siblings. Those
+    # are a plain 0-1 with no mapping and no info text in any map the package
+    # ships, so nothing says whether 0 is *off* or *intermittent*, and those
+    # two readings differ by exactly the hazard. They stay guarded; the
+    # reasoning is in docs/registers.md.
+    "circulation pump operating mode and manual speed":
+        r"^(operating|operational|op\.) mode (heat(ing)? medium|brine( medium)?) "
+        r"pump(, cooling)?$"
         r"|^heat(ing)? medium pump manual speed$"
         r"|^manual heat(ing)? medium pump speed$"
         r"|^speed of circulation pump for heating$",
@@ -156,12 +179,13 @@ class EveryModel(unittest.TestCase):
         known = {
             # Blocked on purpose although they are not dangerous in themselves:
             # on the measured S735 the map and the pump disagree about this
-            # block. See the comment in safety.py.
+            # block. See the comment in safety.py. All three are writable on
+            # the S735 and S735C and on no other map, so the measurement covers
+            # every model the block reaches -- which is what 41103 and 41104,
+            # writable on twelve and four maps, did not.
             (41100, "Reduced ventilation"),
             (41101, "High outdoor temperature"),
             (41102, "OEK"),
-            (41103, "Smart home room control"),
-            (41104, "Speed, brine pump, standby mode (EP14)"),
         }
         rx = re.compile("|".join(CATEGORIES.values()), re.I)
         collateral = set()
@@ -174,6 +198,36 @@ class EveryModel(unittest.TestCase):
                 if not rx.search(coil["title"]):
                     collateral.add((address, coil["title"]))
         self.assertEqual(set(), collateral - known)
+
+    def test_nothing_in_the_everyday_tier_is_an_sg_ready_register(self):
+        """The mistake fix A undid, stated so it cannot come back.
+
+        40761 sat in EVERYDAY described as "SG Ready / smart grid input". Every
+        S-series map titles it *Heating (SG Ready)*: the pump's own menu saying
+        whether SG Ready may touch the heating, sibling of 40762 Cooling and
+        40763 Hot water, both of which were guarded the whole time. The input
+        is 43033 and 46009, and neither was in any tier by name.
+        """
+        rx = re.compile(r"sg.?ready", re.I)
+        offenders = set()
+        for coils in self.maps.values():
+            for address, coil in coils.items():
+                if address in safety.EVERYDAY and rx.search(coil["title"]):
+                    offenders.add((address, coil["title"]))
+        self.assertEqual(set(), offenders)
+
+    def test_the_sg_ready_influence_switches_share_one_tier(self):
+        """40761, 40762 and 40763 are one setting per circuit. One tier.
+
+        They are the same register three times over -- u8 0/1, default 1, one
+        each for heating, cooling and hot water -- so a gate that treats one
+        differently from the others is not reasoning about the feature, it is
+        reasoning about an address.
+        """
+        tiers = {a: safety.tier(a) for a in (40761, 40762, 40763)}
+        self.assertEqual(1, len(set(tiers.values())), tiers)
+        # And the same setting at the address the F generation uses for it.
+        self.assertEqual(safety.tier(40761), safety.tier(48282))
 
     def test_no_everyday_or_guarded_register_is_blocked_on_any_model(self):
         """The tiers must not contradict each other, whichever model is loaded."""

@@ -10,6 +10,8 @@ import datetime as dt
 import json
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -219,7 +221,8 @@ class PlanShape(unittest.TestCase):
         # Deliberate: SG Ready's effect depends on pump settings this app does
         # not control. See the module docstring.
         plan = Plan().build(snap(SPIKY), now=AT)
-        self.assertNotIn(str(spot.R_SG_READY), json.dumps(plan))
+        for reg in (spot.R_SG_READY_ACTIVATE, spot.R_SG_READY_REQUEST):
+            self.assertNotIn(str(reg), json.dumps(plan))
 
     def test_cheap_hours_go_up_and_expensive_hours_go_down(self):
         plan = Plan().build(snap(SPIKY), now=AT)
@@ -603,6 +606,97 @@ class RejectedTokenOverHttp200(unittest.TestCase):
         ).snapshot(now=AT)
         self.assertFalse(result["ok"])
         self.assertNotIn("developer.tibber.com", result["error"])
+
+
+class OneRequestAtATime(unittest.TestCase):
+    """Two tabs arriving at an expired cache made two Tibber requests.
+
+    The web server runs a thread per request on top of the polling thread, and
+    this class had the caches but not the lock weather.py has had from the
+    start -- against an API that rate-limits, for prices that change twice a
+    day. The window is small and entirely real: a phone and a laptop with the
+    page open both poll, and the cache expires between them.
+    """
+
+    class Slow(FakeTibber):
+        def __init__(self, response, gate):
+            super().__init__(response, {"spot_cache_seconds": 900})
+            self.gate = gate
+
+        def _post(self, query):
+            # Wide open while the first caller is inside the fetch, which is
+            # the whole window the second one used to slip through.
+            self.gate.wait(5)
+            return super()._post(query)
+
+    def test_two_callers_at_an_expired_cache_ask_once(self):
+        gate = threading.Event()
+        client = self.Slow(payload(prices(SPIKY)), gate)
+        results = []
+
+        def call():
+            results.append(client.snapshot(now=AT))
+
+        threads = [threading.Thread(target=call) for _ in range(2)]
+        for t in threads:
+            t.start()
+        time.sleep(0.05)          # both are now at the door
+        gate.set()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(client.calls, 1,
+                         "two tabs made two Tibber requests for the same prices")
+        self.assertEqual(results[0]["ok"], results[1]["ok"])
+
+    def test_the_second_caller_gets_the_same_prices_and_not_an_error(self):
+        gate = threading.Event()
+        gate.set()
+        client = self.Slow(payload(prices(SPIKY)), gate)
+        first = client.snapshot(now=AT)
+        second = client.snapshot(now=AT + 60)
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["hours"], second["hours"])
+        self.assertEqual(client.calls, 1)
+
+    def test_the_lock_is_not_held_while_the_cache_is_merely_read(self):
+        # A snapshot served from the cache must not be able to queue behind a
+        # fetch that is timing out -- but it does share the lock, so this only
+        # asserts that a cached read is quick, not that it is lock-free.
+        client = self.Slow(payload(prices(SPIKY)), threading.Event())
+        client.gate.set()
+        client.snapshot(now=AT)
+        started = time.monotonic()
+        client.snapshot(now=AT + 1)
+        self.assertLess(time.monotonic() - started, 1.0)
+
+
+class PricesAreWrittenInSwedish(unittest.TestCase):
+    """"0.42 kr/kWh" in a sentence the page prints verbatim.
+
+    Every number the web app formats itself uses a decimal comma, and NIBE's
+    own manual writes "2,5 kW". A point in the middle of a Swedish sentence
+    reads as a typo, and these strings land in the plan rows next to numbers
+    the page did format.
+    """
+
+    def test_a_price_has_a_decimal_comma(self):
+        self.assertEqual(spot._price(0.42), "0,42 kr/kWh")
+
+    def test_a_negative_price_gets_a_real_minus_sign(self):
+        # Negative spot prices happen, and a hyphen next to the page's own
+        # minus signs is a different character in the same column.
+        self.assertEqual(spot._price(-0.07), "\u22120,07 kr/kWh")
+
+    def test_the_plan_rows_carry_it(self):
+        plan = Plan().build(snap(SPIKY), now=AT)
+        whys = [row.get("why") or "" for row in plan["hours"]]
+        priced = [w for w in whys if "kr/kWh" in w]
+        self.assertTrue(priced, "no plan row quoted a price; check the fixture")
+        for why in priced:
+            self.assertNotIn(".", why.split("kr/kWh")[0],
+                             "a decimal point reached a plan row: %s" % why)
+            self.assertIn(",", why.split("kr/kWh")[0])
 
 
 if __name__ == "__main__":
