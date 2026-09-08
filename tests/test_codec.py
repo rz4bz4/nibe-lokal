@@ -14,7 +14,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nibelokal.registry import Register, Registry           # noqa: E402
+from nibelokal.registry import (FULL_ADDRESS_FLOOR, Register,  # noqa: E402
+                                Registry)
 from nibelokal import safety                                # noqa: E402
 
 
@@ -201,6 +202,97 @@ class CsvLoading(unittest.TestCase):
             os.unlink(path)
 
 
+class ModbusManagerExport(unittest.TestCase):
+    """The only register export an F-series owner can actually produce.
+
+    There is no register export in an F pump's USB menu. The file comes from
+    NIBE's Windows tool, ModbusManager -> File -> Export to file, and it does
+    not look like the pump's own: four lines of preamble above the header, a
+    semicolon delimiter, an ID column holding the *whole* coil address rather
+    than an offset, and a Mode column of R / R/W in place of "Register type".
+
+    Adding 30001 or 40001 to a full address puts every register tens of
+    thousands of places from where it belongs -- silently, because the map is
+    what decides which wire address a read and a write go to.
+    """
+
+    EXPORT = (
+        "ModbusManager 1.0.9\n"
+        "20200624\n"
+        "Product: NIBE F750\n"
+        "Database: 8310\n"
+        "Title;Info;ID;Unit;Size;Factor;Min;Max;Default;Mode\n"
+        '"BT1 Outdoor Temperature";"Current outdoor temperature";40004;"°C";'
+        's16;10;-32767;32767;0;R\n'
+        '"Heat Curve S1";"Heat curve, see manual";47007;"";s8;1;0;15;9;R/W\n'
+        '"Degree Minutes (32 bit)";"Full resolution";40940;"DM";'
+        's32;10;-30000;30000;0;R/W\n'
+        '"EB100-BT16 Evaporator temp";"";40020;"°C";s16;10;-32767;32767;0;R\n'
+    )
+
+    def _write(self, text, encoding="utf-8"):
+        fh = tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False,
+                                         encoding=encoding)
+        fh.write(text)
+        fh.close()
+        self.addCleanup(os.unlink, fh.name)
+        return fh.name
+
+    def setUp(self):
+        self.registry = Registry.from_csv(self._write(self.EXPORT))
+
+    def test_a_full_address_is_not_offset(self):
+        self.assertEqual({40004, 47007, 40940, 40020},
+                         set(self.registry.registers))
+
+    def test_the_mode_column_decides_writability(self):
+        self.assertTrue(self.registry.get(47007).writable)
+        self.assertFalse(self.registry.get(40004).writable)
+
+    def test_the_rest_of_the_columns_are_read(self):
+        curve = self.registry.get(47007)
+        self.assertEqual("Heat Curve S1", curve.title)
+        self.assertEqual("s8", curve.size)
+        self.assertEqual((0.0, 15.0, 9.0), (curve.min, curve.max, curve.default))
+        dm = self.registry.get(40940)
+        self.assertEqual("s32", dm.size)
+        self.assertEqual(10, dm.factor)
+        self.assertEqual("DM", dm.unit)
+        self.assertEqual(-3000.0, dm.min)
+
+    def test_the_preamble_is_not_taken_for_the_header(self):
+        # Without skipping it, DictReader's column name is "ModbusManager 1.0.9"
+        # and nothing parses at all.
+        self.assertEqual(4, len(self.registry))
+
+    def test_an_input_register_stays_read_only_whatever_the_mode_says(self):
+        # With a full address the address space is the address's own leading
+        # digit, and it outranks the Mode column: there is no function that
+        # writes a 3xxxx input register, so a column claiming otherwise cannot
+        # be acted on.
+        path = self._write(self.EXPORT + '"An input";"";30005;"";s16;1;0;0;0;R/W\n')
+        registry = Registry.from_csv(path)
+        self.assertIn(30005, registry.registers)
+        self.assertFalse(registry.get(30005).writable)
+
+    def test_the_pumps_own_export_still_uses_offsets(self):
+        # The other half of the same decision. 8 is an offset here and must
+        # stay one; only a number at or above 30001 is a whole address.
+        path = self._write(
+            "Title\tRegister type\tRegister\tDivision factor\tUnit\t"
+            "Size of variable\tMin value\tMax value\tDefault value\n"
+            "Hot water top\tMODBUS_INPUT_REGISTER\t8\t10\t°C\t2\t0\t0\t0\n"
+            "More hot water\tMODBUS_HOLDING_REGISTER\t225\t1\t\t5\t0\t0\t0\n")
+        r = Registry.from_csv(path)
+        self.assertEqual({30009, 40226}, set(r.registers))
+        self.assertTrue(r.get(40226).writable)
+
+    def test_the_largest_offset_any_export_can_carry_is_below_the_floor(self):
+        # Why the comparison is safe, asserted rather than trusted: the coil
+        # space ends at 65534 and the higher base is 40001.
+        self.assertLess(65534 - 40001, FULL_ADDRESS_FLOOR)
+
+
 class Addressing(unittest.TestCase):
     def test_wire_addresses(self):
         self.assertEqual((reg(address=30009).kind, reg(address=30009).wire), (3, 8))
@@ -208,26 +300,38 @@ class Addressing(unittest.TestCase):
 
 
 class Blocking(unittest.TestCase):
+    """_blocks groups (reported address, register) pairs.
+
+    The pair is what carries a canonical address alongside the physical
+    register it resolves to -- see nibelokal/profile.py. The grouping itself is
+    still by the register's own wire address, which is what these test; on an
+    S-series pump the two halves of a pair are the same number.
+    """
+
+    @staticmethod
+    def _pairs(regs):
+        return [(r.address, r) for r in regs]
+
     def test_offsets_stay_correct_with_a_32_bit_register_in_the_block(self):
         from nibelokal.pump import _blocks
         regs = [reg(address=31026, size="s32"), reg(address=31028, size="s16")]
-        blocks = _blocks(sorted(regs, key=lambda r: r.wire))
+        blocks = _blocks(self._pairs(sorted(regs, key=lambda r: r.wire)))
         self.assertEqual(len(blocks), 1)
         block = blocks[0]
-        start = block[0].wire
-        self.assertEqual([r.wire - start for r in block], [0, 2])
+        start = block[0][1].wire
+        self.assertEqual([r.wire - start for _a, r in block], [0, 2])
 
     def test_a_wide_gap_splits_the_block(self):
         from nibelokal.pump import _blocks
         regs = [reg(address=40001), reg(address=40100)]
-        self.assertEqual(len(_blocks(regs)), 2)
+        self.assertEqual(len(_blocks(self._pairs(regs))), 2)
 
     def test_a_block_never_exceeds_the_query_limit(self):
         from nibelokal.pump import _blocks
         from nibelokal.modbus import MAX_REGS_PER_QUERY
         regs = [reg(address=40001 + i) for i in range(60)]
-        for block in _blocks(regs):
-            span = block[-1].wire + block[-1].count - block[0].wire
+        for block in _blocks(self._pairs(regs)):
+            span = block[-1][1].wire + block[-1][1].count - block[0][1].wire
             self.assertLessEqual(span, MAX_REGS_PER_QUERY)
 
 

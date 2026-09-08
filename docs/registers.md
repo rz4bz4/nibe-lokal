@@ -41,6 +41,21 @@ the assertion is the point.
 | 40207–40210 | Room setpoint per climate system | Ordinary thermostat behaviour, range-checked. |
 | 40067 | Periodic hot water interval | Days between legionella cycles. |
 
+**The same everyday settings on the F generation.** The tier is decided on the
+address that is actually written, and on an F-series pump that is not the
+S-series number this app speaks — see `nibelokal/profile.py`. These rows are
+not cosmetic: the ventilation boost writes with no confirm, so a register
+missing from this dict is not "confirmed anyway", it is *refused*.
+
+| Register | Setting | Why it is safe |
+|---|---|---|
+| 47041 | Hot water comfort mode | 40057 in the F numbering. Same four keys 0/1/2/4, and the pump validates them; the words are Economy/Normal/Luxury rather than Small/Medium/Large, so what the app shows is quoted from the pump rather than translated. |
+| 47260 | Fan mode 0–4 | 40105. Returns to normal on its own, on the return time below — which is the whole reason a ventilation boost is one tap and no dialog. |
+| 47271–47274 | Return time for fan modes 4–1 | 40116–40119. The pump's own range is 1–99 h here; this app still caps its own requests at 24. |
+| 47395–47398 | Room setpoint, climate systems 4–1 | 40210–40207. Note the order: 47398 is system 1. |
+| 47051 | Periodic hot water interval | 40067. Days between legionella cycles, same as on the S series. |
+| 48132 | Temporary luxury hot water | The F generation's whole extra-hot-water feature in one register: 0 off, 1 = 3 h, 2 = 6 h, 3 = 12 h, 4 = a one-time increase. It counts down and stops, which is what earns the everyday tier. This app's own button will not write it — there is no honest way to turn "180 minutes" into one of five fixed durations — but a script or a Homey flow that knows which one it wants should not have to assert consequences this register does not have. |
+
 ## Guarded
 
 Real settings with real consequences. They need `confirm: true`, are checked
@@ -67,6 +82,20 @@ against the register's own min/max, and land in the write log.
 |---|---|---|
 | 40106–40110 | Fan speed per ventilation mode, in percent | On an exhaust-air pump the ventilation *is* the heat source. See the warning below. |
 
+**Clearing an alarm**
+
+Not a setting: throwing away the evidence. `nibelokal/alarms.py` contains no
+write at all and no button in the app offers to reset anything — but
+`/api/write` will write any writable register it is asked to, and both of these
+are writable. Guarded is what makes a reset a decision rather than a
+possibility: an explicit `confirm: true` from somebody who typed the register
+number, and refused outright with `allow_guarded_writes: false`.
+
+| Register | Setting | What goes wrong |
+|---|---|---|
+| 40023 | Reset alarm | The alarm goes away and what caused it does not. The pump carries on, usually on the immersion heater, and the next person to look sees a healthy pump — which is the exact failure the alarm watching exists to catch. |
+| 45171 | Reset alarm, F generation | 40023 in the F numbering. It exists on every F map and on no S map, so until it was listed here it was guarded only by the default at the bottom of `tier()`, which is not the same as somebody having decided. Its neighbour is the reason it is worth naming twice: 45001 is the read-only alarm *number* on the F generation and *forced control*, blocked, on the S. |
+
 **SG Ready**
 
 Every S-series map titles **40761** *Heating (SG Ready)*, u8 0/1, default 1, and
@@ -85,6 +114,26 @@ address away and identical, needed one.
 | 48282 | The same as 40761, on an SMO 20/40 and the F generation | Titled *SG Ready heating* there. Guarded on all seventeen of those maps. |
 | 43033 | Activate SG Ready via API | This *is* the SG Ready input, over Modbus. |
 | 46009 | Requested operating mode (SG Ready), 0–3 | Which SG Ready state to ask for. The map publishes no enumeration for the four values. |
+| 48283 / 48284 | Let SG Ready affect the cooling / the hot water | 40762 and 40763 in the F numbering. 48282, their sibling for the heating, was already listed above from the S-series side; leaving the other two out was the same half-a-pair mistake pointing at the other generation. |
+| 48914 | Max internal additional heat while SG Ready is running | 41053 in the F numbering, and what 47212 is under another name while SG Ready is running. |
+
+**The same guarded settings on the F generation.** None of these *changes* a
+tier — anything unclassified is guarded already. What they change is the
+sentence a refusal quotes, which is the difference between a message somebody
+can act on and a bare register number.
+
+| Register | Setting | What goes wrong |
+|---|---|---|
+| 47004–47011 | Heating curve and heating offset, climate systems 4–1 | 40027–40034 in the F numbering. Note the order: 47007 is the curve for system 1 and 47011 its offset. |
+| 47012–47019 | Min and max supply temperature, climate systems 4–1 | 40035 and 40039; 47015 and 47019 are system 1. The F750's own range is 5–70 °C where an S735's is 20–80, so the floor and ceiling a write is checked against are the pump's, not this table's. |
+| 47020–47028 | Own curve P7–P1, and the two point-offset registers | 40040–40048. The points run downwards in address order on both generations, so P1 is 47026 and P7 is 47020. What P7 is *for* is the open question: NIBE's F750 and F1155 user manuals both show menu 1.9.7 with six points, −30 to +20 °C, and the seventh register exists anyway. The app labels it without a temperature on an F pump and leaves it out of the curve it interpolates — see [the F-series notes](f-series.md). |
+| 47043–47049 | Hot water start and stop temperatures | 40059–40065. The modes NIBE calls low/normal/high on an S are economy/normal/luxury on an F, in that order. |
+| 47212 | Max internal additional heat (kW) | 40103. The immersion heater's ceiling: raising it is buying electric heat, in the same kilowatts. |
+| 47370 / 47376 | Permit additional heat for heating; additional heat stop temperature | 40181 and 40186. The first lets the immersion heater into the house heating at all; the second decides how mild the weather may be while it does. |
+| 47137 | Operating mode | 40238, and the same value 2 for "additional heat only" — the single most expensive register on the pump, in either numbering. |
+| 47261–47265 | Exhaust air fan speed per mode, in percent | 40106–40110. On an exhaust-air F730 or F750 the ventilation is the heat source, exactly as on an S735. |
+| 43005 | Degree minutes, 16-bit | 40012 in the F numbering, and the one NIBE's own MODBUS 40 manual names in its example list. Degree minutes is the pump's running account of how far behind the heating is: write it too negative and the compressor starts now, too positive and it stops. Which of 43005 and 40940 the regulation actually follows, and whether writing either survives the next control cycle, is [not established](f-series.md). |
+| 40940 | Degree minutes, 32-bit — **and something else entirely on an S pump** | The full-resolution twin of 43005 on the F generation. On every S-series map that has this address — S735, S1155, SMO S40 — it is *EB103/104-GP12*, a charge pump, writable, and nothing to do with degree minutes. Guarded on both, and the reason quotes both, because this table is consulted with the address that is actually written and nothing above it knows which pump answered. |
 
 ## Blocked
 

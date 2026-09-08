@@ -495,6 +495,12 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
      inte bara på Just nu. -->
 <div id="alarmBanner" hidden></div>
 
+<!-- Samma sak, av samma skäl: översättningen mellan appens registernummer och
+     F-seriens har aldrig körts mot en riktig pump, och det är inget man ska
+     behöva leta reda på. Raden visas bara när servern säger verified: false,
+     alltså aldrig på en S-seriepump. -->
+<div id="genBanner" hidden></div>
+
 <!-- ===================== NU ===================== -->
 <section class="view on" id="v-now">
 
@@ -854,7 +860,14 @@ const MAPPED_SV = {
   32196: {'no alarm': 'inget larm', 'alarm': 'larm'},
   31029: {'off': 'av', 'hot water': 'varmvatten', 'heat': 'värme',
           'pool': 'pool', 'cooling': 'kyla'},
+  // Samma register, samma fyra nycklar 0/1/2/4, två uppsättningar ord: S-serien
+  // säger Small/Medium/Large och F-serien Economy/Normal/Luxury om precis samma
+  // tre lägen, i samma ordning. Pumpens svenska meny säger Litet/Medel/Stort på
+  // båda. Att lista båda är inte en översättning appen hittat på -- det är två
+  // stavningar av samma meny 2.2, och de fyra stopptemperaturerna bekräftar
+  // parningen: låg är Economy, normal är Normal, hög är Luxury.
   40057: {'small': 'Litet', 'medium': 'Medel', 'large': 'Stort',
+          'economy': 'Litet', 'normal': 'Medel', 'luxury': 'Stort',
           'smart control': 'Smart Control'},
 };
 const mapKey = v => String(v === null || v === undefined ? '' : v).trim().toLowerCase();
@@ -1140,7 +1153,7 @@ async function applyWrite(button, items, opt) {
     items.map(c => `<div class="change"><b>${esc(c.label)}</b>
         <div class="arrow">${esc(show(c, c.from, c.fromText))} <span style="color:var(--muted)">→</span>
           ${esc(show(c, c.to, c.toText))}</div>
-        <div class="addr">register ${esc(String(c.address))}</div></div>`).join('') +
+        <div class="addr">register ${esc(String(regNo(c.address)))}</div></div>`).join('') +
     // Varför de hör ihop är olika för olika par, och "var för sig gör de fel
     // sak" var skrivet för kurva+offset. Två egna kurvpunkter gör inte fel sak
     // var för sig, så meningen kommer från den som vet vilket par det är.
@@ -1338,7 +1351,7 @@ function renderNow() {
     .concat(tiles)).slice(0, TILE_MAX).join('');
 
   $('#all').innerHTML = latest.map(r =>
-    `<tr><td>${esc(namn(r))}<div class="addr">${r.address} · ${esc(r.title)}</div></td>
+    `<tr><td>${esc(namn(r))}<div class="addr">${regNo(r.address)} · ${esc(r.title)}</div></td>
      <td>${r.error ? '<span style="color:var(--bad)">svarar inte</span>'
                    : fmt(r.value, r.unit, r.address)}</td></tr>`
   ).join('');
@@ -1365,12 +1378,35 @@ async function refresh() {
     freshness(lastPolled, lastPollErr);
     if (!$('#histTabs').children.length) buildHistTabs();
     if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
+    paintGeneration(d);
   } catch (e) {
     $('#statusWrap').classList.remove('alarm');
     $('#dot').className = 'dot stale';
     $('#freshness').textContent = 'fel';
     if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
   }
+}
+
+/* En rad högst upp när registeröversättningen inte är verifierad.
+
+   `verified: false` betyder att appen läser och skriver den här pumpens
+   register genom en tabell som byggts ur NIBE:s egna registerkartor men aldrig
+   körts mot en riktig F-seriepump. Det är precis det tillståndet där appen ser
+   ut att fungera, och tystnad om det vore värre än att inte stödja F-serien
+   alls. Nyckeln saknas helt i äldre svar och på S-serien, så `=== false` och
+   inte `!d.verified`: en cachad sida mot en äldre server ska inte plötsligt
+   påstå något om en pump den inte vet något om. */
+const GEN_ISSUE = 'https://github.com/rz4bz4/nibe-lokal/issues/1';
+function paintGeneration(d) {
+  const box = $('#genBanner');
+  if (!box) return;
+  if (!d || d.verified !== false) { box.hidden = true; box.innerHTML = ''; return; }
+  const which = d.model ? d.model : ((d.generation || 'F') + '-serien');
+  box.hidden = false;
+  box.innerHTML = `<div class="warn">Registeröversättningen för ${esc(which)} är inte
+    verifierad mot en riktig pump — jämför värdena med pumpens egen display innan du
+    ändrar något, och <a href="${GEN_ISSUE}" target="_blank" rel="noopener">berätta vad du
+    ser</a>.</div>`;
 }
 
 /* ================= larm =================
@@ -1997,6 +2033,13 @@ async function loadHeating(quiet) {
   $('#heatState').innerHTML = '';
   $('#heatUp').disabled = $('#heatDown').disabled = false;
   $('#adviceGo').disabled = false;
+  /* Vilken utetemperatur varje punkt gäller kommer från servern, som läser den
+     ur pumpens profil. En null betyder att ingen vet: på F-serien visar NIBE:s
+     handbok sex punkter i meny 1.9.7 och registret för en sjunde finns ändå.
+     Se nibelokal/profile.py. */
+  if (Array.isArray(heat.own_curve_outdoor) &&
+      heat.own_curve_outdoor.length === OWN_CURVE_REG.length)
+    OWN_CURVE_OUT = heat.own_curve_outdoor.map(t => (typeof t === 'number' ? t : null));
 
   const el = $('#offsetNow');
   const next = heat.offset === null || heat.offset === undefined ? '–' : signed(heat.offset, 0);
@@ -2063,7 +2106,11 @@ $('#heatDown').onclick = e => nudgeOffset(-1, e.currentTarget);
    sju numrerade register i rad. Det är samma sak som pumpens display kallar
    egen kurva, och den enda begripliga bilden av den är en bild. */
 const OWN_CURVE_REG = [40046, 40045, 40044, 40043, 40042, 40041, 40040];  // P1 (kallast) .. P7
-const OWN_CURVE_OUT = [-30, -20, -10, 0, 10, 20, 30];
+/* Utetemperaturen för varje punkt. S-seriens lista som utgångsvärde; servern
+   skickar med sin egen i /api/heating och den vinner, för det är den som vet
+   vilken generation pumpen är. null = ingen vet vilken temperatur punkten
+   gäller, och då skriver appen ingen. Se loadHeating och profile.py. */
+let OWN_CURVE_OUT = [-30, -20, -10, 0, 10, 20, 30];
 // Register som lämnar Inställningar och bor här i stället.
 const ADV_EXTRA = [40035, 40039, 40185, 40047, 40048, 40027];
 const ADV_ALL = OWN_CURVE_REG.concat(ADV_EXTRA);
@@ -2076,7 +2123,12 @@ let lastAdvice = null;   // senaste svaret från rådgivaren, för att spegla de
 // Det här är ritning, inte rådgivning: förslagen kommer från servern.
 function curveAt(points, outdoor) {
   const known = [];
-  points.forEach((p, i) => { if (typeof p === 'number') known.push([OWN_CURVE_OUT[i], p]); });
+  // En punkt utan känd utetemperatur är inte en punkt på kurvan: den kan inte
+  // interpoleras mot något. Se OWN_CURVE_OUT.
+  points.forEach((p, i) => {
+    if (typeof p === 'number' && typeof OWN_CURVE_OUT[i] === 'number')
+      known.push([OWN_CURVE_OUT[i], p]);
+  });
   if (!known.length) return null;
   if (outdoor <= known[0][0]) return known[0][1];
   if (outdoor >= known[known.length - 1][0]) return known[known.length - 1][1];
@@ -2114,8 +2166,11 @@ function curveSvg(vals, lo, hi, opt) {
   const shift = opt.shift || {};
   const shiftAt = typeof shift.at === 'number' ? shift.at : null;
   const shiftDeg = typeof shift.deg === 'number' && shift.deg !== 0 ? shift.deg : null;
+  // Kurvans varma ände är den sista punkten med känd utetemperatur, inte den
+  // sista punkten: se OWN_CURVE_OUT.
+  const warmEnd = OWN_CURVE_OUT.filter(t => typeof t === 'number').pop();
   const shiftBase = (shiftAt !== null && shiftDeg !== null
-                     && shiftAt > OWN_CURVE_OUT[0] && shiftAt < OWN_CURVE_OUT[OWN_CURVE_OUT.length - 1])
+                     && shiftAt > OWN_CURVE_OUT[0] && shiftAt < warmEnd)
     ? curveAt(vals, shiftAt) : null;
   const all = known.concat(
     [lo, hi].filter(v => typeof v === 'number'),
@@ -2187,7 +2242,7 @@ function curveSvg(vals, lo, hi, opt) {
           <text x="2" y="${T + 4}">${esc(num(y1, 0))} °C</text>
           <text x="2" y="${(H - B).toFixed(1)}">${esc(num(y0, 0))} °C</text>`;
   OWN_CURVE_OUT.forEach((t, i) => {
-    if (i % 2) return;
+    if (i % 2 || typeof t !== 'number') return;
     out += `<text x="${X(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(signed(t, 0))}</text>`;
   });
   out += `<text x="${P}" y="${H - 1}">kallt ute</text>
@@ -2259,8 +2314,9 @@ function renderAdvanced() {
     html += vals.map((v, i) => advRow({
       address: OWN_CURVE_REG[i], point: i,
       title: OWN_CURVE_OUT[i] === 0 ? 'Kring noll grader ute'
+        : typeof OWN_CURVE_OUT[i] !== 'number' ? 'Kurvans varmaste ände'
         : degWord(OWN_CURVE_OUT[i]).replace('grader', 'grader ute'),
-      say: 'Så varmt vatten pumpen skickar ut då · P' + (i + 1) + ' · ' + OWN_CURVE_REG[i],
+      say: 'Så varmt vatten pumpen skickar ut då · P' + (i + 1) + ' · ' + regNo(OWN_CURVE_REG[i]),
       value: v, unit: '°C',
       over: typeof v === 'number' && ((typeof hi === 'number' && v > hi) ||
                                       (typeof lo === 'number' && v < lo)),
@@ -2269,7 +2325,8 @@ function renderAdvanced() {
     // Observationer om formen. De pekar, de påstår inte.
     const notes = [];
     let run = 1;
-    while (run < vals.length && typeof vals[run] === 'number' && vals[run] === vals[0]) run++;
+    while (run < vals.length && typeof OWN_CURVE_OUT[run] === 'number'
+           && typeof vals[run] === 'number' && vals[run] === vals[0]) run++;
     if (run >= 2 && typeof vals[0] === 'number') {
       const tak = typeof hi === 'number' && hi - vals[0] > 2
         ? ` Taket för framledningen ligger på ${num(hi)} °C, så det är inte taket som håller nere den —
@@ -2323,23 +2380,23 @@ function renderAdvanced() {
     return advRow({address: a, title, say, value: v, unit: u});
   };
   const limits = row(40035, 'Kallaste vattnet pumpen skickar ut',
-      'Golvet. Med golvvärme är det satt så att golvet inte känns kallt · 40035', '°C') +
+      'Golvet. Med golvvärme är det satt så att golvet inte känns kallt · ' + regNo(40035), '°C') +
     row(40039, 'Varmaste vattnet pumpen skickar ut',
-      'Taket. Ligger kurvan över det händer ingenting förrän taket höjs · 40039', '°C') +
+      'Taket. Ligger kurvan över det händer ingenting förrän taket höjs · ' + regNo(40039), '°C') +
     row(40185, 'Då slutar pumpen värma för säsongen',
-      'Över den här utetemperaturen stängs värmen av · 40185', '°C');
+      'Över den här utetemperaturen stängs värmen av · ' + regNo(40185), '°C');
   if (limits) html += `<h3 class="sub-h">Golv, tak och säsong</h3>` + limits;
 
   const shift = row(40047, 'Knycken sitter vid den här utetemperaturen',
-      'Punktförskjutning, utetemperatur · 40047', '°C') +
+      'Punktförskjutning, utetemperatur · ' + regNo(40047), '°C') +
     row(40048, 'Så mycket knycks kurvan där',
-      'Punktförskjutning, grader. För att rätta ett enda temperaturintervall · 40048', '°C');
+      'Punktförskjutning, grader. För att rätta ett enda temperaturintervall · ' + regNo(40048), '°C');
   if (shift) html += `<h3 class="sub-h">Punktförskjutning</h3>` + shift;
 
   if (setRows[40027]) {
     html += `<h3 class="sub-h">Vilken kurva pumpen följer</h3>` +
       advRow({address: 40027, title: own ? 'Egen kurva (0)' : 'Kurva ' + setRows[40027].value,
-        say: '0 är egen kurva och punkterna ovan. 1–15 är NIBE:s färdiga kurvor · 40027',
+        say: '0 är egen kurva och punkterna ovan. 1–15 är NIBE:s färdiga kurvor · ' + regNo(40027),
         value: setRows[40027].value, unit: ''});
   }
 
@@ -2407,9 +2464,19 @@ async function stepAdvanced(address, step, button) {
   if (i >= 0) {
     const vals = advPoints();
     const after = vals.slice(); after[i] = to;
-    label = 'Egen kurva P' + (i + 1) + ' (' + signed(OWN_CURVE_OUT[i], 0) + ' °C ute)';
-    why = 'Det här är framledningen när det är ' + degWord(OWN_CURVE_OUT[i]) + ' ute. ' +
-      'Punkten formar kurvan i just det vädret och lämnar resten ifred.';
+    // Utan känd utetemperatur får punkten ingen: se OWN_CURVE_OUT. Det är
+    // P7 på F-serien, där NIBE:s handbok visar sex punkter och den sjunde
+    // bara finns som register.
+    const outAt = OWN_CURVE_OUT[i];
+    label = 'Egen kurva P' + (i + 1) +
+      (typeof outAt === 'number' ? ' (' + signed(outAt, 0) + ' °C ute)' : '');
+    why = typeof outAt === 'number'
+      ? 'Det här är framledningen när det är ' + degWord(outAt) + ' ute. ' +
+        'Punkten formar kurvan i just det vädret och lämnar resten ifred.'
+      : 'Det här är kurvans varmaste ände. NIBE:s handbok för F-serien visar sex ' +
+        'punkter, −30 till +20 °C, och registret för en sjunde finns ändå — vid ' +
+        'vilken utetemperatur den gäller är inte belagt. Appen räknar därför inte ' +
+        'med punkten när den tolkar kurvan.';
     const hi = heat && typeof heat.max_supply === 'number' ? heat.max_supply : null;
     const lo = heat && typeof heat.min_supply === 'number' ? heat.min_supply : null;
     if (hi !== null && to > hi)
@@ -2491,7 +2558,7 @@ function renderAdvice(a) {
     html += groups.map((g, gi) => `<div class="prop">` + g.items.map(sg =>
         `<div class="h">${esc(sg.title)}: ${esc(valTxt(sg.current, sg.unit))} →
            ${esc(valTxt(sg.proposed, sg.unit))}</div>
-         <div class="addr">register ${esc(String(sg.address))}</div>
+         <div class="addr">register ${esc(String(regNo(sg.address)))}</div>
          <div class="w">${esc(sg.why)}</div>`).join('') +
       `<div class="row" style="margin-top:11px"><button class="primary" data-group="${gi}">
         ${g.items.length > 1 ? 'Genomför båda' : 'Genomför'}</button></div></div>`).join('');
@@ -2606,7 +2673,7 @@ function renderAutotune(d) {
     const lbl = SWEDISH[p.register] || ('Register ' + p.register);
     html += `<div class="prop">
       <div class="h">${esc(lbl)}: ${esc(valTxt(p.from))} → ${esc(valTxt(p.to))}</div>
-      <div class="addr">register ${esc(String(p.register))}</div>
+      <div class="addr">register ${esc(String(regNo(p.register)))}</div>
       <div class="w">${esc(p.why_sv || '')}</div>
       ${p.expected_sv ? `<div class="sub">Förväntat: ${esc(p.expected_sv)}</div>` : ''}
       <div class="row" style="margin-top:11px"><button class="primary" id="tuneGo">Genomför</button></div>
@@ -2635,6 +2702,20 @@ function renderAutotune(d) {
 const WATER_GROUP = 'hotwater';
 let setRows = {};
 
+/* Registernumret att visa för någon som står framför pumpen.
+
+   Appen adresserar allt med S-seriens nummer -- det är vokabulären hela den
+   här filen är skriven i -- men på en F-seriepump heter samma register något
+   annat, och det är det numret som står i ägarens egen dokumentation och på
+   pumpens display. Servern skickar därför med `physical` på de rader där de
+   två skiljer sig, och bara där: på en S-seriepump finns nyckeln inte alls och
+   det här är oförändrat. Se nibelokal/profile.py. */
+function regNo(address) {
+  const a = Number(address);
+  const row = setRows[a] || byAddr[a];
+  return (row && row.physical) || a;
+}
+
 async function loadSettings(quiet) {
   let groups;
   try { groups = (await api('/api/settings')).groups; }
@@ -2660,9 +2741,10 @@ async function loadSettings(quiet) {
   const render = (g, bare) => `<div class="setgroup">${bare ? '' : `<h3>${esc(g.title)}</h3>`}
     ${g.intro ? `<p class="intro">${esc(g.intro)}</p>` : ''}
     ${g.rows.map(r => {
+      const no = regNo(r.address);
       const range = (r.min !== null && r.max !== null)
-        ? `${r.address} · ${num(r.min)} … ${num(r.max)}${r.unit ? ' ' + unitSv(r.unit) : ''}`
-        : String(r.address);
+        ? `${no} · ${num(r.min)} … ${num(r.max)}${r.unit ? ' ' + unitSv(r.unit) : ''}`
+        : String(no);
       return `<div class="setrow">
         <div class="n"><b>${esc(r.label)}${r.tier === 'guarded'
           ? '<span class="tag">skyddad</span>' : ''}</b>
@@ -2777,7 +2859,7 @@ async function loadLog() {
       const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
       const day = `${d.getDate()}/${d.getMonth() + 1}`;
       return `<tr><td>${esc(r.title || SWEDISH[r.address] || r.address)}
-              <div class="addr">${day} ${t} · ${r.address}</div></td>
+              <div class="addr">${day} ${t} · ${regNo(r.address)}</div></td>
               <td>${esc(valTxt(r.before))} → ${esc(valTxt(r.after))}</td></tr>`;
     }).join('') : '<tr><td>Inget skrivet ännu</td><td></td></tr>';
   } catch (e) { /* optional */ }

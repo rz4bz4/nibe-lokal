@@ -5,7 +5,7 @@
 #: sees, so there is nothing left to keep in step by hand. Three copies used to
 #: disagree -- the package said 0.2.1, the wheel 0.3.0 and the git tag v0.3.1 --
 #: and SMHI was told the oldest of the three.
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 #: A real minus sign (U+2212), not a hyphen. The web app uses it for every
 #: number it formats itself, and settings.py already uses it in its titles; a

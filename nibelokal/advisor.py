@@ -53,6 +53,14 @@ R_OWN_CURVE = [40046, 40045, 40044, 40043, 40042, 40041, 40040]  # P1 (coldest) 
 # P1 at the cold end. Verify against your own pump's display (menu 1.30.7) --
 # this is the S-series layout and the point spacing is what makes the advice
 # land on the right point instead of one nobody's weather ever reaches.
+#
+# This is the S-series list, kept as a module constant because it is what
+# autotune and the tests import. The list that is actually used comes from the
+# pump's profile: on the F generation the seventh point's outdoor temperature
+# is not established -- NIBE's F750 and F1155 user manuals both show menu 1.9.7
+# with six rows, -30 to +20 -- and the profile says so with a None, which
+# `curve_at` and `_points_for` leave out of the fit entirely. See
+# profile.OWN_CURVE_OUTDOOR and docs/f-series.md.
 OWN_CURVE_OUTDOOR = [-30, -20, -10, 0, 10, 20, 30]
 R_ROOM_SETPOINT = 40207
 R_ROOM_TEMP = 30117
@@ -175,6 +183,21 @@ def emitters(kind: str) -> dict:
     return EMITTERS.get((kind or "").lower(), EMITTERS[DEFAULT_EMITTERS])
 
 
+def outdoor_points(pump=None) -> list:
+    """The outdoor temperature of each own-curve point, for this pump.
+
+    One list, from the profile, so that P7's temperature is asserted in exactly
+    one place -- and on an F-series pump is not asserted at all: the entry is
+    None there, and everything that reads this list skips a point whose
+    temperature it does not know. A pump with no profile (a test double) gets
+    the S-series list, which is what this module has always assumed.
+    """
+    profile = getattr(pump, "profile", None)
+    if profile is None:
+        return list(OWN_CURVE_OUTDOOR)
+    return profile.own_curve_outdoor
+
+
 def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
     """What the pump can tell us about its own heating, without being asked."""
     data = pump.read_many(READ)
@@ -197,6 +220,13 @@ def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
         "priority": (data.get(R_PRIORITY) or {}).get("value"),
         "own_curve": [_value(data, a) for a in R_OWN_CURVE],
     }
+    # The outdoor temperature each of those points governs, from the profile.
+    # Sent to the web app as well, so the curve chart draws the same seven --
+    # or six and one unlabelled -- points this module reasons about, from one
+    # list rather than from a copy of it in JavaScript. A null in it means the
+    # temperature is not established; see profile.OWN_CURVE_OUTDOOR.
+    temps = outdoor_points(pump)
+    out["own_curve_outdoor"] = temps
     out["has_room_sensor"] = out["room_temp"] is not None
     out["uses_own_curve"] = out["curve"] == 0
     em = emitters(emitter_kind)
@@ -211,8 +241,8 @@ def diagnose(pump, store=None, emitter_kind: str = DEFAULT_EMITTERS) -> dict:
         notes.append(em["note"])
 
     if out["uses_own_curve"]:
-        pairs = [(OWN_CURVE_OUTDOOR[i], p) for i, p in enumerate(out["own_curve"])
-                 if p is not None]
+        pairs = [(temps[i], p) for i, p in enumerate(out["own_curve"])
+                 if p is not None and temps[i] is not None]
         if pairs:
             notes.append(
                 "Kurvan står på 0, vilket betyder egen kurva: pumpen följer dina egna "
@@ -345,7 +375,11 @@ def advise(pump, feeling: str, when: str, store=None,
     # Wrong only in some weather = the curve's shape, not its height.
     cold_end = when == "cold_outside"
     if state["uses_own_curve"]:
-        idx = _points_for(when, state.get("outdoor"))
+        # The outdoor temperatures diagnose() read out of the profile, so the
+        # advice and the diagnosis agree about which point governs what -- and
+        # so a point with no known temperature is not proposed on either.
+        temps = state.get("own_curve_outdoor") or list(OWN_CURVE_OUTDOOR)
+        idx = _points_for(when, state.get("outdoor"), temps)
         ceiling = state["max_supply"]
         floor = state["min_supply"]
         hit_ceiling = hit_floor = False
@@ -363,8 +397,9 @@ def advise(pump, feeling: str, when: str, store=None,
                 continue
             proposed = current + direction * em["point_step"]
             after = curve_at([proposed if j == i else p
-                              for j, p in enumerate(state["own_curve"])], weather)
-            before = curve_at(state["own_curve"], weather)
+                              for j, p in enumerate(state["own_curve"])],
+                             weather, temps)
+            before = curve_at(state["own_curve"], weather, temps)
             if after is not None and before is not None:
                 if ceiling is not None and min(after, before) >= ceiling:
                     hit_ceiling = True
@@ -375,7 +410,7 @@ def advise(pump, feeling: str, when: str, store=None,
             advice.suggestions.append(Suggestion(
                 address=R_OWN_CURVE[i],
                 title="Egen kurva, punkt P%d (%s °C ute)"
-                      % (i + 1, sv_number(OWN_CURVE_OUTDOOR[i], None, sign=True)),
+                      % (i + 1, sv_number(temps[i], None, sign=True)),
                 current=current,
                 proposed=proposed,
                 unit="°C",
@@ -384,7 +419,7 @@ def advise(pump, feeling: str, when: str, store=None,
                     "punkten för %s °C ute, alltså den som gäller %s. %d grad%s "
                     "framledning där ändrar värmen i just det vädret, utan att röra "
                     "resten av kurvan."
-                    % (i + 1, sv_number(OWN_CURVE_OUTDOOR[i], None, sign=True),
+                    % (i + 1, sv_number(temps[i], None, sign=True),
                        "när det är kallt" if cold_end else "i milt väder",
                        em["point_step"], "er" if em["point_step"] != 1 else ""),
             ))
@@ -478,15 +513,25 @@ def advise(pump, feeling: str, when: str, store=None,
     return advice
 
 
-def curve_at(points: list, outdoor: float) -> float | None:
+def curve_at(points: list, outdoor: float, temps: list | None = None) -> float | None:
     """Supply temperature the own curve asks for at a given outdoor temperature.
 
     Linear between the two bracketing points, flat outside the ends. This is
     what actually governs the house -- judging a point against min/max supply
     on its own says "this point does nothing" about a point that is half of the
     interpolation currently in force.
+
+    `temps` is the outdoor temperature of each point, from the pump's profile;
+    the S-series list is the default because that is the numbering the whole
+    app speaks. A point whose temperature is None is left out of the fit
+    entirely -- on the F generation that is P7, whose outdoor temperature is
+    not documented anywhere. Interpolating it at a guessed +30 would put the
+    guess into every number this function returns in mild weather, which is
+    where a heat pump spends most of the year.
     """
-    known = [(t, p) for t, p in zip(OWN_CURVE_OUTDOOR, points) if p is not None]
+    temps = OWN_CURVE_OUTDOOR if temps is None else temps
+    known = [(t, p) for t, p in zip(temps, points)
+             if p is not None and t is not None]
     if not known:
         return None
     if outdoor <= known[0][0]:
@@ -502,13 +547,18 @@ def curve_at(points: list, outdoor: float) -> float | None:
     return float(known[-1][1])
 
 
-def _points_for(when: str, outdoor) -> list[int]:
+def _points_for(when: str, outdoor, temps: list | None = None) -> list[int]:
     """Which own-curve points actually govern the weather being complained about.
 
     Reaching for P1 and P2 because they are "the cold end" is the mistake worth
     avoiding: they sit at -30 and -20 C, which most of Sweden never sees. The
     point that governs a normal cold day is the one bracketing it.
+
+    A point with no known outdoor temperature is not a candidate: it cannot be
+    said to govern any weather. On an F pump that is P7, so the mild end of the
+    advice stops at P6 (+20 C) there. See profile.OWN_CURVE_OUTDOOR.
     """
+    temps = OWN_CURVE_OUTDOOR if temps is None else temps
     if when == "cold_outside":
         # Aim just below the current temperature, not far below it: at -10 out,
         # subtracting twelve lands on the -20 and -30 points, which govern
@@ -518,12 +568,19 @@ def _points_for(when: str, outdoor) -> list[int]:
     else:
         target = 8.0 if outdoor is None else max(outdoor, 5.0)
     # The two points bracketing `target`, clamped to the ends of the curve.
-    below = [i for i, t in enumerate(OWN_CURVE_OUTDOOR) if t <= target]
-    lo = below[-1] if below else 0
-    hi = min(lo + 1, len(OWN_CURVE_OUTDOOR) - 1)
+    # Indices of the points that have a temperature at all, in order, so that
+    # "the point above" is the next known one rather than the next number.
+    usable = [i for i, t in enumerate(temps) if t is not None]
+    if not usable:
+        return []
+    below = [i for i in usable if temps[i] <= target]
+    lo = below[-1] if below else usable[0]
+    after = [i for i in usable if i > lo]
+    hi = after[0] if after else lo
     if lo == hi:
-        lo = max(0, hi - 1)
-    return [lo, hi]
+        earlier = [i for i in usable if i < hi]
+        lo = earlier[-1] if earlier else hi
+    return [lo, hi] if lo != hi else [lo]
 
 
 def _curve_limit(curve: float, proposed: float) -> str:

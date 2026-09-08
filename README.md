@@ -2,9 +2,18 @@
 
 [![tests](https://github.com/rz4bz4/nibe-lokal/actions/workflows/ci.yml/badge.svg)](https://github.com/rz4bz4/nibe-lokal/actions/workflows/ci.yml)
 
-A small web app for a NIBE S-series heat pump that talks **directly to the pump
-over Modbus TCP on your own network**. No cloud account, no subscription, no
-myUplink. Your settings and your history stay in files you own.
+A small web app for a NIBE heat pump that talks **directly to the pump over
+Modbus on your own network**. No cloud account, no subscription, no myUplink.
+Your settings and your history stay in files you own.
+
+It is written for, and run daily on, an **S-series** pump over Modbus TCP.
+The older **F series** (F750, F1155, SMO 20/40, VVM 225/320/500 …) is supported
+in code, through a MODBUS 40 accessory and an RS485 gateway, and is
+**unverified against hardware**: nobody involved owns one, and not a line of it
+has been run against a real pump. See [docs/f-series.md](docs/f-series.md) for
+what it is built from and what it is guessing at, and
+[issue #1](https://github.com/rz4bz4/nibe-lokal/issues/1) if you have an F750
+and half an hour.
 
 It does six things:
 
@@ -28,7 +37,10 @@ It does six things:
   you have to remember to take is one you will not have when you need it, and you
   need it right after changing something you should not have.
 - **Pushes alarms to your phone.** NIBE's own 478 S-series alarm texts, in
-  Swedish, verbatim, sent once per alarm rather than once per minute. 289 of the
+  Swedish, verbatim, sent once per alarm rather than once per minute. (There are
+  461 more for the F series in `alarms_f.json`, and they are a *different set of
+  numbers* — 300 of them carry an action sentence, and none of them have been
+  seen next to a real pump.) 289 of the
   478 also carry the sentence from NIBE's longer text that tells you what to do;
   the other 189 have no such sentence at NIBE, and the app shows nothing rather
   than inventing one. Eleven codes have no short text either — for those you get
@@ -74,11 +86,20 @@ extra hot water, a ventilation boost, a nudge to the heat, and your own history
 
 ## What you need
 
-- A NIBE S-series heat pump (S735, S1155, S1255, S320, SMO40 …) with software
-  **2.2.1 or later**, on the same LAN as the machine running this.
+- A NIBE heat pump on the same LAN as the machine running this. Either:
+  - an **S-series** pump (S735, S1155, S1255, S320, SMO40 …) with software
+    **2.2.1 or later**, which speaks Modbus TCP itself. This is the case the app
+    was written for and the only one anyone has run it against; or
+  - an **F-series** pump (F750, F1155, F1255 …), or an SMO 20/40 or VVM indoor
+    unit, with a MODBUS 40 accessory and an RS485-to-Ethernet gateway.
+    Supported in code and **unverified against hardware** — see
+    [F series](#f-series-unverified) below and
+    [issue #1](https://github.com/rz4bz4/nibe-lokal/issues/1).
 - Python 3.10 or newer.
-- **Modbus TCP enabled on the pump**: on its display, menu **7.5.9 Modbus
-  TCP/IP**. Note the two switches in that menu:
+- **Modbus TCP enabled on the pump** (S series): on its display, menu **7.5.9
+  Modbus TCP/IP**. On an F-series pump this menu does not exist and the way in is
+  the MODBUS 40 accessory instead — [docs/f-series.md](docs/f-series.md) is the
+  whole story. Note the two switches in menu 7.5.9:
   - *"Reading Modbus only"* must be **off** if you want the app to change
     anything. Reading works either way.
   - *"IP address restriction"* — set it to the machine running this app. Worth
@@ -87,7 +108,54 @@ extra hot water, a ventilation boost, a nudge to the heat, and your own history
   192.168/16), so this runs on your LAN, not in a cloud.
 
 Find the pump's address in your router's DHCP list — it shows up as
-`NIBE-<serial number>`.
+`NIBE-<serial number>`. On an F-series pump you point `host` at the *gateway*
+instead; the pump's own network socket is for NIBE Uplink and does not answer
+Modbus.
+
+### F series (unverified)
+
+The F generation — F370, F470, F730, F750, F1145, F1155, F1245, F1255, F1345,
+F1355, and the SMO 20/40 and VVM indoor units built on the same platform — has
+no Modbus TCP. It reaches the network through NIBE's **MODBUS 40** accessory
+(part 067 144), which is Modbus RTU over RS485 at 9600 8N1, and then through an
+RS485-to-Ethernet gateway. The app grows two settings for this, `generation` and
+`framing`, both documented in `config.example.yaml`.
+
+**None of this has been run against an F-series pump.** Nobody involved owns
+one. It is built from NIBE's own manuals and register maps, it may not work at
+all, and where it is guessing it says so.
+[docs/f-series.md](docs/f-series.md) has the hardware chain, what MODBUS 40 can
+and cannot do, the register and semantic differences with a confidence against
+each one, and the four things an owner could do that would settle most of it.
+[Issue #1](https://github.com/rz4bz4/nibe-lokal/issues/1)
+([docs/ISSUE-f-series.md](docs/ISSUE-f-series.md)) is the issue asking for
+exactly that.
+
+Four differences are worth knowing before you read further, because they are the
+ones that bite:
+
+- **MODBUS 40 is slow, and it is one register per request.** NIBE's own table
+  limits a read of any register that is not in the module's 20-entry LOG.SET
+  file to **one register per request** (two words for a 32-bit value) with a
+  2.1 s maximum timeout, so the app asks for one at a time on an F pump instead
+  of batching twenty: a poll of the dashboard's twenty answering registers is
+  around 40 seconds of bus time and a full `backup` of every register takes
+  20–35 minutes, which is the arithmetic working rather than a bug.
+  `poll_seconds: 60` is therefore the floor on an F series, not a comfortable
+  default — and the **daily automatic backup is off** there unless you ask for
+  it, because half an hour of held bus is not a thing to do by default.
+- **Writing is function 16 only.** NIBE: *"'Write Single registers' does not
+  work in the Modbus40."* This app has only ever sent function 16, on both
+  generations, so this is a thing to know rather than a thing to configure.
+- **The register export comes from ModbusManager, not from the pump.** There is
+  no register export in an F pump's USB menu. NIBE's Windows tool → File →
+  Export to file.
+- **Which way round a 32-bit value comes is a setting, and NIBE's own documents
+  disagree about its factory value.** It is menu 5.3.11 and it is also register
+  48852, so the app reads 48852 at startup and follows it, defaulting to the low
+  word first. `word_swap` in `config.yaml` overrules both. See
+  [docs/f-series.md](docs/f-series.md); 48852's value on a real pump is one of
+  the questions issue #1 asks.
 
 ## Install
 
@@ -166,12 +234,30 @@ this process.
 Register numbers differ between models **and between firmware versions of the
 same model**. The app can get the map from either of two places:
 
-1. **Your own pump.** Menu 7.5.9 → *"Export all registers"* onto a USB stick.
-   Point `register_csv` at the resulting CSV. This is the only map guaranteed to
-   match your unit — use it if you can.
+1. **Your own pump's registers.** Point `register_csv` at the CSV. This is the
+   only map guaranteed to match your unit — use it if you can, and on an F
+   series use it if you possibly can, because nobody has checked the shipped
+   maps against a real one. Where the file comes from is not the same on the two
+   generations:
+   - **S series**: on the pump, menu 7.5.9 → *"Export all registers"* onto a
+     USB stick.
+   - **F series**: there is **no** register export in the pump's USB menu.
+     The file comes from NIBE's Windows tool, **ModbusManager → File → Export
+     to file**. It has whole register numbers where the S-series export has
+     offsets, and the app tells the two apart by itself.
+
+   A CSV carries no model name, and it does not need one: the app derives the
+   generation from the map, because 40027 is the heating curve on an S and
+   47007 on an F. Set `generation:` only if your export somehow has both or
+   neither, which it will say so about.
 2. **The `nibe` package** (`pip install nibe`), which ships the same maps the
    Home Assistant integration uses. Set `model:` to yours. Convenient, and what
    most people will start with.
+
+The numbering differs between the two generations, not just between models: the
+heating curve is 40027 on an S735 and 47007 on an F750, and 45001 is *"activate
+forced control"* on every S map and read-only *"alarm"* on every F one. That is
+what `generation` decides, and why it is not guessed from anything ambiguous.
 
 If the map does not match your pump, registers read *plausible nonsense* rather
 than failing loudly. That is the failure mode to watch for. Registers your pump
@@ -481,8 +567,15 @@ python3 -m nibelokal backup --note "before touching the heating curve"
 python3 -m nibelokal diff backup/nibe-20260601-090000.json backup/latest.json
 ```
 
-The app also takes one on its own every `auto_backup_hours` (24 by default), so
-there is always something to go back to.
+The app also takes one on its own every `auto_backup_hours` — every 24 hours on
+an S-series pump, so there is always something to go back to.
+
+**On an F-series pump the automatic one is off unless you ask for it.** A full
+snapshot there is one register per request at NIBE's 2.1 s, which is 20–35
+minutes of the polling thread holding the pump's only bus: the page goes stale
+for all of it and an alarm raised meanwhile is noticed when it finishes. Set
+`auto_backup_hours` yourself — overnight is a perfectly reasonable thing to want
+— or run `nibelokal backup` by hand, which prints the estimate first.
 
 `backup` reads every register the pump answers on and writes
 `backup/nibe-<timestamp>.json` plus a `latest.json` symlink. `diff` compares two
@@ -544,11 +637,14 @@ one this app could close by talking to NIBE differently — and on the S series
 Modbus does not expose the settings at all. There is no weekly-schedule register
 anywhere in the S-series map, and holiday has only a status flag (40020, plus
 45391 for away mode) with no dates, temperatures or fan modes behind it. The
-F-series map has the whole holiday block at 48043–48051; the S series simply does
-not. Toggling a status the pump's own calendar also drives is a good way to end
-up with two things fighting over the same setting, so the app leaves those two
-registers where everything unclassified lands: guarded, writable only if you ask
-for it explicitly.
+F-series map has the whole holiday block at 48043–48051 — activated, start and
+end date, hot water mode, fan mode, room temperature — and the S series simply
+does not. Toggling a status the pump's own calendar also drives is a good way to
+end up with two things fighting over the same setting, so the app leaves those
+two registers where everything unclassified lands: guarded, writable only if you
+ask for it explicitly. The F block is not used either: a feature that works on
+one generation and not the other is worse than a feature that works on neither,
+and this one is not implemented on hardware anybody here can test.
 
 ## Security
 
@@ -657,6 +753,38 @@ particularly after a firmware update. The app reconnects and backs off; if it is
 constant, reboot the pump.
 
 **No unit answers** — try `unit: 0` instead of `1`. Both are in use in the wild.
+On an F series through a MODBUS 40, NIBE fixes the slave address at `1` unless
+you changed it in menu 5.3.11.
+
+**F series: it connects and then times out with nothing in it** — try the other
+value of `framing`. A transparent gateway needs `rtu` and a converting one needs
+`tcp`, and sending the wrong one produces exactly this. See
+[docs/f-series.md](docs/f-series.md).
+
+**F series: 16-bit values look right, 32-bit ones are absurd** — that is the
+word-swap setting in the pump's menu 5.3.11, not the register map. It exists
+from MODBUS 40 software v.11, and it is also register 48852, which the app reads
+at startup and follows. If 48852 and the menu disagree, or the register does not
+answer, say what the menu says with `word_swap: false` (high word first) or
+`word_swap: true` (low word first) in `config.yaml` rather than editing
+anything. Any backup header records which order the snapshot was taken in.
+NIBE's manual and NIBE's register database contradict each other about the
+factory value; [docs/f-series.md](docs/f-series.md) has both, and issue #1 asks
+owners for theirs.
+
+**F series: a write is refused or lands somewhere odd** — this app only ever
+sends function 16, so the classic "function 6 does not work in the Modbus40"
+failure cannot happen here. What can:
+- the wrong **`unit`**. A MODBUS 40 that is not being addressed answers nothing
+  rather than "wrong slave", so it looks like the gateway is missing. It is
+  slave 1, fixed, up to MODBUS 40 v.7, and 1–247 from v.10 (menu 5.3.11).
+- the wrong **`framing`**, which fails the same way — see the entry above.
+- the wrong **word swap** on a 32-bit register: the value is written in the
+  other order and reads back as nonsense, while every 16-bit register is fine.
+- a register **ModbusManager marks read-only**. NIBE says a value can be updated
+  *"if the heat pump/indoor module permits it"* and that *"the values that can
+  be updated are in ModbusManager"* — so the map is the answer to "may I write
+  this", and it is an answer from a database rather than from your pump.
 
 ## Prior art and thanks
 
@@ -666,6 +794,17 @@ which also powers the Home Assistant integration.
 Register semantics and the protocol limits come from NIBE's own
 [Modbus S-Series](https://installer.nibe.eu/download/18.47aa975e18a8b43315f342c/1696946129027/Modbus%20S-Series.pdf)
 technical document.
+
+The F-series work stands on NIBE's MODBUS 40 installer manual and
+[FAQ](https://installer.nibe.eu/download/18.47aa975e18a8b43315f342a/1696946128721/FAQ%20Modbus%2040.pdf),
+their F750 and F1155 manuals, and other people's projects —
+[yozik04/nibe](https://github.com/yozik04/nibe) again, openHAB's
+[nibeheatpump binding](https://www.openhab.org/addons/bindings/nibeheatpump/),
+and one long
+[LogicMachine thread](https://forum.logicmachine.net/showthread.php?tid=903&pid=13184)
+of people finding out what MODBUS 40 actually does.
+[docs/f-series.md](docs/f-series.md) cites each one against the claim it
+supports.
 
 ## Not affiliated with NIBE
 

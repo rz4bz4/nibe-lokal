@@ -5,24 +5,123 @@
 
 # Your heat pump's IP address on your LAN. Find it in the router's DHCP list;
 # it appears as NIBE-<serial number>. Required -- there is no default.
+#
+# On an F-series pump this is the *gateway's* address, not the pump's. An F750
+# has a network socket but it only speaks to NIBE Uplink; Modbus arrives through
+# a MODBUS 40 accessory on RS485 and a gateway. See docs/f-series.md.
 host: ""
 
 port: 502          # Modbus TCP. Enable it on the pump: menu 7.5.9 Modbus TCP/IP.
+                   # On an F series, whatever port your gateway listens on.
 unit: 1            # Modbus slave id. Try 1; if nothing answers, try 0.
+                   # Through a MODBUS 40 it is fixed at 1 unless you changed it
+                   # in the pump's menu 5.3.11 (needs MODBUS 40 v.10 or later).
+
+# Which generation of NIBE the register numbers belong to. The two do not agree
+# on numbering: the heating curve is 40027 on an S735 and 47007 on an F750, and
+# 45001 is the writable "activate forced control" on every S map and a read-only
+# alarm number on every F one. Getting this wrong is not a missing value, it is
+# a plausible wrong one.
+#
+#   ""   derive it from `model` -- the normal case, and what you want
+#   "S"  S735, S1155, S1255, S320, S2125, SMO S40, VVM S320/S325/S500
+#   "F"  F750, F730, F470, F370, F1155, F1255, F1145, F1245, F1345, F1355,
+#        and -- this is the one that surprises people -- the SMO 20, the SMO 40
+#        and the VVM 225/310/320/325/500. See the model list below.
+#
+# Set it explicitly only when `model` is empty (because you are using
+# register_csv) or when the derivation gets it wrong.
+generation: ""
+
+# How Modbus frames are wrapped on the TCP connection. Two boxes that both call
+# themselves "RS485 to Ethernet" can want opposite things here, and picking the
+# wrong one gives you a connection that opens and then times out with nothing in
+# it -- the same symptom either way, which is why this is a setting and not a
+# guess.
+#
+#   "tcp"  Modbus TCP: an MBAP header, no CRC. Every S-series pump, and any
+#          gateway you have put into Modbus-TCP-to-RTU conversion mode
+#          (Waveshare's "Modbus TCP<-->RTU", PUSR's "TCP server, Modbus TCP").
+#   "rtu"  Raw RTU frames with their CRC16, forwarded byte for byte. Gateways in
+#          transparent/passthrough mode -- which is the *default* on a Waveshare
+#          RS485 TO ETH and needs nothing configured. This is Home Assistant's
+#          "rtuovertcp".
+#
+# If you do not know which mode your gateway is in, try "rtu" first.
+framing: "tcp"
+
+# Which of the two 16-bit registers of a 32-bit value comes first. It only
+# affects 32-bit registers -- the energy meters, the compressor hour counters,
+# the 32-bit degree minutes -- and every 16-bit register reads correctly either
+# way, which is what makes the wrong setting hard to recognise: the page looks
+# right except for a handful of large, stable-looking nonsense numbers.
+#
+#   ""       ask the pump, and this is what you want.
+#            S series: low word first. NIBE's own technical document specifies
+#            it, it is not a setting there, and this app has always done it.
+#            F series: it IS a setting -- the pump's menu 5.3.11, from MODBUS 40
+#            software v.11 -- and it is also register 48852 "Modbus40 Word
+#            Swap", so the app reads that register once at startup and uses what
+#            it says. If the register does not answer it assumes the low word
+#            first, and every backup header records which of the two happened.
+#   true     low word first, whatever the pump says.
+#   false    high word first (Big Endian), whatever the pump says.
+#
+# Worth knowing before you set it: NIBE's own two documents disagree. The
+# MODBUS 40 installer manual says "Factory setting: Big Endian", and NIBE's
+# register database gives 48852 a factory value of 1 -- "swapping the words in
+# 32-bit variables" -- which is the opposite. The `nibe` python package and
+# Home Assistant's integration both follow the register. So does this app, and
+# that is why it would rather ask your pump than believe either of them.
+# Nothing here has been checked against real hardware; see docs/f-series.md.
+#
+# Set it only after looking at menu 5.3.11, or after seeing the symptom above.
+word_swap: ""
 
 # --- the register map -----------------------------------------------------
 
-# Used when register_csv is empty. S-series models the `nibe` package knows --
-# these are the ones with built-in Modbus TCP:
+# Used when register_csv is empty. Grouped by GENERATION, because that is what
+# decides how every register number in this app is translated -- see
+# `generation` above. How you reach the pump is a separate question, and the
+# two do not line up the way the names suggest.
+#
+# S generation (register 40027 is the heating curve):
 #   S735 S735C S1155 S1255 S1156 S1256 S320 S325 S330 S332 S2125
-#   SMO20 SMO40 SMOS40 VVMS320 VVMS325 VVMS500
-# The F-series maps are in the package too, but those pumps need a MODBUS 40
-# accessory over RS485 rather than the TCP this app speaks.
+#   SMOS40 VVMS320 VVMS325 VVMS500
+# F generation (47007 is the heating curve), and UNVERIFIED -- nobody has run
+# this against one. Read docs/f-series.md before you trust anything it does:
+#   F750 F730 F470 F370 F1155 F1255 F1145 F1245 F1345 F1355
+#   SMO20 SMO40 VVM225 VVM310 VVM320 VVM325 VVM500
+#
+# The SMO 20 and SMO 40 are the pair worth pointing at, and this file used to
+# get them wrong twice. They were listed as S-series models, which would have
+# had the app reading 40027 on a controller whose heating curve is 47007; and
+# this comment then said they have built-in Modbus TCP, which they do not.
+# Their maps carry 48852 "Modbus40 Word Swap" and 48889 "MODBUS40 Disable
+# LOG.SET" -- the MODBUS 40 accessory's own registers -- and no Modbus TCP
+# registers at all, and the `nibe` package's own README offers TCP for S models
+# only. They are F-generation controllers reached the F-generation way, and
+# docs/f-series.md names the menu that switches it on: 5.2.4 on an SMO 40.
+#
+# Transport, which follows the generation and not the model name:
+#   built-in Modbus TCP  : every S-series pump (menu 7.5.9)
+#   MODBUS 40 on RS485   : the F-series pumps, the SMO 20/40 and the VVM indoor
+#                          units, through a gateway. See docs/f-series.md.
 model: ""
 
-# Better: export the register list from the pump itself (menu 7.5.9 ->
-# "Export all registers" onto a USB stick) and point this at the CSV. It is the
-# only map guaranteed to match your unit and its firmware. Takes precedence.
+# Better: use your own pump's register list and point this at the CSV. It is
+# the only map guaranteed to match your unit and its firmware, and it takes
+# precedence over `model`. Where it comes from depends on the generation:
+#   S series : on the pump, menu 7.5.9 -> "Export all registers" onto a USB
+#              stick.
+#   F series : there is no register export in the pump's USB menu. Use NIBE's
+#              Windows tool ModbusManager -> File -> Export to file. That file
+#              has whole register numbers (40004, 47007) where the S-series
+#              export has offsets, and the app tells them apart by itself.
+# A CSV carries no model name. On its own it is still a complete configuration
+# -- the app works the generation out from the map, because 40027 is the
+# heating curve on an S and 47007 on an F -- but if it somehow has both or
+# neither, set `generation` below.
 register_csv: ""
 
 # --- the web app ----------------------------------------------------------
@@ -50,6 +149,32 @@ allow_any_host: false
 poll_seconds: 60      # NIBE allows 100 registers/s; 60 s is the community norm
 history_days: 400     # older readings are pruned daily
 
+# On an F series, 60 is the FLOOR rather than a comfortable default, and the
+# reason is not the pump but the accessory. NIBE's own table limits a read of
+# any register that is not in MODBUS 40's 20-entry LOG.SET file to one register
+# per request (two words for a 32-bit value) with a 2.1 s maximum timeout, and
+# users report the 2.1 s as real spacing rather than a timeout that is rarely
+# reached. So the app asks for exactly one register at a time there, and the
+# arithmetic is simply the number of registers:
+#
+#     20 dashboard registers an F750 answers  x ~2.1 s  ~= 40 s per poll
+#     the 646 registers in the F750 map       x ~2.1 s  ~= 20-25 minutes
+#
+# (Twenty and not the twenty-five listed in nibelokal/pump.py: five of them have
+# no F-series equivalent and are never asked for. See nibelokal/profile.py. The
+# backup walks the whole map, which is 646 registers for an F750 -- so a backup
+# there is a quarter of an hour and more, not the seconds it is on an S735.)
+#
+# Forty seconds of bus time inside a sixty-second poll leaves very little room,
+# and a backup holds the bus for all of its minutes -- do not run one while you
+# are waiting for a poll. Raise poll_seconds to 300 if the dashboard is enough
+# once every five minutes, or put the dashboard registers in a LOG.SET file
+# built with NIBE's ModbusManager, which lifts those twenty to 20 registers per
+# request and a 0.5 s timeout. Nobody has measured any of this on real
+# hardware -- if you do, docs/ISSUE-f-series.md is where that number goes.
+# (The rate limiter is not the constraint and is not raised for this: 100
+# registers a second is NIBE's ceiling and the RS485 bus is nowhere near it.)
+
 # What those two cost on disk, because it is more than it looks. One row per
 # register per poll, about 57 bytes a row once the indexes are counted, and the
 # shipped dashboard is 25 registers:
@@ -65,7 +190,27 @@ history_days: 400     # older readings are pruned daily
 # A full snapshot of every setting, taken automatically this often. A backup you
 # have to remember to take is one you will not have when you need it -- and you
 # need it right after changing something you should not have. 0 turns it off.
-auto_backup_hours: 24
+#
+# Left commented out on purpose, because the right answer is not the same on the
+# two generations and the app resolves it from the pump's:
+#
+#   S series: every 24 h. A full snapshot is a few seconds of Modbus TCP and
+#             costs a few hundred kilobytes a year. This is what it has always
+#             done and what it goes on doing.
+#   F series: OFF. Through a MODBUS 40 the same snapshot is one register per
+#             request at 2.1 s -- 20 to 35 minutes for a 646-register F750 map
+#             -- and it is taken by the polling thread, which holds the pump's
+#             only bus for all of it. Every poll in that window is skipped, the
+#             page goes stale for half an hour, and an alarm raised meanwhile is
+#             noticed when the backup finishes. A daily snapshot is worth
+#             having; it is not worth having by default at that price on a
+#             transport nobody has measured yet.
+#
+# Uncomment it to say what you want, on either generation. On an F pump a
+# nightly one at an hour you are asleep is a perfectly reasonable thing to ask
+# for -- it is being the default that is not. `nibelokal backup` takes one by
+# hand whenever you like, and on an F pump it prints the estimate first.
+# auto_backup_hours: 24
 
 # false blocks every "guarded" write (heating curve, operating mode, hot water
 # temperatures, ...) outright, leaving only the everyday ones. Blocked registers

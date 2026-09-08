@@ -24,6 +24,7 @@ from http.server import ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import config, server                            # noqa: E402
+from nibelokal.profile import Profile                           # noqa: E402
 from nibelokal.registry import Register                         # noqa: E402
 from nibelokal.store import Poller, Store                       # noqa: E402
 
@@ -72,9 +73,17 @@ class FakePump:
 
     def __init__(self):
         self.registry = FakeRegistry()
+        # An S-series profile is the identity, so this fake behaves exactly as
+        # it did before the profile existed. See nibelokal/profile.py.
+        self.profile = Profile("S", "S735")
         self.values = {30002: 3.4, 30006: 32.0, 31976: 0, 40012: -120,
                        40027: 5, 40031: 0}
         self.written = []
+
+    def register(self, address):
+        if not self.profile.available(address):
+            return None
+        return self.registry.get(self.profile.physical(address))
 
     def read_many(self, addresses):
         return {a: {"value": self.values[a]} for a in addresses if a in self.values}

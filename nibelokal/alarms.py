@@ -19,12 +19,25 @@ Registers, verified against the S735 map in yozik04/nibe:
          hands it over as one of those strings and not as 0/1 -- confirmed on
          the real pump, where /api/register/32196 answers "No alarm". Both
          forms are accepted here; see _class1_raised.
-  40023  "Reset alarm", writable.
+  40023  "Reset alarm", writable. 45171 "Alarm Reset" on the F generation.
 
-40023 is never written here, and there is no code path that could. An alarm
-this app silently cleared is an alarm nobody ever learns about, and the pump
-would go on failing in exactly the way that costs money. Resetting is done on
-the pump's own display, by a person who has read what the alarm says.
+**This module never writes anything.** There is no write in it, no import of
+anything that writes, and nothing in the watcher, the notifier or the poll
+loop that could reach a register. An alarm this app silently cleared is an
+alarm nobody ever learns about, and the pump would go on failing in exactly
+the way that costs money.
+
+That is a promise about this module and not about the app, and an earlier
+version of this paragraph said "there is no code path that could", which was
+not true: `/api/write` will write any writable register an owner asks it to,
+and 40023 and 45171 are writable. What is actually enforced there is the tier.
+Both are classified GUARDED in nibelokal/safety.py with the reason spelled out,
+so a reset needs an explicit `confirm: true` from somebody who typed the
+register number, and is refused outright when `allow_guarded_writes: false`.
+Nothing resets an alarm by itself, and no button in the web app offers to.
+Resetting is done deliberately, by a person who has read what the alarm says --
+on the pump's own display, or through `/api/write` with the confirm that says
+they meant it.
 
 Edge triggering is the whole design. The poller runs every 60 seconds and a
 standing alarm is present in every one of those readings; notifying on presence
@@ -68,11 +81,46 @@ import urllib.request
 
 log = logging.getLogger("nibelokal.alarms")
 
+#: Canonical (S-series) addresses, like every other register number in this
+#: app. The readings this module is handed come out of `pump.read_many`, which
+#: is canonical in and canonical out, so nothing here has to translate to look
+#: a value up -- see nibelokal/profile.py.
+#:
+#: What does have to translate is the *text*. Two of the sentences below name a
+#: register number, and they are read by somebody standing in front of a pump:
+#: on an F-series pump the alarm number is register 45001, not 31976, and
+#: telling them to look at 31976 sends them looking for a register that pump
+#: does not have. `_register_name` does that translation.
+#:
+#: The class 1 flag has no F-series equivalent at all -- no F map the `nibe`
+#: package ships publishes one. That degrades by itself and needs no branch:
+#: with no reading for 32196, `_current_codes` never consults the flag, and an
+#: F-series alarm is caught by its number alone. What is lost is the ability to
+#: notice an alarm the pump raises *without* naming it, which on the S series
+#: is the only thing this flag is for.
 R_ALARM = 31976       # alarm number
 R_CLASS1 = 32196      # "Class 1 alarm" flag, 0/1
 
-TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "data", "alarms_s.json")
+#: The alarm code table, per generation. **The numbers are not the same
+#: alarms.** 301 code numbers appear in both files and exactly one of them
+#: carries the same text in both; code 123 is "Ingen rumsgivare i kyla" on the
+#: S series and "Givarfel: AZ2-BT23 uteluftsgivare" on the F. See
+#: `_meta.numbering_warning` in alarms_f.json and docs/f-series.md.
+#:
+#: So the table is chosen by the pump's generation, and by nothing else. The
+#: failure this prevents is not a missing text: it is a fluent, confident
+#: Swedish sentence about a fault the pump does not have, arriving on
+#: somebody's phone at three in the morning at Pushover priority 2. Where the
+#: generation cannot be established the lookup is refused outright and the code
+#: is reported as a number -- see describe().
+_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+TABLE_PATHS = {"S": os.path.join(_DATA, "alarms_s.json"),
+               "F": os.path.join(_DATA, "alarms_f.json")}
+
+#: The S-series table's path, kept under its old name because it is what this
+#: module has always called it. Nothing here reads it any more; the tables are
+#: chosen by generation.
+TABLE_PATH = TABLE_PATHS["S"]
 
 #: Config keys this module reads, with the defaults it assumes when they are
 #: absent. Repeated here rather than imported from config.py so that this
@@ -179,53 +227,99 @@ CREATE TABLE IF NOT EXISTS alarm_notify_window (
 );
 """
 
-_table: dict | None = None
+#: The loaded tables, by generation. Read once each and kept.
+_tables: dict[str, dict] = {}
 
 
-def load_table(path: str = TABLE_PATH) -> dict:
-    """The alarm code table, read once and kept.
+def generation_of(profile) -> str | None:
+    """"S", "F", or None when it cannot be established.
+
+    Takes a Profile, a bare "S"/"F", or None -- a Watcher may be built against
+    a test double or an older Pump that has no profile at all, and that is the
+    case this returns None for rather than assuming a generation.
+    """
+    if profile is None:
+        return None
+    gen = getattr(profile, "generation", profile)
+    gen = str(gen or "").strip().upper()
+    return gen if gen in TABLE_PATHS else None
+
+
+def load_table(generation: str, path: str | None = None) -> dict:
+    """The alarm code table for one generation, read once and kept.
 
     A missing or broken file is not fatal: without it every code is unknown,
     which still tells the owner the number and that something is wrong. Losing
     the alarm because the lookup table would not parse would be the wrong
     trade entirely.
+
+    `path` is for the tests, which need to see what a broken file does without
+    breaking the shipped one.
     """
-    global _table
-    if _table is not None:
-        return _table
+    generation = str(generation or "").strip().upper()
+    if generation not in TABLE_PATHS:
+        raise ValueError("no alarm table for generation %r" % (generation,))
+    if path is None and generation in _tables:
+        return _tables[generation]
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path or TABLE_PATHS[generation], encoding="utf-8") as fh:
             loaded = json.load(fh)
         codes = loaded.get("codes")
         if not isinstance(codes, dict):
             raise ValueError("no 'codes' object")
-        _table = loaded
+        table = loaded
     except Exception as exc:                              # noqa: BLE001
-        log.warning("alarm code table unavailable (%s): every code will be "
-                    "reported by number only", exc)
-        _table = {"_meta": {"error": str(exc)}, "codes": {}}
-    return _table
+        log.warning("%s-series alarm code table unavailable (%s): every code "
+                    "will be reported by number only", generation, exc)
+        table = {"_meta": {"error": str(exc)}, "codes": {}}
+    if path is None:
+        _tables[generation] = table
+    return table
 
 
-def describe(code) -> dict:
-    """Look up one alarm number. Never guesses.
+def describe(code, profile=None) -> dict:
+    """Look up one alarm number, in this pump's own generation. Never guesses.
 
     The result of this ends up in front of a person deciding whether to call an
     engineer at their own expense, so an unknown code says it is unknown and
     shows the number. A plausible-sounding invented text would be worse than
     nothing: it is the one failure mode where the app is confidently wrong
     about a thing the owner cannot check without the number.
+
+    `profile` decides which table is read, and there is no default. An S-series
+    text served for an F-series code is exactly the plausible-sounding invented
+    text this function refuses to produce -- the two numberings share 301 code
+    numbers and one text -- so with no profile the answer is the number and an
+    honest sentence saying why there is nothing else. Falling back to the S
+    table would be the same mistake in a more confident voice.
     """
     try:
         number = int(code)
     except (TypeError, ValueError):
         number = None
 
+    generation = generation_of(profile)
+    if generation is None:
+        shown = number if number is not None else code
+        return {
+            "code": number,
+            "severity": "warning",
+            "text": "Larm %s. Appen vet inte vilken generation pumpen är (S "
+                    "eller F), och larmnumren betyder olika saker på de två – "
+                    "samma nummer är olika fel. Därför slås koden inte upp "
+                    "alls." % shown,
+            "action": "Sätt `generation` (eller `model`) i config.yaml, och "
+                      "läs larmet på pumpens display så länge.",
+            "known": False,
+        }
+
     entry = None
     if number is not None:
-        entry = load_table()["codes"].get(str(number))
-    # Eleven codes in NIBE's own table carry a severity and an action but no
-    # text at all. Handing those over as known with text "" put an empty line
+        entry = load_table(generation)["codes"].get(str(number))
+    # Eleven codes in NIBE's S-series table, and twelve in the F one, carry a
+    # severity and an action but no text at all -- and four of the F ones have
+    # no long text either, so for them there is nothing but the number.
+    # Handing those over as known with text "" put an empty line
     # in the notification and an empty line on the page; what the owner can
     # actually use is the number and the fact that the table has nothing to
     # say about it. Severity and action are still NIBE's, so they are kept.
@@ -402,10 +496,15 @@ def make_notifier(config: dict):
 class Watcher:
     """Turns a stream of register readings into "this just started" events."""
 
-    def __init__(self, store, pump, config: dict, notifier=None):
+    def __init__(self, store, pump, config: dict, notifier=None, profile=None):
         self.store = store
         self.pump = pump
         self.config = config or {}
+        # Which generation's alarm table to read, and which register numbers to
+        # quote in a notification. Taken from the pump, which always has one;
+        # `profile` is for a caller that has one and no pump. None means the
+        # codes are reported by number only -- see describe().
+        self.profile = profile if profile is not None else getattr(pump, "profile", None)
         self.notifier = make_notifier(self.config) if notifier is None else notifier
         self.min_severity = str(self.config.get(
             "alarm_min_severity", CONFIG_DEFAULTS["alarm_min_severity"])).lower()
@@ -530,17 +629,30 @@ class Watcher:
             "known": info["known"],
         }
 
+    def _register_name(self, address: int) -> int:
+        """The number this pump's own display and paperwork use for `address`.
+
+        A notification is read by somebody who is about to go and look at the
+        pump, so it has to name the register they will find there. Falls back
+        to the canonical number for a pump object that has no profile -- a test
+        double, or a Watcher built against an older Pump.
+        """
+        return (self.profile.physical(address) if self.profile is not None
+                else address)
+
     def _describe(self, code: int) -> dict:
         if code == 0:
             # The 32196 case. Truthful about what is and is not known.
             return {
                 "code": 0, "severity": "alarm", "known": False,
-                "text": "Pumpen rapporterar ett larm (register 32196) men lämnar "
-                        "inget larmnummer i register 31976.",
+                "text": "Pumpen rapporterar ett larm (register %d) men lämnar "
+                        "inget larmnummer i register %d."
+                        % (self._register_name(R_CLASS1),
+                           self._register_name(R_ALARM)),
                 "action": "Läs larmet på pumpens display – appen kan inte se "
                           "vilket det är.",
             }
-        return describe(code)
+        return describe(code, self.profile)
 
     def _trim(self, c) -> None:
         """Keep the unsent queue bounded.

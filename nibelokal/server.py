@@ -352,14 +352,22 @@ class Handler(BaseHTTPRequestHandler):
             data = pump.read_many(DASHBOARD) if live else (poller.latest or pump.read_many(DASHBOARD))
             out = []
             for address, row in sorted(data.items()):
-                reg = pump.registry.get(address)
-                out.append({
+                reg = pump.register(address)
+                entry = {
                     "address": address,
                     "title": reg.title if reg else str(address),
                     "unit": reg.unit if reg else "",
                     "value": row.get("value"),
                     "error": row.get("error"),
-                })
+                }
+                # `address` stays the canonical (S-series) number the web app
+                # is built around, so an older cached index.html goes on
+                # working; `physical` is what this pump calls it, and appears
+                # only when the two differ -- which is never on an S-series
+                # pump. See nibelokal/profile.py.
+                if reg is not None and reg.address != address:
+                    entry["physical"] = reg.address
+                out.append(entry)
             # Additive on purpose: registers, polled_at, poll_error and
             # register_map keep their names and their meanings, because the web
             # app reads them by name and an older cached index.html has to keep
@@ -367,6 +375,18 @@ class Handler(BaseHTTPRequestHandler):
             body = {
                 "pump": {"host": pump.host, "port": pump.port},
                 "register_map": pump.registry.source,
+                # Which generation of pump this is, and whether the mapping
+                # between the register numbers this app uses and the ones that
+                # pump uses has ever been run against real hardware. S is the
+                # identity and is what the author's own pump runs; F is a table
+                # built from the `nibe` package's maps and verified only
+                # against those. The web app shows a line at the top of the
+                # page when this is false, because "it looks like it works and
+                # does nothing" is the failure mode worth warning about.
+                # See nibelokal/profile.py.
+                "generation": pump.profile.generation,
+                "model": pump.profile.model,
+                "verified": pump.profile.verified,
                 "polled_at": poller.last_ok,
                 "poll_error": poller.last_error,
                 # A database that will not take the readings is its own
@@ -406,14 +426,18 @@ class Handler(BaseHTTPRequestHandler):
             needle = q.get("q", [""])[0]
             writable = q.get("writable", ["0"])[0] == "1"
             hits = pump.registry.search(needle, writable)[:200]
-            return self._json([dict(r.as_dict(), tier=tier(r.address)) for r in hits])
+            return self._json([_register_json(pump, pump.profile.canonical(r.address), r)
+                               for r in hits])
 
         if path.startswith("/api/register/"):
             address = _as_int(path.rsplit("/", 1)[1], "address")
-            reg = pump.registry.get(address)
+            reg = pump.register(address)
             if reg is None:
-                return self._json({"error": "no such register"}, 404)
-            return self._json(dict(reg.as_dict(), value=pump.read(address), tier=tier(address)))
+                return self._json({"error": "no such register",
+                                   "detail": pump.profile.why_unavailable(address)
+                                             or None}, 404)
+            return self._json(dict(_register_json(pump, address, reg),
+                                   value=pump.read(address)))
 
         if path == "/api/history":
             address = _as_int(q.get("address", ["30009"])[0], "address")
@@ -769,6 +793,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+def _register_json(pump, address: int, reg) -> dict:
+    """One register, addressed the way the whole API addresses registers.
+
+    `address` is the canonical (S-series) number every caller uses; `physical`
+    is what this pump calls it, present only when the two differ. The tier is
+    decided on the physical address, because that is what a write would go to.
+    """
+    out = dict(reg.as_dict(), address=address, tier=tier(reg.address))
+    if reg.address != address:
+        out["physical"] = reg.address
+    return out
+
+
 def _optional_number(value):
     """A number out of the config, or None for "not set". Never raises."""
     if value is None or isinstance(value, bool):
@@ -822,9 +859,15 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     # The watcher and the indoor feed ride along on the poll the pump is
     # already answering: one Modbus read, and the alarm registers are in
     # DASHBOARD, so watching costs nothing extra on the wire.
+    # Resolved against the generation: unset means daily on an S-series pump,
+    # as it always has, and off on an F one, where a snapshot is half an hour of
+    # the polling thread holding the only bus there is. See
+    # config.auto_backup_hours.
+    from .config import DEFAULT_AUTO_BACKUP_HOURS, auto_backup_hours
+    backup_every = auto_backup_hours(cfg, pump.profile.generation)
     poller = Poller(pump, store, DASHBOARD, cfg["poll_seconds"],
-                    backup_dir if cfg.get("auto_backup_hours") else None,
-                    float(cfg.get("auto_backup_hours") or 24),
+                    backup_dir if backup_every else None,
+                    backup_every or DEFAULT_AUTO_BACKUP_HOURS,
                     watcher=providers["watcher"], indoor=providers["homey"])
     poller.start()
 
@@ -853,14 +896,35 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     httpd = ThreadingHTTPServer((listen, port), Handler)
     where = "http://%s:%d/" % ("localhost" if listen in ("0.0.0.0", "") else listen, port)
     print("nibe-lokal serving %s" % where)
-    print("  pump         : %s:%d" % (pump.host, pump.port))
+    print("  pump         : %s:%d%s" % (pump.host, pump.port,
+                                        "" if pump.mb.framing == "tcp"
+                                        else " (Modbus RTU over TCP)"))
     print("  register map : %s" % pump.registry.source)
+    if not pump.profile.verified:
+        # An F-series mapping has never met an F-series pump. Said on the
+        # console as well as on the page, because the person setting this up
+        # for the first time is looking at the console.
+        print("  generation   : %s - the translation between this app's register "
+              "numbers and" % pump.profile.generation)
+        print("                 your pump's has NOT been run against real hardware. "
+              "Check the")
+        print("                 values against the pump's own display before you "
+              "change anything.")
     print("  polling      : every %d s" % cfg["poll_seconds"])
     if not Handler.ctx["token"]:
         print("  auth         : none - anyone on your LAN can change settings.")
         print("                 Set auth_token in config.yaml to require a token.")
     if poller.backup_dir:
         print("  auto backup  : every %g h into %s" % (poller.backup_hours, backup_dir))
+    elif pump.profile.generation == "F" and cfg.get("auto_backup_hours") in (None, ""):
+        # Off by default here, and quietly off is indistinguishable from
+        # broken. See config.auto_backup_hours.
+        print("  auto backup  : off - a full snapshot through a MODBUS 40 is one "
+              "register per")
+        print("                 request and holds the bus for 20-35 minutes. Set "
+              "auto_backup_hours")
+        print("                 in config.yaml to turn it on anyway, or run "
+              "`nibelokal backup`.")
     # Say which of the optional features are on. An integration that is
     # silently off looks exactly like one that is broken, and this is the line
     # that tells them apart without opening the browser.

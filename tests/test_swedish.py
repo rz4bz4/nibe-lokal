@@ -137,7 +137,7 @@ class NoSwedishSentenceFormatsItsOwnNumbers(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
     def test_there_is_one_and_it_is_the_released_one(self):
-        self.assertEqual(nibelokal.__version__, "0.3.2")
+        self.assertEqual(nibelokal.__version__, "0.4.0")
 
 
 if __name__ == "__main__":

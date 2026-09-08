@@ -17,6 +17,7 @@ No network. Nothing here is configured, so no provider has anywhere to call,
 and the one server that is started binds to 127.0.0.1 on a port the kernel
 picks.
 """
+import builtins
 import contextlib
 import io
 import json
@@ -34,6 +35,7 @@ from http.server import ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import alarms, autotune, config, server, spot     # noqa: E402
+from nibelokal.profile import Profile                            # noqa: E402
 from nibelokal.pump import DASHBOARD                             # noqa: E402
 from nibelokal.store import (R_DEGREE_MINUTES, R_OUTDOOR,        # noqa: E402
                              R_PRIORITY, R_SUPPLY, Poller, Store)
@@ -109,8 +111,11 @@ class FakePump:
     host = "192.0.2.10"
     port = 502
 
-    def __init__(self, values=None, fail=False):
+    def __init__(self, values=None, fail=False, profile=None):
         self.registry = FakeRegistry()
+        # An S-series profile is the identity, so this fake behaves exactly as
+        # it did before the profile existed. See nibelokal/profile.py.
+        self.profile = profile if profile is not None else Profile("S", "S735")
         self.fail = fail
         self.values = values or {30002: 3.4, 30006: 32.0, 31976: 0,
                                  40012: -120, 40027: 5, 40031: 0}
@@ -119,11 +124,21 @@ class FakePump:
         # them to /api/status.
         self.missing_list: list[dict] = []
 
+    def register(self, address):
+        """Pump.register: the register a canonical address resolves to here."""
+        if not self.profile.available(address):
+            return None
+        return self.registry.get(self.profile.physical(address))
+
     def read_many(self, addresses):
         self.reads += 1
         if self.fail:
             raise OSError("pumpen svarar inte")
-        return {a: {"value": self.values[a]} for a in addresses if a in self.values}
+        # A register this pump cannot address drops out, exactly as it does in
+        # Pump.read_many -- which is how the alarm watcher finds out that an
+        # F-series pump has no class 1 flag.
+        return {a: {"value": self.values[a]} for a in addresses
+                if a in self.values and self.register(a) is not None}
 
     def missing(self):
         return list(self.missing_list)
@@ -1167,7 +1182,7 @@ class OneVersionString(unittest.TestCase):
 
     def test_the_package_is_the_source_of_truth(self):
         import nibelokal
-        self.assertEqual(nibelokal.__version__, "0.3.2")
+        self.assertEqual(nibelokal.__version__, "0.4.0")
 
     def test_the_wheel_does_not_carry_a_second_copy(self):
         with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as fh:
@@ -1367,3 +1382,357 @@ class WriteAllResponseShape(unittest.TestCase):
                                 "error": "Värmeoffset: timeout"})
         self.assertTrue(reply["partial"])
         self.assertIn("rolled_back", reply)
+
+
+class TheStatusEndpointSaysWhichGenerationThisIs(unittest.TestCase):
+    """Three additive keys the page reads to decide whether to warn.
+
+    `generation`, `model` and `verified` say which numbering the addresses in
+    this answer are in and whether the translation between them and the app's
+    own has ever been run against real hardware. On an S-series pump the
+    translation is the identity, so `verified` is true and nothing is shown.
+    On an F-series one it is a table read out of NIBE's own register maps that
+    has never met a pump, and the page says so in one line.
+
+    `physical` on a register row is the other half: the address stays the
+    canonical one the web app is built around, so a cached index.html goes on
+    working, and the number the owner's own documentation uses rides along.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _status(self, pump):
+        poller = Poller(pump, self.store, DASHBOARD, 60)
+        ctx = server.build_context(
+            pump, _cfg(), self.tmp.name, self.store, poller,
+            {"homey": None, "weather": None, "tibber": None, "plan": None,
+             "watcher": None, "errors": {}})
+        return _handler(ctx).call("/api/status")[0]
+
+    def test_an_s_series_pump_reports_itself_verified(self):
+        body = self._status(FakePump())
+        self.assertEqual(body["generation"], "S")
+        self.assertEqual(body["model"], "S735")
+        self.assertIs(body["verified"], True)
+
+    def test_no_s_series_row_carries_a_physical_address(self):
+        # Because there is nothing to carry: the translation is the identity,
+        # and a key that appeared here would change what the page renders on
+        # the author's own pump.
+        body = self._status(FakePump())
+        self.assertTrue(body["registers"])
+        for row in body["registers"]:
+            self.assertNotIn("physical", row, row)
+
+    def test_an_f_series_pump_reports_itself_unverified(self):
+        pump = FakePump(profile=Profile.for_model("F750"))
+        body = self._status(pump)
+        self.assertEqual(body["generation"], "F")
+        self.assertEqual(body["model"], "F750")
+        self.assertIs(body["verified"], False,
+                      "the F table has never been run against a real pump, and "
+                      "the page has a line that only appears when this is false")
+
+    def test_an_f_series_row_carries_both_numbers(self):
+        pump = FakePump(profile=Profile.for_model("F750"))
+        body = self._status(pump)
+        rows = {r["address"]: r for r in body["registers"]}
+        # The address stays the one the web app holds...
+        self.assertIn(30002, rows)
+        # ...and the pump's own number rides along beside it.
+        self.assertEqual(rows[30002]["physical"], 40004)
+        self.assertEqual(rows[40012]["physical"], 43005)
+
+    def test_a_register_with_no_f_equivalent_is_simply_absent(self):
+        # 31976 has one (45001) and stays; 32196, the class 1 alarm flag, has
+        # none on any F map, and an absent row is how the alarm watcher is
+        # meant to find that out.
+        pump = FakePump(values={30002: 3.4, 31976: 0, 32196: 0},
+                        profile=Profile.for_model("F750"))
+        body = self._status(pump)
+        addresses = {r["address"] for r in body["registers"]}
+        self.assertIn(31976, addresses)
+        self.assertNotIn(32196, addresses)
+
+
+class TheTwoNewConfigKeys(unittest.TestCase):
+    """`generation` and `framing`, and the two ways of getting them wrong."""
+
+    def _load(self, text):
+        path = os.path.join(tempfile.mkdtemp(), "config.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return config.load(path)
+
+    def test_both_keys_are_in_defaults(self):
+        self.assertEqual(config.DEFAULTS["generation"], "")
+        self.assertEqual(config.DEFAULTS["framing"], "tcp")
+
+    def test_the_defaults_are_the_s_series_behaviour(self):
+        cfg = self._load("host: 192.0.2.10\nmodel: S735\n")
+        self.assertEqual(cfg["generation"], "")
+        self.assertEqual(cfg["framing"], "tcp")
+
+    def test_a_csv_with_no_model_and_no_generation_is_accepted(self):
+        # config.example.yaml has said "required unless register_csv is set"
+        # about `model` since before the generations split, and a released
+        # version accepted exactly this. The generation is derived from the map
+        # itself in __main__.build(), where the map has been loaded -- see
+        # profile.generation_from_addresses -- rather than refused here.
+        path = os.path.join(tempfile.mkdtemp(), "registers.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("Register,Title,Mode\n27,Heating curve,R/W\n")
+        cfg = self._load("host: 192.0.2.10\nregister_csv: %s\n" % path)
+        self.assertEqual(cfg["generation"], "")
+        self.assertEqual(cfg["model"], "")
+
+    def test_a_csv_with_a_generation_is_accepted(self):
+        path = os.path.join(tempfile.mkdtemp(), "registers.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("Register,Title,Mode\n27,Heating curve,R/W\n")
+        cfg = self._load("host: 192.0.2.10\nregister_csv: %s\ngeneration: F\n" % path)
+        self.assertEqual(cfg["generation"], "F")
+
+    def test_a_nonsense_generation_is_refused_with_both_letters_named(self):
+        with self.assertRaises(SystemExit) as caught:
+            self._load("host: 192.0.2.10\nmodel: S735\ngeneration: X\n")
+        message = str(caught.exception)
+        self.assertIn("S735", message)
+        self.assertIn("F750", message)
+
+    def test_a_nonsense_framing_is_refused(self):
+        with self.assertRaises(SystemExit) as caught:
+            self._load("host: 192.0.2.10\nmodel: S735\nframing: rtuovertcp\n")
+        self.assertIn("rtu", str(caught.exception))
+
+    def test_rtu_is_accepted(self):
+        cfg = self._load("host: 192.0.2.10\nmodel: F750\nframing: rtu\n")
+        self.assertEqual(cfg["framing"], "rtu")
+
+
+class TheDeviceIdLineInStatus(unittest.TestCase):
+    """`status` asks the pump what it is, and never fails because it would not say.
+
+    Function 0x2B is optional in the Modbus specification. It is also the
+    cheapest cross-check there is that the `model:` in config.yaml is the pump
+    on the other end of the wire -- and the thing an F750 owner should paste
+    into an issue -- so it is asked for, printed, and forgiven.
+    """
+
+    class FakeModbus:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def device_id(self):
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+    class FakePump:
+        def __init__(self, mb, model="F750"):
+            self.mb = mb
+            self.profile = Profile.for_model(model)
+
+    def _run(self, answer, model="F750"):
+        from nibelokal.__main__ import print_identity
+        pump = self.FakePump(self.FakeModbus(answer), model)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_identity(pump)
+        return out.getvalue()
+
+    def test_it_prints_what_the_pump_said(self):
+        line = self._run({"vendor": "NIBE", "product": "F750",
+                          "revision": "5539", "objects": {}})
+        self.assertIn("NIBE F750 5539", line)
+
+    def test_a_pump_that_does_not_implement_it_is_not_an_error(self):
+        from nibelokal.modbus import ModbusError
+        line = self._run(ModbusError(1, "reading the device identification"))
+        self.assertIn("not answered", line)
+
+    def test_neither_is_a_malformed_answer(self):
+        from nibelokal.modbus import ModbusOffline
+        self.assertIn("not answered", self._run(ModbusOffline("nonsense")))
+        # And not even something nobody anticipated: this line is a bonus on a
+        # command whose job is to read registers.
+        self.assertIn("unreadable", self._run(RuntimeError("kaboom")))
+
+    def test_a_model_mismatch_is_said_out_loud(self):
+        line = self._run({"vendor": "NIBE", "product": "F1245",
+                          "revision": "5539", "objects": {}}, model="F750")
+        self.assertIn("F1245", line)
+        self.assertIn("plausible nonsense", line)
+
+    def test_a_matching_model_says_nothing_extra(self):
+        line = self._run({"vendor": "NIBE", "product": "F750",
+                          "revision": "5539", "objects": {}}, model="F750")
+        self.assertNotIn("note:", line)
+
+    def test_objects_beyond_the_three_basic_ones_are_shown_too(self):
+        # Whatever a pump volunteers is worth pasting into an issue, even when
+        # this app has no name for it.
+        line = self._run({"vendor": "NIBE", "product": "F750",
+                          "objects": {0: "NIBE", 1: "F750", 6: "extra"}})
+        self.assertIn("[6] extra", line)
+
+
+class AnUnknownKeyIsReportedWhateverItHolds(unittest.TestCase):
+    """The warning has to survive an empty value.
+
+    `config.load` skipped every empty value before it looked at the key, so an
+    unknown key with an empty value -- which is exactly how a typo looks in a
+    file copied from config.example.yaml, where nearly every line is `key: ""`
+    -- was silently dropped. `genration: ""` then produced no warning about the
+    typo and no generation, which is the one setting whose absence reads as
+    plausible nonsense rather than as a failure.
+    """
+
+    def _load_capturing(self, text):
+        path = os.path.join(tempfile.mkdtemp(), "config.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        printed = []
+        saved = builtins.print
+        builtins.print = lambda *a, **kw: printed.append(" ".join(str(x) for x in a))
+        try:
+            cfg = config.load(path)
+        finally:
+            builtins.print = saved
+        return cfg, "\n".join(printed)
+
+    def test_an_unknown_key_with_an_empty_value_still_warns(self):
+        _cfg, printed = self._load_capturing(
+            'host: 192.0.2.10\nmodel: S735\ngenration: ""\n')
+        self.assertIn("ignoring unknown key", printed)
+        self.assertIn("genration", printed)
+
+    def test_an_unknown_key_with_a_value_still_warns(self):
+        _cfg, printed = self._load_capturing(
+            "host: 192.0.2.10\nmodel: S735\ngenration: F\n")
+        self.assertIn("genration", printed)
+
+    def test_a_known_key_left_empty_is_still_the_default_and_silent(self):
+        cfg, printed = self._load_capturing(
+            'host: 192.0.2.10\nmodel: S735\ngeneration: ""\n')
+        self.assertEqual(cfg["generation"], "")
+        self.assertNotIn("ignoring unknown key", printed)
+
+
+class TheDailyBackupIsOffOnAnFPump(unittest.TestCase):
+    """23 to 34 minutes of the polling thread holding the only bus there is.
+
+    On an S-series pump a full snapshot is a few seconds of Modbus TCP and a
+    daily one is free -- which is what this app has always done and what it goes
+    on doing. Through a MODBUS 40 the same snapshot is one register per request
+    at NIBE's 2.1 s, taken inside the poll loop: every poll in that window is
+    skipped, the page goes stale for half an hour, and an alarm raised during it
+    is noticed when the backup finishes. Off until it is asked for, and said out
+    loud on the console so that quietly off is not mistaken for broken.
+    """
+
+    def test_unset_is_daily_on_an_s_pump(self):
+        self.assertEqual(24.0, config.auto_backup_hours({}, "S"))
+        self.assertEqual(24.0, config.auto_backup_hours(
+            {"auto_backup_hours": None}, "S"))
+
+    def test_unset_is_off_on_an_f_pump(self):
+        self.assertEqual(0.0, config.auto_backup_hours({}, "F"))
+        self.assertEqual(0.0, config.auto_backup_hours(
+            {"auto_backup_hours": None}, "F"))
+
+    def test_a_number_in_the_config_is_used_on_either_generation(self):
+        # An owner who asked for it knows what they asked for.
+        for generation in ("S", "F"):
+            self.assertEqual(6.0, config.auto_backup_hours(
+                {"auto_backup_hours": 6}, generation))
+            self.assertEqual(0.0, config.auto_backup_hours(
+                {"auto_backup_hours": 0}, generation))
+
+    def test_the_default_is_the_unset_sentinel_and_not_a_number(self):
+        # Because the right number depends on the generation and config.py
+        # does not know it. A 24 here would be an F-series default nobody
+        # chose.
+        self.assertIsNone(config.DEFAULTS["auto_backup_hours"])
+
+    def test_a_config_file_that_says_nothing_still_reads_as_unset(self):
+        path = os.path.join(tempfile.mkdtemp(), "config.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("host: 192.0.2.10\nmodel: F750\n")
+        cfg = config.load(path)
+        self.assertIsNone(cfg["auto_backup_hours"])
+        self.assertEqual(0.0, config.auto_backup_hours(cfg, "F"))
+
+    def test_a_config_file_that_says_a_number_is_honoured(self):
+        path = os.path.join(tempfile.mkdtemp(), "config.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("host: 192.0.2.10\nmodel: F750\nauto_backup_hours: 48\n")
+        self.assertEqual(48.0, config.auto_backup_hours(config.load(path), "F"))
+
+
+class TheWordSwapKey(unittest.TestCase):
+    """Which half of a 32-bit value comes first, and who decides.
+
+    Empty means the generation's factory setting -- NIBE's own low-word-first
+    on the S series, MODBUS 40's Big Endian on the F. It has to be settable
+    because on the F series it is a setting in the pump's menu 5.3.11 rather
+    than a fact, and the symptom of getting it wrong is a page that looks
+    right apart from a few absurd 32-bit numbers.
+    """
+
+    def _load(self, text):
+        path = os.path.join(tempfile.mkdtemp(), "config.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return config.load(path)
+
+    def test_it_is_in_defaults_and_empty(self):
+        self.assertEqual(config.DEFAULTS["word_swap"], "")
+
+    def test_the_default_is_low_word_first_on_both_generations(self):
+        # The S series because NIBE's own TIF says so, the F series because
+        # register 48852 "Modbus40 Word Swap" has a factory value of 1 --
+        # swapped, which is the low word at the lower address. The MODBUS 40
+        # manual's "Factory setting: Big Endian" says the opposite and loses to
+        # its own register map. See profile.LOW_WORD_FIRST.
+        self.assertTrue(Profile.for_model("S735").low_word_first)
+        self.assertTrue(Profile.for_model("F750").low_word_first)
+        self.assertEqual(Profile.for_model("F750").word_order_source, "assumed")
+
+    def test_an_explicit_value_wins_on_either_generation(self):
+        self.assertTrue(Profile.for_model("F750", word_swap="true").low_word_first)
+        self.assertFalse(Profile.for_model("S735", word_swap="false").low_word_first)
+        self.assertFalse(Profile.for_model("F750", word_swap="false").low_word_first)
+
+    def test_the_spellings_a_config_file_uses(self):
+        for text in ("true", "yes", "on", "1", "True"):
+            self.assertTrue(Profile.for_model("F750", word_swap=text).low_word_first,
+                            text)
+        for text in ("false", "no", "off", "0"):
+            self.assertFalse(Profile.for_model("S735", word_swap=text).low_word_first,
+                             text)
+
+    def test_empty_is_not_false(self):
+        # "" is "I have not said", and reading it as false would flip the S
+        # series to an order NIBE's own document contradicts.
+        self.assertTrue(Profile.for_model("S735", word_swap="").low_word_first)
+        self.assertIsNone(Profile("S", word_swap=None).word_swap)
+
+    def test_nonsense_is_refused_at_startup(self):
+        # Rather than at the first 32-bit read, which is a plausible-looking
+        # number on a page and nothing in a log.
+        with self.assertRaises(SystemExit) as caught:
+            self._load("host: 192.0.2.10\nmodel: F750\nword_swap: maybe\n")
+        self.assertIn("word_swap", str(caught.exception))
+
+    def test_it_reaches_the_pump_through_the_profile(self):
+        cfg = self._load("host: 192.0.2.10\nmodel: F750\nword_swap: true\n")
+        profile = Profile.for_model(cfg["model"], cfg["generation"],
+                                    cfg["word_swap"])
+        self.assertTrue(profile.low_word_first)

@@ -2,9 +2,13 @@
 
 Two sources, in order of authority:
 
-1. A CSV exported from your own pump (menu 7.5.9 -> "Export all registers" onto
-   a USB stick). This is the only map guaranteed to match your unit and its
-   firmware. Point `register_csv` at it in config.yaml.
+1. A CSV of your own pump's registers. This is the only map guaranteed to match
+   your unit and its firmware. Point `register_csv` at it in config.yaml. Where
+   it comes from depends on the generation, and the two files do not look alike:
+   an S-series pump exports its own (menu 7.5.9 -> "Export all registers" onto a
+   USB stick), while an F-series pump has no register export in its USB menu at
+   all and the file comes from NIBE's Windows tool ModbusManager instead (File
+   -> Export to file). `from_csv` reads both; see it for how they differ.
 2. The `nibe` python package (pip install nibe), which ships the same maps that
    the Home Assistant integration uses. Convenient, but a model/firmware
    mismatch shows up as registers that read plausible nonsense.
@@ -15,10 +19,12 @@ not care which one you used.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import logging
 import math
 import os
+import re
 import struct
 from dataclasses import dataclass, field
 
@@ -38,6 +44,30 @@ LIMITS = {
 # NIBE's own CSV export codes the variable size as a digit. Same mapping the
 # nibe package's convert_csv.py uses.
 CSV_SIZES = {"1": "s8", "2": "s16", "3": "s32", "4": "u8", "5": "u16", "6": "u32"}
+
+#: The column that holds the register number, under every name the two exports
+#: give it. NIBE's own USB export calls it "Register" and puts an offset in it;
+#: ModbusManager calls it "ID" and puts the whole coil address in it.
+ID_COLUMNS = ("register", "id", "register number")
+
+#: Every column name `from_csv` knows, used only to find the header row in a
+#: file that has a preamble above it. Not a schema: a column that is not here
+#: is ignored, as it always was.
+KNOWN_COLUMNS = frozenset(ID_COLUMNS) | {
+    "title", "name", "info", "unit", "mode", "r/w", "access",
+    "register type", "type", "registertype",
+    "size of variable", "size", "division factor", "factor", "divisor",
+    "min value", "min", "max value", "max", "default value", "default",
+}
+
+#: At or above this, a number in the register column is a whole coil address
+#: rather than an offset into one of the two address spaces.
+#:
+#: It cannot be ambiguous. Coil addresses run to 65534 and the higher of the two
+#: bases is 40001, so the largest offset any export can carry is 25533 -- eleven
+#: thousand short of the lowest address (30001, the first input register). See
+#: `from_csv`.
+FULL_ADDRESS_FLOOR = 30001
 
 # Sentinels the pump uses for "no value" (matches the nibe package's convention).
 INVALID = {
@@ -63,6 +93,16 @@ class Register:
     default: float | None = None
     mappings: dict[str, str] = field(default_factory=dict)   # {"0": "SMALL", ...}
     info: str = ""
+    #: Which 16-bit word of a 32-bit value sits at the lower address. Only
+    #: 32-bit registers are affected; every 16-bit one reads the same either
+    #: way, which is exactly what makes the wrong setting hard to spot.
+    #:
+    #: Nothing sets this per register: `Registry.set_word_order` sets it on
+    #: every register at once, from the profile, and `Pump.__init__` is the one
+    #: caller. The default is True -- low word first, NIBE's S-series TIF, and
+    #: what this app has always done -- so a Register built by hand in a test
+    #: behaves as it did. See nibelokal/profile.py, LOW_WORD_FIRST.
+    low_word_first: bool = True
 
     def __post_init__(self):
         # min/max/default come out of the register map as RAW values, while
@@ -100,7 +140,10 @@ class Register:
     def decode(self, regs: list[int]):
         """Raw 16-bit words -> real value (or None when the pump says 'no value')."""
         if self.count == 2:
-            raw = regs[0] | (regs[1] << 16)          # low word first
+            # Which half is which is not a constant of Modbus, it is a setting
+            # of the pump -- see low_word_first above and profile.py.
+            raw = (regs[0] | (regs[1] << 16) if self.low_word_first
+                   else (regs[0] << 16) | regs[1])
             if self.signed:
                 raw = struct.unpack(">i", struct.pack(">I", raw & 0xFFFFFFFF))[0]
         else:
@@ -195,7 +238,12 @@ class Register:
             )
         if self.count == 2:
             raw &= 0xFFFFFFFF
-            return [raw & 0xFFFF, (raw >> 16) & 0xFFFF]
+            # The same order the value was read in. A write that used the
+            # other one would be the read bug with the consequences reversed:
+            # a plausible number on the page and nonsense in the pump.
+            if self.low_word_first:
+                return [raw & 0xFFFF, (raw >> 16) & 0xFFFF]
+            return [(raw >> 16) & 0xFFFF, raw & 0xFFFF]
         return [raw & 0xFFFF]
 
     def as_dict(self) -> dict:
@@ -217,9 +265,25 @@ class Registry:
     def __init__(self, registers: dict[int, Register], source: str):
         self.registers = registers
         self.source = source
+        #: See set_word_order. True is what every map has meant until now.
+        self.low_word_first = True
 
     def __len__(self) -> int:
         return len(self.registers)
+
+    def set_word_order(self, low_first: bool) -> None:
+        """Say which 16-bit word of a 32-bit value comes first, once.
+
+        The order is a property of the pump, not of any one register, and the
+        pump is what the profile knows about -- so it is decided in
+        `Pump.__init__` and applied here to every register at once. Doing it
+        per register at each call site would be two places that have to agree
+        about the same fact, which is how a read and a write end up using
+        opposite orders. See nibelokal/profile.py.
+        """
+        self.low_word_first = bool(low_first)
+        for reg in self.registers.values():
+            reg.low_word_first = self.low_word_first
 
     def get(self, address: int) -> Register | None:
         return self.registers.get(address)
@@ -279,67 +343,105 @@ class Registry:
 
     @classmethod
     def from_csv(cls, path: str) -> "Registry":
-        """Parse a CSV exported from the pump itself (menu 7.5.9)."""
+        """Parse a register export: the pump's own, or ModbusManager's.
+
+        Two shapes, and an F-series owner can only produce the second one.
+
+        * **The pump's own USB export** (S series, menu 7.5.9 -> "Export all
+          registers"). One column of *offsets* -- 8, 225, 1087 -- and a
+          "Register type" column saying which address space each belongs to, so
+          the coil address is 30001 or 40001 plus the offset.
+        * **ModbusManager -> File -> Export to file** (the F series). NIBE's own
+          Windows tool, and the only route to a register list on a pump that has
+          no register export in its USB menu. Its ID column holds the *whole*
+          coil address -- 40004, 47007 -- and a "Mode" column of R or R/W says
+          whether it may be written. It also writes four lines of preamble
+          (tool version, date, product, database) before the header row.
+
+        Telling the two apart is one comparison and does not need a flag: an
+        offset cannot reach 30001, because the coil addresses it is an offset
+        into stop at 65534 and the larger of the two bases is 40001, so the
+        largest offset any export can carry is 25533. Anything at or above
+        30001 is therefore already a coil address. Getting this wrong is not a
+        subtle failure -- it puts every register 30001 or 40001 places from
+        where it belongs -- but it is a silent one, which is why it is decided
+        by arithmetic rather than by which tool the file looks like it came
+        from.
+        """
         regs: dict[int, Register] = {}
         # The pump writes these in latin-1 (the degree sign gives it away);
         # ModbusManager and some tools re-save them as UTF-8.
         for encoding in ("utf-8-sig", "latin-1"):
             try:
                 with open(path, encoding=encoding, newline="") as probe:
-                    probe.read()
+                    text = probe.read()
                 break
             except UnicodeDecodeError:
                 continue
-        with open(path, encoding=encoding, newline="") as fh:
-            sample = fh.read(4096)
-            fh.seek(0)
-            try:
-                dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-            except csv.Error:
-                dialect = csv.excel
-            for row in csv.DictReader(fh, dialect=dialect):
-                low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        # Sniffed and read from the header row down, not from the top of the
+        # file: on a ModbusManager export the top of the file is "ModbusManager
+        # 1.0.9", which the sniffer reads as a one-column comma-separated
+        # header and DictReader then treats as the column names.
+        body = _csv_from_header(text)
+        try:
+            dialect = csv.Sniffer().sniff(body[:4096], delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        for row in csv.DictReader(io.StringIO(body), dialect=dialect):
+            low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
 
-                def pick(*names, default=""):
-                    for n in names:
-                        if low.get(n):
-                            return low[n]
-                    return default
+            def pick(*names, default=""):
+                for n in names:
+                    if low.get(n):
+                        return low[n]
+                return default
 
-                num = pick("register", "id", "register number")
-                if not num.lstrip("-").isdigit():
-                    continue
-                # NIBE's own export names this "Register type" with values like
-                # MODBUS_HOLDING_REGISTER. Other exports (and ModbusManager)
-                # instead carry a "Mode" column of R / R/W. Accept both, and
-                # treat writability as the tell -- getting this wrong puts every
-                # register in the other address space, where it reads garbage.
-                rtype = pick("register type", "type", "registertype").lower()
-                mode = pick("mode", "r/w", "access").lower()
-                holding = "hold" in rtype or "w" in mode.replace("write", "w")
-                base = 40001 if holding else 30001
-                address = base + int(num)
-                size = pick("size of variable", "size", default="s16").lower()
-                # NIBE's export writes the size as a digit 1-6, not as "s16".
-                size = CSV_SIZES.get(size, size if size in LIMITS else "s16")
-                factor = pick("division factor", "factor", "divisor", default="1")
-                lo = _num(pick("min value", "min"))
-                hi = _num(pick("max value", "max"))
-                # The export uses min == max (usually 0) to mean "no range given".
-                # Kept as-is they would refuse every write of anything else.
-                if lo is not None and hi is not None and lo == hi:
-                    lo = hi = None
-                regs[address] = Register(
-                    address=address,
-                    title=pick("title", "name", default=str(address)),
-                    size=size,
-                    factor=int(float(factor)) if factor.replace(".", "").isdigit() else 1,
-                    unit=pick("unit"),
-                    writable=holding,
-                    min=lo,
-                    max=hi,
-                    default=_num(pick("default value", "default")),
-                )
+            num = pick(*ID_COLUMNS)
+            if not num.lstrip("-").isdigit():
+                continue
+            # NIBE's own export names this "Register type" with values like
+            # MODBUS_HOLDING_REGISTER. ModbusManager instead carries a
+            # "Mode" column of R / R/W. Accept both, and treat writability
+            # as the tell -- getting this wrong puts every register in the
+            # other address space, where it reads garbage.
+            rtype = pick("register type", "type", "registertype").lower()
+            mode = pick("mode", "r/w", "access").lower()
+            holding = "hold" in rtype or "w" in mode.replace("write", "w")
+            offset = int(num)
+            if offset >= FULL_ADDRESS_FLOOR:
+                address = offset
+                # The address space is the address's own first digit here,
+                # and it outranks the Mode column: a 3xxxx input register is
+                # read-only whatever a column says, and there is no FC to
+                # write one with.
+                holding = holding and address // 10000 == 4
+            else:
+                address = (40001 if holding else 30001) + offset
+            size = pick("size of variable", "size", default="s16").lower()
+            # NIBE's export writes the size as a digit 1-6, not as "s16".
+            size = CSV_SIZES.get(size, size if size in LIMITS else "s16")
+            factor = pick("division factor", "factor", "divisor", default="1")
+            lo = _num(pick("min value", "min"))
+            hi = _num(pick("max value", "max"))
+            # The export uses min == max (usually 0) to mean "no range given".
+            # Kept as-is they would refuse every write of anything else.
+            if lo is not None and hi is not None and lo == hi:
+                lo = hi = None
+            regs[address] = Register(
+                address=address,
+                title=pick("title", "name", default=str(address)),
+                size=size,
+                factor=int(float(factor)) if factor.replace(".", "").isdigit() else 1,
+                unit=pick("unit"),
+                writable=holding,
+                min=lo,
+                max=hi,
+                default=_num(pick("default value", "default")),
+                # ModbusManager exports an "Info" column, the same sentence the
+                # `nibe` package carries. The pump's own export has none, so
+                # this is "" there, exactly as it was.
+                info=pick("info"),
+            )
         if not regs:
             raise RuntimeError("No registers parsed from %s - is it the pump's own export?" % path)
         return cls(regs, "CSV exported from the pump: %s" % os.path.basename(path))
@@ -357,6 +459,32 @@ class Registry:
                 )
             return cls.from_csv(csv_path)
         return cls.from_package(model)
+
+
+def _csv_from_header(text: str) -> str:
+    """`text` from its column-header row down, dropping any preamble above it.
+
+    ModbusManager's "Export to file" writes four lines before the header --
+    the tool version, a date, the product name and the database number -- and
+    csv.DictReader has no notion of a preamble: it takes the first line it is
+    given as the column names, which on such a file is "ModbusManager 1.0.9".
+    The pump's own USB export has no preamble, and there the header is the
+    first line, so this returns it unchanged.
+
+    A line counts as the header when it names the register column and at least
+    one other column this parser knows. Both conditions, because "id" alone is
+    a word that could appear in a title.
+    """
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        cells = {c.strip().strip('"').strip("'").lower()
+                 for c in re.split(r"[,;\t]", line)}
+        if cells & set(ID_COLUMNS) and len(cells & KNOWN_COLUMNS) >= 2:
+            return "".join(lines[i:])
+    # No recognisable header. Left exactly as it was, so the existing failure
+    # -- "No registers parsed from ..." -- is what the caller sees, rather than
+    # an empty string and a different, less helpful one.
+    return text
 
 
 def _num(s: str):

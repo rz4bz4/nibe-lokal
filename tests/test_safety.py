@@ -372,6 +372,84 @@ def code_blocked_addresses():
     return addresses
 
 
+class TheFSeriesRowsAreClassifiedAsIntended(unittest.TestCase):
+    """The tiers are consulted with the address that is actually written.
+
+    On an F-series pump that is the physical address, and the S-series rows
+    mean nothing there. Two of the app's buttons write with confirm=False, so a
+    register missing from EVERYDAY does not get confirmed anyway -- it gets
+    *refused*, quoting a number the owner has never seen.
+    """
+
+    #: Canonical -> physical for the everyday registers, spelled out here
+    #: rather than imported from the table, so that a change to the table has
+    #: to be made in two places on purpose.
+    EVERYDAY_PAIRS = {
+        40057: 47041,       # hot water comfort mode
+        40067: 47051,       # periodic hot water interval
+        40105: 47260,       # ventilation / fan mode
+        40116: 47271, 40117: 47272, 40118: 47273, 40119: 47274,   # return times
+        40207: 47398,       # room setpoint, climate system 1
+    }
+
+    GUARDED_PAIRS = {
+        40027: 47007,       # heating curve
+        40031: 47011,       # heating offset
+        40035: 47015,       # min supply
+        40039: 47019,       # max supply
+        40046: 47026,       # own curve P1
+        40040: 47020,       # own curve P7
+        40062: 47046, 40063: 47047, 40064: 47048, 40065: 47049,   # hot water
+        40103: 47212,       # max internal additional heat
+        40110: 47265,       # exhaust fan normal
+        40238: 47137,       # operating mode
+    }
+
+    def test_the_everyday_rows_really_are_everyday(self):
+        for canonical, physical in sorted(self.EVERYDAY_PAIRS.items()):
+            with self.subTest(canonical=canonical):
+                self.assertEqual(safety.tier(canonical), "everyday")
+                self.assertEqual(
+                    safety.tier(physical), "everyday",
+                    "%d is everyday and %d is not, so a button that writes it "
+                    "without a dialog would be refused" % (canonical, physical))
+
+    def test_an_everyday_write_needs_no_confirm_at_either_address(self):
+        for physical in sorted(self.EVERYDAY_PAIRS.values()):
+            with self.subTest(physical=physical):
+                safety.check(physical, confirmed=False)     # must not raise
+
+    def test_the_guarded_rows_are_guarded_and_say_why(self):
+        for canonical, physical in sorted(self.GUARDED_PAIRS.items()):
+            with self.subTest(canonical=canonical):
+                self.assertEqual(safety.tier(physical), "guarded")
+                self.assertTrue(
+                    safety.reason(physical),
+                    "%d falls through to the guarded default, so a refusal "
+                    "quotes an empty reason" % physical)
+
+    def test_a_guarded_write_is_still_refused_without_a_confirm(self):
+        for physical in sorted(self.GUARDED_PAIRS.values()):
+            with self.subTest(physical=physical):
+                with self.assertRaises(Refused):
+                    safety.check(physical, confirmed=False)
+
+    def test_the_f_hot_water_boost_is_everyday(self):
+        # 48132 is the F generation's whole extra-hot-water feature. This app's
+        # own button will not write it, but it counts down and stops by itself,
+        # which is the property the everyday tier is about.
+        self.assertEqual(safety.tier(48132), "everyday")
+        self.assertIn("3 h", safety.reason(48132))
+
+    def test_no_f_row_landed_inside_a_blocked_range_by_accident(self):
+        # The floor drying programme is 47276-47291 on the F generation, and
+        # the fan registers sit just below it. A range that grew by two would
+        # swallow the ventilation boost.
+        for address in list(self.EVERYDAY_PAIRS.values()) + [48132]:
+            with self.subTest(address=address):
+                self.assertNotEqual(safety.tier(address), "blocked")
+
+
 class DocumentationMatchesTheCode(unittest.TestCase):
     """docs/registers.md is what people read before they trust the gate.
 

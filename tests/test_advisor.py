@@ -13,13 +13,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import advisor                                  # noqa: E402
 from nibelokal.advisor import OWN_CURVE_OUTDOOR, R_OWN_CURVE   # noqa: E402
+from nibelokal.profile import Profile                          # noqa: E402
 
 
 class FakePump:
-    """Answers read_many() from a dict of address -> value."""
+    """Answers read_many() from a dict of address -> value.
 
-    def __init__(self, values: dict):
+    Carries a profile, because a Pump does: it is what says which outdoor
+    temperature each own-curve point governs, and on the F generation the
+    seventh point's is not established.
+    """
+
+    def __init__(self, values: dict, profile=None):
         self.values = values
+        self.profile = profile if profile is not None else Profile("S")
 
     def read_many(self, addresses):
         return {a: {"value": self.values[a]} for a in addresses if a in self.values}
@@ -33,7 +40,7 @@ class FakeStore:
         return {"rows": 1, "first": 0, "last": int(self.hours * 3600)}
 
 
-def own_curve_pump(points=(45, 45, 45, 37, 33, 23, 15), over=None):
+def own_curve_pump(points=(45, 45, 45, 37, 33, 23, 15), over=None, profile=None):
     values = {
         advisor.R_CURVE: 0,
         advisor.R_OFFSET: 0,
@@ -49,7 +56,7 @@ def own_curve_pump(points=(45, 45, 45, 37, 33, 23, 15), over=None):
     }
     values.update({a: p for a, p in zip(R_OWN_CURVE, points)})
     values.update(over or {})
-    return FakePump(values)
+    return FakePump(values, profile)
 
 
 def numbered_pump(curve=5, offset=0, over=None):
@@ -347,6 +354,92 @@ class TheWordForTheImmersionHeater(unittest.TestCase):
         source = inspect.getsource(advisor)
         self.assertNotIn("Elpatron", source)
         self.assertNotIn("elpatron", source)
+
+
+class TheSeventhOwnCurvePointOnAnFPump(unittest.TestCase):
+    """P7 is +30 C on the S series and an open question on the F.
+
+    NIBE's F750 and F1155 user manuals both show menu 1.9.7 with six rows,
+    -30 to +20. The register for a seventh exists with the same default as the
+    S series', which is where "+30" came from -- inference from register order,
+    not a manual. So on an F pump the point is not labelled with a temperature
+    and is not interpolated: an unverified point has no business in the fit
+    that decides how warm a house is in mild weather, which is where a heat
+    pump spends most of the year.
+    """
+
+    def f_pump(self, **kw):
+        return own_curve_pump(profile=Profile.for_model("F750"), **kw)
+
+    def test_the_profile_is_where_the_list_lives(self):
+        self.assertEqual(Profile("S").own_curve_outdoor,
+                         [-30, -20, -10, 0, 10, 20, 30])
+        self.assertEqual(Profile("F").own_curve_outdoor,
+                         [-30, -20, -10, 0, 10, 20, None])
+
+    def test_diagnose_sends_the_list_on(self):
+        # So that the chart in web/index.html draws the same points this
+        # module reasons about, from one list rather than a copy of it.
+        self.assertEqual(advisor.diagnose(own_curve_pump())["own_curve_outdoor"],
+                         [-30, -20, -10, 0, 10, 20, 30])
+        self.assertIsNone(advisor.diagnose(self.f_pump())["own_curve_outdoor"][6])
+
+    def test_the_unverified_point_is_left_out_of_the_interpolation(self):
+        points = [45, 45, 45, 37, 33, 23, 15]
+        f = Profile("F").own_curve_outdoor
+        # Above +20 the F curve is flat at P6, because P6 is the warmest point
+        # whose weather is known -- not a ramp down towards a P7 at a guessed
+        # +30.
+        self.assertEqual(advisor.curve_at(points, 25.0, f), 23)
+        self.assertEqual(advisor.curve_at(points, 20.0, f), 23)
+        # The S series does interpolate towards P7, because NIBE says where it
+        # is.
+        self.assertEqual(advisor.curve_at(points, 25.0), 19)
+
+    def test_the_s_series_answer_is_untouched(self):
+        points = [45, 45, 45, 37, 33, 23, 15]
+        for outdoor in (-40, -30, -15, 0, 5, 12, 20, 30, 40):
+            self.assertEqual(advisor.curve_at(points, outdoor),
+                             advisor.curve_at(points, outdoor, OWN_CURVE_OUTDOOR),
+                             outdoor)
+
+    def test_no_advice_ever_proposes_the_unverified_point(self):
+        for feeling in ("warmer", "colder"):
+            for when in ("cold_outside", "mild_outside"):
+                for outdoor in (-15.0, 0.0, 8.0, 18.0, 25.0):
+                    a = advisor.advise(
+                        self.f_pump(over={advisor.R_OUTDOOR: outdoor}),
+                        feeling, when)
+                    self.assertNotIn(
+                        R_OWN_CURVE[6], [s.address for s in a.suggestions],
+                        "P7 proposed at %s C ute (%s, %s), and nobody knows "
+                        "what weather it governs" % (outdoor, feeling, when))
+
+    def test_the_mild_end_of_the_advice_still_works_on_an_f_pump(self):
+        # Excluding P7 must not mean excluding the advice: P6 is the mild end
+        # there, and it is a real point with a documented temperature.
+        a = advisor.advise(self.f_pump(over={advisor.R_OUTDOOR: 12.0}),
+                           "colder", "mild_outside")
+        self.assertTrue([s for s in a.suggestions if s.address in R_OWN_CURVE],
+                        "no own-curve suggestion at all in mild weather")
+
+    def test_the_s_series_advice_still_reaches_p7(self):
+        # Points kept clear of the 26 C floor, so what is being tested is which
+        # point governs +25 C and not whether it is pinned against min supply.
+        a = advisor.advise(
+            own_curve_pump(points=(45, 45, 45, 37, 33, 31, 29),
+                           over={advisor.R_OUTDOOR: 25.0}),
+            "colder", "mild_outside")
+        self.assertIn(R_OWN_CURVE[6], [s.address for s in a.suggestions])
+
+    def test_and_the_same_curve_on_an_f_pump_stops_at_p6(self):
+        a = advisor.advise(
+            self.f_pump(points=(45, 45, 45, 37, 33, 31, 29),
+                        over={advisor.R_OUTDOOR: 25.0}),
+            "colder", "mild_outside")
+        addresses = [s.address for s in a.suggestions]
+        self.assertIn(R_OWN_CURVE[5], addresses)
+        self.assertNotIn(R_OWN_CURVE[6], addresses)
 
 
 if __name__ == "__main__":

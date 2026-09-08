@@ -10,6 +10,7 @@ every power cut, which is exactly when a pump has also just alarmed.
 No network: the notifier is a fake, and PushoverNotifier is only ever asked to
 build its request, never to send it.
 """
+import json
 import os
 import sys
 import tempfile
@@ -19,11 +20,31 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import alarms                                   # noqa: E402
 from nibelokal.alarms import R_ALARM, R_CLASS1, Watcher         # noqa: E402
+from nibelokal.profile import Profile                           # noqa: E402
 from nibelokal.store import Store                               # noqa: E402
 
 
+#: The two profiles every case in this file is run against. `S` is the one the
+#: asserted texts belong to; `F` appears only where the difference is the
+#: point.
+S = Profile("S")
+F = Profile("F")
+
+
 class FakePump:
+    """A pump stands in for a Pump, and a Pump always has a profile.
+
+    Which generation it is decides which alarm table the watcher reads, and
+    the two tables are different sets of alarms at the same numbers -- see
+    TestTheTableIsChosenByGeneration below. Every case in this file that is
+    not about the generation runs on an S-series pump, which is the one the
+    texts it asserts belong to.
+    """
+
     host = "192.0.2.10"
+
+    def __init__(self, generation="S"):
+        self.profile = Profile(generation)
 
 
 class FakeNotifier:
@@ -89,19 +110,19 @@ class AlarmTestCase(unittest.TestCase):
 
 class TestTable(AlarmTestCase):
     def test_shipped_table_loads(self):
-        table = alarms.load_table()
+        table = alarms.load_table("S")
         self.assertGreater(len(table["codes"]), 100)
         self.assertIn("source", table["_meta"])
 
     def test_known_code(self):
         # 163 is a phase fault: the pump cannot run the compressor at all.
-        info = alarms.describe(163)
+        info = alarms.describe(163, S)
         self.assertTrue(info["known"])
         self.assertTrue(info["text"])
         self.assertIn(info["severity"], alarms.SEVERITIES)
 
     def test_unknown_code_is_not_guessed(self):
-        info = alarms.describe(65123)
+        info = alarms.describe(65123, S)
         self.assertFalse(info["known"])
         self.assertEqual(info["code"], 65123)
         # The number has to be in the text: it is the only thing the owner can
@@ -110,19 +131,147 @@ class TestTable(AlarmTestCase):
         self.assertEqual(info["severity"], "warning")
 
     def test_garbage_code_does_not_raise(self):
-        info = alarms.describe("not a number")
+        info = alarms.describe("not a number", S)
         self.assertFalse(info["known"])
         self.assertIsNone(info["code"])
 
     def test_missing_table_file(self):
-        alarms._table = None
-        try:
-            table = alarms.load_table(os.path.join(self.dir.name, "nope.json"))
-            self.assertEqual(table["codes"], {})
-        finally:
-            alarms._table = None
-        # And the shipped table is picked up again afterwards.
-        self.assertTrue(alarms.describe(163)["known"])
+        # An explicit path is never cached, so the shipped table is untouched
+        # and still there afterwards.
+        table = alarms.load_table("S", os.path.join(self.dir.name, "nope.json"))
+        self.assertEqual(table["codes"], {})
+        self.assertTrue(alarms.describe(163, S)["known"])
+
+    def test_a_table_for_a_generation_that_does_not_exist(self):
+        # Not a fallback to the other one: there are exactly two numberings,
+        # and a third is a bug in the caller rather than a reason to guess.
+        with self.assertRaises(ValueError):
+            alarms.load_table("X")
+
+
+class TestTheTableIsChosenByGeneration(AlarmTestCase):
+    """The S and F alarm numbers are different alarms at the same numbers.
+
+    301 code numbers appear in both files and exactly one of them carries the
+    same text. Code 123 is the clearest case: "Ingen rumsgivare i kyla" on the
+    S series and a sensor fault on the outdoor air sensor on the F. Serving the
+    wrong one is not a missing text -- it is a fluent Swedish sentence about a
+    fault the pump does not have, pushed at priority 2 at three in the morning.
+    """
+
+    def test_the_f_table_answers_for_an_f_pump(self):
+        info = alarms.describe(123, F)
+        self.assertTrue(info["known"])
+        self.assertIn("BT23", info["text"])
+
+    def test_the_s_table_answers_for_an_s_pump(self):
+        info = alarms.describe(123, S)
+        self.assertTrue(info["known"])
+        self.assertIn("rumsgivare", info["text"])
+
+    def test_the_two_texts_are_not_the_same(self):
+        self.assertNotEqual(alarms.describe(123, S)["text"],
+                            alarms.describe(123, F)["text"])
+
+    def test_no_profile_refuses_rather_than_falling_back(self):
+        info = alarms.describe(123, None)
+        self.assertFalse(info["known"])
+        self.assertEqual(info["code"], 123)
+        # The number is all it will say, and it says why.
+        self.assertIn("123", info["text"])
+        self.assertIn("generation", info["text"])
+
+    def test_a_bare_generation_letter_works_too(self):
+        # The watcher hands over a Profile; a caller with only the letter
+        # should not have to build one.
+        self.assertEqual(alarms.describe(123, "F")["text"],
+                         alarms.describe(123, F)["text"])
+
+    def test_the_watcher_takes_it_from_the_pump(self):
+        w = Watcher(self.store, FakePump("F"), {}, notifier=self.notifier)
+        events = w.poll(reading(123))
+        self.assertEqual(len(events), 1)
+        self.assertIn("BT23", events[0]["text"])
+        self.assertIn("BT23", self.notifier.sent[0]["message"])
+
+    def test_and_an_s_pump_still_gets_the_s_text(self):
+        w = Watcher(self.store, FakePump("S"), {}, notifier=self.notifier)
+        events = w.poll(reading(123))
+        self.assertIn("rumsgivare", events[0]["text"])
+
+    def test_a_pump_with_no_profile_at_all_reports_the_number(self):
+        # A test double, or a Watcher built against an older Pump. It still
+        # notices the alarm and still notifies; what it will not do is invent
+        # a text for it.
+        pump = FakePump()
+        del pump.profile
+        w = Watcher(self.store, pump, {}, notifier=self.notifier)
+        events = w.poll(reading(123))
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0]["known"])
+        self.assertIn("123", events[0]["text"])
+
+
+class TestTheFCodesReadByHand(AlarmTestCase):
+    """Ten F-series codes the machine rule got wrong, in both directions.
+
+    The rule that classified `alarms_f.json` reads NIBE's long text. Ten codes
+    have no long text at all, or only NIBE's generic "this alarm came from the
+    heat pump" wording, so all ten fell through to `warning`. Seven of them are
+    the pump narrating normal operation -- a defrost, a start-up, a preheat --
+    and at the default `alarm_min_severity: warning` an exhaust-air F750 would
+    have pushed a notification for every defrost, several times a day, all
+    winter. Three are the faults that stop the compressor, and at
+    `alarm_min_severity: alarm` nobody would have been woken by them.
+
+    Reclassified by hand, by the S file's own rule, and recorded in
+    `_meta.hand_reclassified` -- these are the only codes in that file a person
+    has read.
+    """
+
+    IN_PROGRESS = (175, 183, 233, 234, 235, 270, 998)
+    REAL_FAULTS = (220, 221, 222)
+
+    def test_a_defrost_is_information_and_not_a_warning(self):
+        self.assertEqual("info", alarms.describe(183, F)["severity"])
+        self.assertIn("Avfrostning", alarms.describe(183, F)["text"])
+
+    def test_every_in_progress_code_is_information(self):
+        for code in self.IN_PROGRESS:
+            self.assertEqual("info", alarms.describe(code, F)["severity"], code)
+
+    def test_a_defrost_does_not_notify_at_the_default_setting(self):
+        w = Watcher(self.store, FakePump("F"), {}, notifier=self.notifier)
+        w.poll(reading(183))
+        self.assertEqual([], self.notifier.sent)
+
+    def test_high_pressure_is_an_alarm(self):
+        self.assertEqual("alarm", alarms.describe(220, F)["severity"])
+
+    def test_every_named_fault_is_an_alarm(self):
+        for code in self.REAL_FAULTS:
+            self.assertEqual("alarm", alarms.describe(code, F)["severity"], code)
+
+    def test_high_pressure_wakes_somebody(self):
+        w = Watcher(self.store, FakePump("F"), {}, notifier=self.notifier)
+        w.poll(reading(220))
+        self.assertEqual(2, self.notifier.sent[0]["priority"])
+
+    def test_the_s_table_is_untouched(self):
+        # 183 is a different alarm on the S series and was already info there
+        # for its own reason; 220 is not in the S file's hand-reviewed set and
+        # must not have been moved by this.
+        self.assertIn("klimatsystem", alarms.describe(183, S)["text"])
+
+    def test_the_meta_records_the_rule_and_every_code_it_moved(self):
+        with open(alarms.TABLE_PATHS["F"], encoding="utf-8") as fh:
+            meta = json.load(fh)["_meta"]
+        moved = meta["hand_reclassified"]
+        self.assertIn("rule", moved)
+        self.assertEqual(set(str(c) for c in self.IN_PROGRESS), set(moved["to_info"]))
+        self.assertEqual(set(str(c) for c in self.REAL_FAULTS), set(moved["to_alarm"]))
+        for reason in list(moved["to_info"].values()) + list(moved["to_alarm"].values()):
+            self.assertGreater(len(reason), 20, reason)
 
 
 class TestCodesWithoutAText(AlarmTestCase):
@@ -134,7 +283,7 @@ class TestCodesWithoutAText(AlarmTestCase):
     """
 
     def _textless(self):
-        return sorted(int(c) for c, e in alarms.load_table()["codes"].items()
+        return sorted(int(c) for c, e in alarms.load_table("S")["codes"].items()
                       if not (e.get("sv") or "").strip())
 
     def test_the_table_still_has_some(self):
@@ -142,18 +291,18 @@ class TestCodesWithoutAText(AlarmTestCase):
 
     def test_they_are_not_reported_as_known_with_an_empty_text(self):
         for code in self._textless():
-            info = alarms.describe(code)
+            info = alarms.describe(code, S)
             self.assertTrue(info["text"].strip(), code)
             self.assertIn(str(code), info["text"], code)
             self.assertFalse(info["known"], code)
 
     def test_nibes_own_action_is_still_kept_where_there_is_one(self):
         with_action = [c for c in self._textless()
-                       if alarms.load_table()["codes"][str(c)].get("action")]
+                       if alarms.load_table("S")["codes"][str(c)].get("action")]
         self.assertTrue(with_action)
         for code in with_action:
-            self.assertEqual(alarms.describe(code)["action"],
-                             alarms.load_table()["codes"][str(code)]["action"])
+            self.assertEqual(alarms.describe(code, S)["action"],
+                             alarms.load_table("S")["codes"][str(code)]["action"])
 
 
 class TestSelfClearingCodes(AlarmTestCase):
@@ -167,7 +316,7 @@ class TestSelfClearingCodes(AlarmTestCase):
     """
 
     def test_183_is_not_an_alarm(self):
-        self.assertEqual(alarms.describe(183)["severity"], "info")
+        self.assertEqual(alarms.describe(183, S)["severity"], "info")
 
     def test_and_so_it_does_not_wake_anybody_at_the_default_setting(self):
         w = self.watcher()          # alarm_min_severity defaults to "warning"
@@ -345,7 +494,7 @@ class TestNotifier(AlarmTestCase):
         self.assertEqual(self.notifier.sent[0]["priority"], 1)
 
     def test_min_severity_filters(self):
-        info_code = next(c for c, e in alarms.load_table()["codes"].items()
+        info_code = next(c for c, e in alarms.load_table("S")["codes"].items()
                          if e["severity"] == "info")
         w = self.watcher({"alarm_min_severity": "alarm"})
         w.poll(reading(int(info_code)))
@@ -594,7 +743,7 @@ class TestDebounce(AlarmTestCase):
         # The other half of the bargain: an all-clear for an alarm nobody was
         # ever told about is a message with no referent, whatever the flap
         # guard did with it.
-        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+        info_code = int(next(c for c, e in alarms.load_table("S")["codes"].items()
                              if e["severity"] == "info"))
         w = self.watcher({"alarm_min_severity": "alarm",
                           "alarm_debounce_seconds": 900})
@@ -750,7 +899,7 @@ class TestClearWithoutARaise(AlarmTestCase):
     """"Larmet borta (105)" about an alarm nobody was told about."""
 
     def test_a_clear_is_not_pushed_when_the_alarm_never_was(self):
-        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+        info_code = int(next(c for c, e in alarms.load_table("S")["codes"].items()
                              if e["severity"] == "info"))
         w = self.watcher({"alarm_min_severity": "alarm"})
         w.poll(reading(info_code))
@@ -760,7 +909,7 @@ class TestClearWithoutARaise(AlarmTestCase):
                          "the severity filter was doing its job")
 
     def test_but_the_events_are_both_in_the_history(self):
-        info_code = int(next(c for c, e in alarms.load_table()["codes"].items()
+        info_code = int(next(c for c, e in alarms.load_table("S")["codes"].items()
                              if e["severity"] == "info"))
         w = self.watcher({"alarm_min_severity": "alarm"})
         w.poll(reading(info_code))

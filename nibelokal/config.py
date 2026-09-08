@@ -12,7 +12,34 @@ DEFAULTS = {
     "port": 502,
     "unit": 1,                  # Modbus slave id; try 1, then 0
     "model": "",                # required unless register_csv is set
-    "register_csv": "",         # CSV exported from the pump, menu 7.5.9
+    # The pump's own register list. On the S series that is the export in menu
+    # 7.5.9; on the F series the pump has none and it comes from NIBE's
+    # ModbusManager instead. See nibelokal/registry.py, which reads both.
+    "register_csv": "",
+    # S or F. Empty means "work it out", which is what almost everyone wants
+    # and what happens by default: from `model` when there is one, and
+    # otherwise from the register map itself -- 40027 is the heating curve on
+    # an S and 47007 on an F, which partitions every map there is. It has to
+    # stay settable for the map that answers neither or both, because the
+    # generation decides how every register number in this app is translated
+    # and guessing it reads plausible nonsense. See nibelokal/profile.py.
+    "generation": "",
+    # tcp (Modbus TCP with an MBAP header, what an S-series pump speaks over
+    # Ethernet) or rtu (a raw Modbus RTU frame with a CRC16, what a
+    # transparent RS485-to-Ethernet gateway in front of an F-series pump's
+    # MODBUS 40 accessory forwards). See nibelokal/modbus.py.
+    "framing": "tcp",
+    # Which of the two 16-bit registers of a 32-bit value comes first. Empty
+    # means: ask the pump. On the S series there is nothing to ask -- the order
+    # is NIBE's own TIF and not a setting -- so it is the low word first. On the
+    # F series it IS a setting, the pump's menu 5.3.11, and it is also register
+    # 48852, so the app reads that at startup and follows it; the default when
+    # it does not answer is the low word first too, because 48852's documented
+    # factory value is 1 ("swapping the words") while the MODBUS 40 manual's
+    # prose says the opposite. It has to stay settable because get it wrong and
+    # every 32-bit register reads a large, stable-looking nonsense number while
+    # every 16-bit one is perfect. See nibelokal/profile.py.
+    "word_swap": "",
     "listen": "127.0.0.1",      # bind address for the web app
     "listen_port": 8377,
     "auth_token": "",           # empty = no token required
@@ -21,7 +48,14 @@ DEFAULTS = {
     "poll_seconds": 60,         # NIBE's own guidance is not to poll harder
     "history_days": 400,
     # Hours between automatic full-settings snapshots. 0 turns them off.
-    "auto_backup_hours": 24,
+    #
+    # None, and not 24, because the right answer depends on the generation and
+    # nothing here knows which one this is: a snapshot of an S-series pump is a
+    # few seconds of Modbus TCP, and the same snapshot through a MODBUS 40 is
+    # 23-34 minutes of one-register-per-request that the polling thread holds
+    # the bus for. `auto_backup_hours()` below turns the None into 24 on an S
+    # pump and 0 on an F one; a number written in config.yaml is used on either.
+    "auto_backup_hours": None,
     "allow_guarded_writes": True,
     # floor | radiators | mixed -- shapes the heating advice, nothing else
     "emitters": "radiators",
@@ -173,12 +207,21 @@ def load(path: str = "config.yaml") -> dict:
                         v = v.split("#", 1)[0].strip()
                     loaded[k.strip()] = v
         for k, v in (loaded or {}).items():
-            if v in (None, ""):
-                continue
+            # The key is checked before the value, and that order is the point.
+            # The other way round -- which is how this read until 2026-09-08 --
+            # an unknown key with an empty value was skipped as "not set" and
+            # never reported, so `genration: ""` in a config file was silent in
+            # both directions: no warning about the typo, and no generation.
+            # A key nobody recognises is worth saying so about whatever it
+            # holds.
             if k not in cfg:
                 # Better a loud warning than a setting that silently does nothing
                 # -- a mistyped allowed_hosts is a locked-out phone.
                 print("config: ignoring unknown key %r" % k)
+                continue
+            if v in (None, ""):
+                # A known key left empty means "use the default", and every
+                # empty-means-unset key in DEFAULTS depends on that.
                 continue
             cfg[k] = _coerce_or_default(k, v)
 
@@ -197,6 +240,43 @@ def load(path: str = "config.yaml") -> dict:
             "There is no safe default: a mismatched register map does not fail, it "
             "reads\nplausible nonsense."
         )
+    generation = str(cfg.get("generation") or "").strip().upper()
+    if generation and generation not in ("S", "F"):
+        raise SystemExit(
+            "`generation` must be S, F or left empty (got %r).\n\n"
+            "S is the 2021 platform: S735, S1155, S1255, S320, SMO S40, VVM S320.\n"
+            "F is everything before it: F750, F1155, SMO 20/40, VVM 225/320/500.\n\n"
+            "Leave it empty to work it out from `model`." % cfg["generation"]
+        )
+    # A register_csv on its own is a complete configuration, and
+    # config.example.yaml has said so since before the generations split:
+    # "required unless register_csv is set". It carries no model name, so the
+    # generation is derived from the map itself -- profile.generation_from_
+    # addresses, the same 40027-or-47007 test the model lists are partitioned
+    # by -- in __main__.build(), where the map has actually been loaded. A map
+    # that answers neither or both fails there, loudly, naming both markers.
+    # Refusing here instead turned a working configuration into a startup
+    # error, which is a regression against the released behaviour.
+    try:
+        from .profile import parse_word_swap
+        parse_word_swap(cfg.get("word_swap"))
+    except ValueError as exc:
+        # Refused here rather than at the first 32-bit read, which is a value
+        # on a page that looks like a number and is not.
+        raise SystemExit(
+            "%s\n\n"
+            "Leave it empty unless you have looked at the pump's menu 5.3.11 "
+            "and know what it says." % exc
+        )
+    if str(cfg.get("framing") or "tcp").strip().lower() not in ("tcp", "rtu"):
+        raise SystemExit(
+            "`framing` must be tcp or rtu (got %r).\n\n"
+            "tcp is Modbus TCP, which is what an S-series pump speaks over Ethernet "
+            "and what a\nprotocol-converting RS485 gateway presents. rtu is a raw "
+            "Modbus RTU frame over the\nsame socket, which is what a *transparent* "
+            "serial bridge in front of an F-series\npump's MODBUS 40 forwards."
+            % cfg["framing"]
+        )
     if not cfg["host"]:
         raise SystemExit(
             "No pump address configured.\n\n"
@@ -206,6 +286,44 @@ def load(path: str = "config.yaml") -> dict:
             "Modbus TCP must be enabled on the pump: menu 7.5.9 Modbus TCP/IP."
         )
     return cfg
+
+
+#: What an unset `auto_backup_hours` means on an S-series pump. Its own
+#: constant only so that the number in config.example.yaml, the number in the
+#: README and the number here are one number.
+DEFAULT_AUTO_BACKUP_HOURS = 24.0
+
+#: NIBE's documented maximum timeout for one register outside a MODBUS 40's
+#: LOG.SET file, in seconds, and -- users on the LogicMachine forum say -- the
+#: real spacing between requests rather than a ceiling that is rarely reached.
+#: One request per register, so this times the size of the map is what a backup
+#: costs on an F pump. See docs/f-series.md.
+F_SECONDS_PER_REGISTER = 2.1
+
+
+def auto_backup_hours(cfg: dict, generation: str) -> float:
+    """Hours between automatic snapshots, resolved for this generation.
+
+    A number in config.yaml is used as it stands, on either generation: an
+    owner who has asked for daily snapshots on an F pump knows what they are
+    asking for, and this is not the place to overrule them.
+
+    Unset is where the generations part. On an S-series pump a full snapshot is
+    a few seconds of Modbus TCP and a daily one is free, which is what this app
+    has always done. On an F-series pump the same snapshot is every register in
+    the map at one register per request and 2.1 s per request -- 23 to 34
+    minutes for the 646-register F750 map -- taken by the polling thread, which
+    holds the pump's only bus for all of it. Every poll in that window is
+    skipped, the dashboard goes stale for half an hour, and an alarm raised
+    during it is noticed when the backup finishes. A daily backup is worth
+    having; it is not worth having by default at that price, on a transport
+    nobody has measured. So on an F pump it is off until it is asked for, and
+    config.example.yaml says so where somebody will read it.
+    """
+    value = cfg.get("auto_backup_hours")
+    if value is None or value == "":
+        return 0.0 if generation == "F" else DEFAULT_AUTO_BACKUP_HOURS
+    return float(value)
 
 
 def resolve(cfg: dict, key: str, base: str) -> str:

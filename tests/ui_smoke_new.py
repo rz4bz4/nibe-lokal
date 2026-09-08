@@ -80,6 +80,7 @@ from nibelokal import advisor                             # noqa: E402
 from nibelokal import settings as nsettings               # noqa: E402
 from nibelokal import spot as nspot                       # noqa: E402
 from nibelokal.homey import Homey                         # noqa: E402
+from nibelokal.profile import Profile                    # noqa: E402
 from nibelokal.pump import DASHBOARD, FAN_SPEED_REGISTER  # noqa: E402
 from nibelokal.registry import Registry                   # noqa: E402
 from nibelokal.weather import Weather                     # noqa: E402
@@ -90,6 +91,15 @@ NOW = time.time()
 #: titlar, enheter, storlekar, skalfaktorer och mappningar kommer harifran, och
 #: det ar mappningarna som gor att ett halvt dussin register svarar med ord.
 REGISTRY = Registry.load("S735")
+
+#: Och samma sak for F-serien. Lage "f750" kor hela appen mot en F750:s egen
+#: registerkarta, med F750-profilen emellan -- alltsa exakt den vag en riktig
+#: F-seriepump gar. Poangen ar inte att skarmbilden blir snygg, utan att sidan
+#: motter det den moter dar: registernummer den aldrig har sett (47007, 40004),
+#: mappade ord den inte har svenska for ("Fan mode 2"), rader som helt saknas
+#: for att registret inte finns (flaktprocenten, extra varmvatten) och en
+#: overst pa sidan som sager att oversattningen inte ar verifierad.
+F_REGISTRY = Registry.load("F750")
 
 
 # --------------------------------------------------------------------------
@@ -186,11 +196,21 @@ class FakePump:
     port = 502
 
     def __init__(self, mode: str):
-        self.registry = REGISTRY
+        f = mode == "f750"
+        self.registry = F_REGISTRY if f else REGISTRY
+        # Profilen ar det enda som skiljer de tva: adresserna appen fragar med
+        # ar desamma, kartan under ar en annan. Se nibelokal/profile.py.
+        self.profile = Profile.for_model("F750" if f else "S735")
         self.values = pump_values(mode)
 
+    def register(self, address: int):
+        """Samma metod som nibelokal.pump.Pump.register."""
+        if not self.profile.available(address):
+            return None
+        return self.registry.get(self.profile.physical(address))
+
     def _read(self, address: int):
-        reg = self.registry.get(address)
+        reg = self.register(address)
         return reg.decode(reg.encode(self.values[address]))
 
     def read(self, address: int):
@@ -199,7 +219,7 @@ class FakePump:
     def read_many(self, addresses) -> dict:
         out = {}
         for a in addresses:
-            if self.registry.get(a) is None or a not in self.values:
+            if self.register(a) is None or a not in self.values:
                 continue
             out[a] = {"value": self._read(a)}
         return out
@@ -222,16 +242,23 @@ class FakeStore:
 
 def status_registers(pump: FakePump) -> list:
     """Samma rader som server.py bygger i /api/status: titel och enhet ur
-    kartan, alltsa engelska bada tva, och vardet som pumpen svarade."""
+    kartan, alltsa engelska bada tva, och vardet som pumpen svarade.
+
+    `address` ar appens eget (S-seriens) nummer aven pa en F-seriepump, och
+    `physical` det numret pumpen sjalv anvander -- bara nar de skiljer sig,
+    alltsa aldrig i nagot av de andra lagena."""
     data = pump.read_many(DASHBOARD)
     out = []
     for address, row in sorted(data.items()):
-        reg = pump.registry.get(address)
-        out.append({"address": address,
-                    "title": reg.title if reg else str(address),
-                    "unit": reg.unit if reg else "",
-                    "value": row.get("value"),
-                    "error": row.get("error")})
+        reg = pump.register(address)
+        entry = {"address": address,
+                 "title": reg.title if reg else str(address),
+                 "unit": reg.unit if reg else "",
+                 "value": row.get("value"),
+                 "error": row.get("error")}
+        if reg is not None and reg.address != address:
+            entry["physical"] = reg.address
+        out.append(entry)
     return out
 
 
@@ -559,7 +586,14 @@ class Stub(SimpleHTTPRequestHandler):
         if path == "/api/status":
             return self._json({
                 "pump": {"host": pump.host, "port": pump.port},
-                "register_map": REGISTRY.source,
+                "register_map": pump.registry.source,
+                # Verified ar falskt bara pa F-serien, och det ar det som
+                # tander raden overst pa sidan. Nyckeln finns i alla lagen:
+                # en sida som cachats mot en aldre server ska mota att den
+                # saknas, inte att den ar falsk.
+                "generation": pump.profile.generation,
+                "model": pump.profile.model,
+                "verified": pump.profile.verified,
                 # Pollern gar; svaret ska darfor vara farskt varje gang och
                 # inte aldras genom testkorningen -- "4 min sedan" i rubriken
                 # ar en egenskap hos stubben, inte hos appen.
@@ -1054,6 +1088,45 @@ def register_fallback(page, url, out):
     check(page.locator("#alarmBanner").is_visible(), "och det foljer med till Varme")
 
 
+def f_series_says_it_is_unverified(page, url, out):
+    """En F750. Tva saker ska hanga ihop, och de ar hela poangen med laget.
+
+    1. Sidan sager overst att oversattningen inte ar verifierad, och lanken gar
+       till issue-sidan. Det ar det enda i appen som skiljer "det har ar mott
+       mot en riktig pump" fran "det har ar last ur en registerkarta".
+    2. Registernumren i listan ar pumpens egna. Appen adresserar allt med
+       40027 och 40031, men det som star pa skarmen ska vara 47007 och 47011 --
+       for det ar de numren som star i agarens egen dokumentation.
+    """
+    print("\n=== F-serien: overs\u00e4ttningen ar inte verifierad ===")
+    page.goto(url, wait_until="networkidle")
+    page.wait_for_timeout(2400)
+    banner = page.locator("#genBanner")
+    check(banner.is_visible(), "raden om overs\u00e4ttningen visas")
+    txt = banner.inner_text()
+    check("F750" in txt, "och den namner modellen: %r" % txt[:80])
+    check(page.locator("#genBanner a").count() == 1, "med en lank att beratta pa")
+    shoot(page, out, "f750-obekraftad")
+
+    page.locator("#goSettings").click()
+    page.wait_for_timeout(1800)
+    body = page.locator("#settings").inner_text() + page.locator("#setWater").inner_text()
+    check("47011" in body, "installningslistan visar pumpens eget nummer for "
+                           "varmeoffset (47011, inte 40031)")
+    check("40031" not in body, "och inte appens eget")
+    shoot(page, out, "f750-installningar")
+
+    page.locator('nav button[data-view="heat"]').click()
+    page.wait_for_timeout(900)
+    page.locator("#advSum").click()
+    page.wait_for_timeout(800)
+    adv = page.locator("#advBody").inner_text()
+    check("47026" in adv or "47007" in adv,
+          "Avancerat visar ocksa pumpens egna nummer")
+    check(page.locator("#genBanner").is_visible(), "och raden foljer med till Varme")
+    shoot(page, out, "f750-avancerat")
+
+
 def alarm_never_invented(page, url, out):
     """Det falska larmet: 32196 svarar "No alarm", vilket ar sant i JavaScript.
 
@@ -1327,7 +1400,7 @@ def stepper_write(page, url):
 
 
 MODES = ["full", "quiet", "off", "fallback", "curve", "unreach",
-         "slow", "heat502", "alarmdown"]
+         "slow", "heat502", "alarmdown", "f750"]
 
 
 def main():
@@ -1368,7 +1441,8 @@ def main():
                       % (mode, label, (": " + "; ".join(real[:3])) if real else ""))
                 page.close()
 
-        for fn, mode in [(register_fallback, "fallback"), (owner_curve, "curve"),
+        for fn, mode in [(f_series_says_it_is_unverified, "f750"),
+                         (register_fallback, "fallback"), (owner_curve, "curve"),
                          (heat_down, "heat502"), (unreachable, "unreach"),
                          (slow_server, "slow"), (alarm_never_invented, "alarmdown"),
                          (mapped_setting, "full"), (ventilation_down, "full")]:

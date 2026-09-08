@@ -657,6 +657,13 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
     settings = settings or {}
     curve = _num(settings.get("curve"))
     points = settings.get("own_curve")
+    # The outdoor temperature each point governs, as advisor.diagnose() read it
+    # out of the pump's profile. Not a constant: on the F generation the
+    # seventh point's temperature is not established and arrives as None, and
+    # a point whose weather is unknown cannot be the point that governs the
+    # weather where the error is worst. Falls back to the S-series list for a
+    # settings dict from an older caller. See profile.OWN_CURVE_OUTDOOR.
+    temps = settings.get("own_curve_outdoor") or list(OWN_CURVE_OUTDOOR)
     min_supply = _num(settings.get("min_supply"))
     max_supply = _num(settings.get("max_supply"))
 
@@ -701,13 +708,13 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
         }
         return res
 
-    if not isinstance(points, (list, tuple)) or len(points) != len(OWN_CURVE_OUTDOOR):
+    if not isinstance(points, (list, tuple)) or len(points) != len(temps):
         res.notes_sv.append(
             "Pumpen kör egen kurva (40027 = 0) men punkterna gick inte att läsa, "
             "så det går inte att säga vilken punkt som ska flyttas.")
         return res
 
-    idx = _point_for(worst_x, points)
+    idx = _point_for(worst_x, points, temps)
     if idx is None:
         res.notes_sv.append(
             "Ingen läsbar kurvpunkt ligger nära %s °C ute, där felet är störst."
@@ -740,9 +747,9 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
                _fmt(max_supply if direction > 0 else min_supply), limit))
         return res
 
-    before = curve_at(list(points), worst_x)
+    before = curve_at(list(points), worst_x, temps)
     after_points = [target if j == idx else p for j, p in enumerate(points)]
-    after = curve_at(after_points, worst_x)
+    after = curve_at(after_points, worst_x, temps)
     effect = ""
     if before is not None and after is not None:
         effect = (" Beräknad framledning vid %s °C ute går från %s till %s °C."
@@ -756,7 +763,7 @@ def _slope_answer(res, f, nights, settings, em, wait_hours):
                    "punkten för %s °C ute, den som styr vädret där felet är "
                    "störst (%s °C ute). Att flytta den ändrar kurvan just där "
                    "och lämnar den andra änden i fred — vilket offset inte gör."
-                   % (idx + 1, _sv(OWN_CURVE_OUTDOOR[idx], None, sign=True),
+                   % (idx + 1, _sv(temps[idx], None, sign=True),
                       _sv(worst_x, 0))),
         "expected_sv": ("%s °C framledning motsvarar ungefär %s °C inomhus i det "
                         "vädret.%s Beräknad framledning (31018) rampar under "
@@ -995,16 +1002,21 @@ def _clamp(v, lo, hi) -> float:
     return max(lo, min(hi, v))
 
 
-def _point_for(outdoor, points):
+def _point_for(outdoor, points, temps=None):
     """The own-curve point that governs a given outdoor temperature.
 
     Nearest readable point, not "the cold end": P1 and P2 sit at -30 and -20 C,
     which most of Sweden never reaches, and advice that lands there is advice
     that does nothing.
+
+    A point with no outdoor temperature -- P7 on the F generation, where NIBE's
+    manual shows six points and the seventh is inference -- is not a candidate:
+    "nearest" is meaningless for a point whose weather nobody has established.
     """
+    temps = OWN_CURVE_OUTDOOR if temps is None else temps
     best, best_d = None, None
-    for i, t in enumerate(OWN_CURVE_OUTDOOR):
-        if i >= len(points) or _num(points[i]) is None:
+    for i, t in enumerate(temps):
+        if t is None or i >= len(points) or _num(points[i]) is None:
             continue
         d = abs(t - outdoor)
         if best_d is None or d < best_d:

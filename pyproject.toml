@@ -4,7 +4,7 @@ name = "nibe-lokal"
 # once (package 0.2.1, wheel 0.3.0, git tag v0.3.1) and SMHI was told the
 # oldest of them; read it from the package instead of retyping it here.
 dynamic = ["version"]
-description = "Local Modbus TCP web app for NIBE S-series heat pumps, without the cloud subscription"
+description = "Local Modbus web app for NIBE S- and F-series heat pumps, without the cloud subscription"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}

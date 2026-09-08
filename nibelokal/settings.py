@@ -191,6 +191,30 @@ def home(group: dict, address: int) -> str:
     return RENDERED_ELSEWHERE.get(address, group.get("home", "set"))
 
 
+#: Rows whose wording is not true on both generations, by generation.
+#:
+#: One row so far, and it is a row about what nobody knows. P7 is "+30 °C ute"
+#: on the S series because NIBE's menu 1.30.7 says so. On the F series the
+#: register exists with the same default, and both the F750 and the F1155 user
+#: manual show menu 1.9.7 with six rows ending at +20 -- so the seventh point's
+#: outdoor temperature is an inference from register order, not a reading. A
+#: label that names a temperature is a claim; this one is not established, so
+#: on an F pump the label does not make it and the explanation says why. See
+#: docs/f-series.md, "The seventh own-curve point", and
+#: profile.OWN_CURVE_OUTDOOR, which is where the same fact lives for the chart
+#: and for the advice.
+BY_GENERATION: dict[str, dict[int, tuple[str, str]]] = {
+    "F": {
+        40040: ("Egen kurva P7",
+                "Framledning i den varmaste änden av kurvan. NIBE:s handbok för "
+                "F-serien visar sex punkter i meny 1.9.7, −30 till +20 °C, och "
+                "registret för en sjunde finns ändå. Vilken utetemperatur den "
+                "gäller är inte belagt, så appen skriver ingen här och räknar "
+                "inte med punkten när den tolkar kurvan."),
+    },
+}
+
+
 #: Every address this module offers, in the order the groups list them.
 ADDRESSES = [addr for g in GROUPS for addr, _, _ in g["registers"]]
 
@@ -204,17 +228,27 @@ def build(pump, values: dict) -> list[dict]:
     """
     from . import safety
 
+    generation = getattr(getattr(pump, "profile", None), "generation", "S")
+    overrides = BY_GENERATION.get(generation, {})
+
     out = []
     for group in GROUPS:
         rows = []
         for address, label, why in group["registers"]:
+            # A row whose wording is only true on one generation says the other
+            # thing on the other one. See BY_GENERATION.
+            label, why = overrides.get(address, (label, why))
             row = values.get(address)
             if not row or "error" in row or row.get("value") is None:
                 continue
-            reg = pump.registry.get(address)
+            # pump.register(), not pump.registry.get(): the addresses in this
+            # file are the S-series numbering the whole app speaks, and on an
+            # F-series pump the map is keyed by something else entirely. See
+            # nibelokal/profile.py.
+            reg = pump.register(address)
             if reg is None or not reg.writable:
                 continue
-            rows.append({
+            entry = {
                 "address": address,
                 "label": label,
                 "why": why,
@@ -225,9 +259,15 @@ def build(pump, values: dict) -> list[dict]:
                 "default": reg.default,
                 "options": (sorted(reg.mappings.items(), key=lambda kv: int(kv[0]))
                             if reg.mappings else None),
-                "tier": safety.tier(address),
+                # The tier is decided on the address that is actually written.
+                "tier": safety.tier(reg.address),
                 "home": home(group, address),
-            })
+            }
+            if reg.address != address:
+                # So the row can show the number the owner's own pump uses
+                # while the app goes on addressing it by the canonical one.
+                entry["physical"] = reg.address
+            rows.append(entry)
         if rows:
             out.append({"key": group["key"], "title": group["title"],
                         "intro": group["intro"],
