@@ -671,8 +671,25 @@ Modbus has no authentication at all — anyone who can reach port 502 can change
 every setting. Assume the same about this app:
 
 - Bind to `127.0.0.1` and put it behind something, or leave it on a LAN you trust.
-- Set `auth_token` in `config.yaml` to require a token
-  (`X-Auth-Token` header, or `?token=` once, which the app remembers).
+- Set a token. With one set, **every** `/api/` request — reads as well as
+  writes — needs it; without one, everything works as before. Set it in the
+  environment as `NIBE_LOKAL_TOKEN` (best: a systemd `EnvironmentFile=` with
+  mode 600), or as `auth_token` in `config.yaml`. The older `NIBE_TOKEN` and
+  `NIBE_AUTH_TOKEN` still work; `NIBE_LOKAL_TOKEN` wins if several are set.
+  A client sends it as `Authorization: Bearer <token>`, as `X-Auth-Token:
+  <token>`, or as `?token=` once:
+
+  ```sh
+  curl -H "Authorization: Bearer $NIBE_LOKAL_TOKEN" http://<host>:8377/api/status
+  ```
+
+  The web app asks for the token the first time an API call is refused and
+  remembers it in the browser; opening it once as
+  `http://<host>:8377/?token=<token>` does the same without the question. The
+  page itself (HTML, icons) is served without a token and contains no data.
+- With no token and a bind address other than localhost (`listen: 0.0.0.0` or
+  a LAN address), the app logs a warning at startup: that combination means
+  anyone on the network can read the pump and change its settings.
 - The app refuses requests whose `Host` header is not localhost, its bind
   address, this machine's own name, or a bare IP address (an IP cannot be
   DNS-rebound, and reaching the app at `192.168.1.5` is the normal case), and
@@ -717,7 +734,8 @@ SMHI needs no credential, so there is nothing to protect there.
 
 Every key in `config.example.yaml` can also be set as an environment variable
 with a `NIBE_` prefix: `NIBE_HOST`, `NIBE_LISTEN_PORT`, `NIBE_AUTH_TOKEN`,
-`NIBE_ALLOWED_HOSTS`, and so on.
+`NIBE_ALLOWED_HOSTS`, and so on. The API token also reads from
+`NIBE_LOKAL_TOKEN`, which takes precedence; see [Security](#security).
 
 ### Keeping it running
 

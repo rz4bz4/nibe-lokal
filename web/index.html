@@ -791,7 +791,7 @@ async function api(path, opts = {}) {
   if (res.status === 401) {
     // An installed home-screen app has its own storage, so a ?token= from the
     // browser is not there. Ask once rather than showing a dead dashboard.
-    const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
+    const given = prompt('Appen kräver en kod (NIBE_LOKAL_TOKEN eller auth_token i config.yaml):', '');
     if (given) {
       token = given.trim();
       try { localStorage.setItem('nibe_token', token); } catch (e) {}

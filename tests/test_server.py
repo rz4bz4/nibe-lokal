@@ -351,6 +351,110 @@ class TheToken(ServerTestCase):
         self.assertEqual(status, 401)
 
 
+class BearerToken(ServerTestCase):
+    """Authorization: Bearer, next to X-Auth-Token and ?token=."""
+
+    def bearer(self, value, path="/api/status"):
+        return self.get(path, token=None, extra=["Authorization: " + value])[0]
+
+    def test_the_right_bearer_token_gets_in(self):
+        self.assertEqual(self.bearer("Bearer " + TOKEN), 200)
+
+    def test_the_scheme_is_case_insensitive(self):
+        self.assertEqual(self.bearer("bearer " + TOKEN), 200)
+
+    def test_a_wrong_bearer_token_is_401(self):
+        self.assertEqual(self.bearer("Bearer fel"), 401)
+
+    def test_another_scheme_is_not_a_token(self):
+        self.assertEqual(self.bearer("Basic " + TOKEN), 401)
+
+    def test_no_header_at_all_is_401_for_reads_too(self):
+        self.assertEqual(self.get("/api/status", token=None)[0], 401)
+
+    def test_a_write_needs_it_as_well(self):
+        payload = b'{"minutes": 60}'
+        head = ["POST /api/hotwater HTTP/1.1", "Host: 127.0.0.1:%d" % self.port,
+                "Content-Type: application/json",
+                "Content-Length: %d" % len(payload), "Connection: close"]
+        raw = ("\r\n".join(head) + "\r\n\r\n").encode() + payload
+        self.assertEqual(self.raw(raw)[0], 401)
+        ok = ("\r\n".join(head + ["Authorization: Bearer " + TOKEN])
+              + "\r\n\r\n").encode() + payload
+        self.assertEqual(self.raw(ok)[0], 200)
+
+    def test_the_page_itself_needs_no_token(self):
+        # The shell is static and holds nothing; it is what asks for the token.
+        status = self.get("/", token=None)[0]
+        self.assertIn(status, (200, 500))       # 500 only if web/ is absent
+        self.assertNotEqual(status, 401)
+
+
+class WithoutAToken(ServerTestCase):
+    """No token configured: everything works as it always has."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.handler.ctx["token"] = ""
+
+    def test_reads_and_writes_need_nothing(self):
+        self.assertEqual(self.get("/api/status", token=None)[0], 200)
+        self.assertEqual(self.post("/api/hotwater", {"minutes": 60},
+                                   token="")[0], 200)
+
+
+class TokenSources(unittest.TestCase):
+    def test_nibe_lokal_token_wins(self):
+        env = {"NIBE_LOKAL_TOKEN": "a", "NIBE_TOKEN": "b"}
+        self.assertEqual(server.resolve_token({"auth_token": "c"}, env), "a")
+
+    def test_the_older_variable_still_works(self):
+        self.assertEqual(server.resolve_token({"auth_token": "c"},
+                                              {"NIBE_TOKEN": "b"}), "b")
+
+    def test_an_empty_variable_does_not_switch_the_config_token_off(self):
+        self.assertEqual(server.resolve_token({"auth_token": "c"},
+                                              {"NIBE_LOKAL_TOKEN": "  "}), "c")
+
+    def test_nothing_anywhere_is_no_token(self):
+        self.assertEqual(server.resolve_token({"auth_token": ""}, {}), "")
+
+    def test_build_context_uses_it(self):
+        old = os.environ.get("NIBE_LOKAL_TOKEN")
+        os.environ["NIBE_LOKAL_TOKEN"] = "frånmiljön"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                store = Store(os.path.join(tmp, "nibe.db"))
+                try:
+                    cfg = dict(config.DEFAULTS, host="192.0.2.10", model="S735")
+                    ctx = server.build_context(FakePump(), cfg, tmp, store, None, {})
+                finally:
+                    store.close()
+        finally:
+            if old is None:
+                del os.environ["NIBE_LOKAL_TOKEN"]
+            else:
+                os.environ["NIBE_LOKAL_TOKEN"] = old
+        self.assertEqual(ctx["token"], "frånmiljön")
+
+
+class TheStartupWarning(unittest.TestCase):
+    def test_open_on_every_interface_warns(self):
+        self.assertIn("0.0.0.0", server.auth_warning("0.0.0.0", ""))
+        self.assertIn("NIBE_LOKAL_TOKEN", server.auth_warning("", ""))
+
+    def test_open_on_a_lan_address_warns(self):
+        self.assertIsNotNone(server.auth_warning("192.0.2.5", ""))
+
+    def test_loopback_does_not(self):
+        for listen in ("127.0.0.1", "localhost", "::1", "127.0.0.2"):
+            self.assertIsNone(server.auth_warning(listen, ""), listen)
+
+    def test_a_token_does_not(self):
+        self.assertIsNone(server.auth_warning("0.0.0.0", "hemligt"))
+
+
 class TheVersion(ServerTestCase):
     """The app's version and the pump's own answer, on /api/status."""
 

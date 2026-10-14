@@ -173,6 +173,47 @@ def read_device_id(pump) -> dict | None:
     return out or None
 
 
+#: Environment variables that set the API token, strongest first. The config
+#: key `auth_token` (and so NIBE_AUTH_TOKEN, see config.py) is the fallback.
+TOKEN_ENV = ("NIBE_LOKAL_TOKEN", "NIBE_TOKEN")
+
+
+def resolve_token(cfg: dict, environ=None) -> str:
+    """The API token, or "" for none. The first non-empty source wins."""
+    environ = os.environ if environ is None else environ
+    for name in TOKEN_ENV:
+        value = (environ.get(name) or "").strip()
+        if value:
+            return value
+    return str(cfg.get("auth_token") or "").strip()
+
+
+def is_loopback(listen: str) -> bool:
+    """True when the bind address only answers this machine."""
+    if listen in ("localhost",):
+        return True
+    try:
+        return ipaddress.ip_address(listen.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def auth_warning(listen: str, token: str) -> str | None:
+    """The startup warning for an open API on a reachable address, or None.
+
+    No token is a supported setup -- on 127.0.0.1 behind a proxy it is the
+    sensible one -- so it is not an error. On 0.0.0.0 or a LAN address it means
+    every device on the network can read the pump and change its settings, and
+    that is said in the log, where a service that nobody watches leaves a trace.
+    """
+    if token or is_loopback(listen):
+        return None
+    return ("no API token is set and the app listens on %s: anyone who can "
+            "reach this port can read the pump and change its settings. Set "
+            "NIBE_LOKAL_TOKEN (or auth_token in config.yaml) to require one."
+            % (listen or "0.0.0.0"))
+
+
 def _is_ip_literal(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
@@ -238,6 +279,13 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return True
         given = self.headers.get("X-Auth-Token") or ""
+        if not given:
+            # The standard header, for scripts, Homey flows and curl: the
+            # scheme is case-insensitive (RFC 7235), anything but Bearer is
+            # simply not a token.
+            scheme, _, value = (self.headers.get("Authorization") or "").strip().partition(" ")
+            if scheme.lower() == "bearer":
+                given = value.strip()
         if not given:
             given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
         # Bytes, not str: compare_digest raises TypeError on a str with a
@@ -891,7 +939,7 @@ def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
         "allowed_hosts": set() if allowed_hosts is None else allowed_hosts,
         "store": store,
         "poller": poller,
-        "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
+        "token": resolve_token(cfg),
         "emitters": cfg.get("emitters") or "radiators",
         "backup_dir": backup_dir or resolve(cfg, "backup_dir", base)
                       or os.path.join(base, "backup"),
@@ -976,9 +1024,14 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         print("                 values against the pump's own display before you "
               "change anything.")
     print("  polling      : every %d s" % cfg["poll_seconds"])
-    if not Handler.ctx["token"]:
-        print("  auth         : none - anyone on your LAN can change settings.")
-        print("                 Set auth_token in config.yaml to require a token.")
+    if Handler.ctx["token"]:
+        print("  auth         : token required on every /api/ request")
+    else:
+        print("  auth         : none - anyone who can reach the port can change settings.")
+        print("                 Set NIBE_LOKAL_TOKEN or auth_token in config.yaml.")
+    warning = auth_warning(listen, Handler.ctx["token"])
+    if warning:
+        log.warning(warning)
     if poller.backup_dir:
         print("  auto backup  : every %g h into %s" % (poller.backup_hours, backup_dir))
     elif pump.profile.generation == "F" and cfg.get("auto_backup_hours") in (None, ""):
