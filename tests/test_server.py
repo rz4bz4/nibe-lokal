@@ -351,6 +351,54 @@ class TheToken(ServerTestCase):
         self.assertEqual(status, 401)
 
 
+class TheVersion(ServerTestCase):
+    """The app's version and the pump's own answer, on /api/status."""
+
+    def test_status_carries_the_app_version(self):
+        from nibelokal import __version__
+        status, body = self.get("/api/status")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data["app_version"], __version__)
+        # Built without a device id, so it is null -- not absent, not invented.
+        self.assertIn("device", data)
+        self.assertIsNone(data["device"])
+
+    def test_a_device_id_given_at_startup_is_passed_through(self):
+        self.handler.ctx["device"] = {"vendor": "NIBE", "product": "S735",
+                                      "revision": "9999"}
+        try:
+            data = json.loads(self.get("/api/status")[1])
+        finally:
+            self.handler.ctx["device"] = None
+        self.assertEqual(data["device"]["revision"], "9999")
+
+
+class ReadDeviceId(unittest.TestCase):
+    """Best effort: any failure is "not answered", never an exception."""
+
+    def test_a_pump_that_does_not_answer_is_none(self):
+        class Silent:
+            def device_id(self):
+                raise OSError("timed out")
+        pump = FakePump()
+        pump.mb = Silent()
+        self.assertIsNone(server.read_device_id(pump))
+
+    def test_a_pump_with_no_modbus_object_at_all_is_none(self):
+        self.assertIsNone(server.read_device_id(FakePump()))
+
+    def test_only_the_three_named_fields_are_kept(self):
+        class Answers:
+            def device_id(self):
+                return {"vendor": "NIBE", "product": "S735", "revision": "1234",
+                        "objects": {0: "NIBE", 1: "S735", 2: "1234"}}
+        pump = FakePump()
+        pump.mb = Answers()
+        self.assertEqual(server.read_device_id(pump),
+                         {"vendor": "NIBE", "product": "S735", "revision": "1234"})
+
+
 class TheRequestLog(unittest.TestCase):
     """`?token=` goes in the DEBUG log under -v, and logs get pasted around.
 

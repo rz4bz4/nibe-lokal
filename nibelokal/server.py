@@ -20,7 +20,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import advisor, autotune, settings
+from . import __version__, advisor, autotune, settings
 from .alarms import Watcher
 from .homey import Homey
 from .pump import DASHBOARD
@@ -152,6 +152,25 @@ def build_providers(pump, cfg: dict, store: Store) -> dict:
             providers["errors"][name] = str(exc)
             log.warning("optional feature %s not available: %s", name, exc)
     return providers
+
+
+def read_device_id(pump) -> dict | None:
+    """What the pump says it is -- vendor, product, software version -- or None.
+
+    Asked once, at startup, before the poller owns the bus: function 0x2B with
+    its one-second timeout (see modbus.device_id). Optional in the Modbus
+    specification, so every failure here means "not answered" and nothing
+    else; the web app then simply shows no pump version.
+    """
+    try:
+        info = pump.mb.device_id()
+    except Exception as exc:                              # noqa: BLE001
+        log.info("device identification not answered: %s", exc)
+        return None
+    if not isinstance(info, dict):
+        return None
+    out = {k: info.get(k) for k in ("vendor", "product", "revision") if info.get(k)}
+    return out or None
 
 
 def _is_ip_literal(host: str) -> bool:
@@ -387,6 +406,11 @@ class Handler(BaseHTTPRequestHandler):
                 "generation": pump.profile.generation,
                 "model": pump.profile.model,
                 "verified": pump.profile.verified,
+                # Additive. The app's own version, and what the pump answered
+                # to Read Device Identification at startup (vendor, product,
+                # software version), or null when it did not answer.
+                "app_version": __version__,
+                "device": self.ctx.get("device"),
                 "polled_at": poller.last_ok,
                 "poll_error": poller.last_error,
                 # A database that will not take the readings is its own
@@ -817,7 +841,8 @@ def _optional_number(value):
 
 
 def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
-                  allowed_hosts=None, backup_dir: str | None = None) -> dict:
+                  allowed_hosts=None, backup_dir: str | None = None,
+                  device: dict | None = None) -> dict:
     """Everything a request needs, assembled once.
 
     Its own function so that a test can build the exact dict the server runs
@@ -828,6 +853,7 @@ def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
 
     return {
         "pump": pump,
+        "device": device,
         "allowed_hosts": set() if allowed_hosts is None else allowed_hosts,
         "store": store,
         "poller": poller,
@@ -856,6 +882,9 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
                   cfg["history_days"])
     backup_dir = resolve(cfg, "backup_dir", base) or os.path.join(base, "backup")
     providers = build_providers(pump, cfg, store)
+    # Before the poller starts, so the one-second question does not queue
+    # behind -- or in front of -- a poll on the same socket.
+    device = read_device_id(pump)
     # The watcher and the indoor feed ride along on the poll the pump is
     # already answering: one Modbus read, and the alarm registers are in
     # DASHBOARD, so watching costs nothing extra on the wire.
@@ -891,15 +920,17 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
             pass
 
     Handler.ctx = build_context(pump, cfg, base, store, poller, providers,
-                                allowed, backup_dir)
+                                allowed, backup_dir, device)
 
     httpd = ThreadingHTTPServer((listen, port), Handler)
     where = "http://%s:%d/" % ("localhost" if listen in ("0.0.0.0", "") else listen, port)
-    print("nibe-lokal serving %s" % where)
+    print("nibe-lokal %s serving %s" % (__version__, where))
     print("  pump         : %s:%d%s" % (pump.host, pump.port,
                                         "" if pump.mb.framing == "tcp"
                                         else " (Modbus RTU over TCP)"))
     print("  register map : %s" % pump.registry.source)
+    if device:
+        print("  device id    : %s" % " ".join(device.values()))
     if not pump.profile.verified:
         # An F-series mapping has never met an F-series pump. Said on the
         # console as well as on the page, because the person setting this up

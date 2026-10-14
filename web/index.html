@@ -725,6 +725,7 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
   <footer>
     nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
     ingen molntjänst, ingen prenumeration<br>
+    <span id="verNote"></span><br>
     <span id="mapNote"></span>
   </footer>
 </section>
@@ -1378,6 +1379,7 @@ async function refresh() {
     freshness(lastPolled, lastPollErr);
     if (!$('#histTabs').children.length) buildHistTabs();
     if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
+    paintVersion(d);
     paintGeneration(d);
   } catch (e) {
     $('#statusWrap').classList.remove('alarm');
@@ -1385,6 +1387,22 @@ async function refresh() {
     $('#freshness').textContent = 'fel';
     if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
   }
+}
+
+/* Appens version och vad pumpen själv svarade att den är (Read Device
+   Identification vid start). Båda nycklarna saknas i äldre svar; då står
+   raden tom hellre än att gissa. */
+function paintVersion(d) {
+  const parts = [];
+  if (d.app_version) parts.push('nibe-lokal ' + d.app_version);
+  const dev = d.device;
+  if (dev && typeof dev === 'object') {
+    const name = [dev.vendor, dev.product].filter(Boolean).join(' ');
+    let t = 'pumpen: ' + (name || 'okänd');
+    if (dev.revision) t += ', programvara ' + dev.revision;
+    parts.push(t);
+  }
+  $('#verNote').textContent = parts.join(' · ');
 }
 
 /* En rad högst upp när registeröversättningen inte är verifierad.

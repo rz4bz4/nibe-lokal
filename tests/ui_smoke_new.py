@@ -597,6 +597,9 @@ class Stub(SimpleHTTPRequestHandler):
                 # Pollern gar; svaret ska darfor vara farskt varje gang och
                 # inte aldras genom testkorningen -- "4 min sedan" i rubriken
                 # ar en egenskap hos stubben, inte hos appen.
+                "app_version": "9.9.9",
+                "device": {"vendor": "NIBE", "product": pump.profile.model,
+                           "revision": "1234"},
                 "polled_at": int(time.time() - 20),
                 "poll_error": None,
                 "store_error": None,
@@ -974,6 +977,9 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
             check(vis("#alarmBanner"), "larmet syns aven pa fliken %s" % tab)
             check("larm" in page.locator("#freshness").inner_text().lower(),
                   "rubrikraden sager larm pa %s, inte 'live'" % tab)
+        ver = page.locator("#verNote").text_content() or ""
+        check("9.9.9" in ver and "1234" in ver,
+              "sidfoten visar appens och pumpens version (%r)" % ver)
         page.locator('nav button[data-view="now"]').click()
         page.wait_for_timeout(600)
     else:
