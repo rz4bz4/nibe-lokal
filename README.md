@@ -610,6 +610,25 @@ earlier version of this paragraph claimed. Cut `history_days`, lengthen
 recompute rather than trusting the three bolded numbers if you have changed any
 of the three.
 
+### Energy
+
+The *Historik* tab has an energy view: kWh per hour for the last 24 hours, or
+per day for the last 7 or 30 days. It is built from three of the pump's own
+accumulated counters, which are in `DASHBOARD` and therefore stored with
+everything else — produced heat for heating (31578) and for hot water (31576),
+both including the immersion heater, and the electricity the pump has used
+(33824). No extra table and no extra Modbus traffic beyond three registers per
+poll (which adds three to the 25 in the arithmetic above).
+
+A bucket is how far the counter moved: its last reading in the bucket minus the
+last reading in the one before. A bucket with no readings (the app was not
+running) is a gap, not a zero, and a counter that went backwards is left out
+rather than drawn as negative energy. The bars start the day the app first
+stores the counters, so after an upgrade the view fills in over a day or two.
+On an F-series pump the produced-heat counters map to the *Heat Meter – Total
+system* registers (unverified, like the rest of the F table) and there is no
+consumption counter. The same numbers are at `GET /api/energy?period=day|week|month`.
+
 Do not poll harder than the pump allows: NIBE documents **max 100 registers per
 second and 20 registers per query**, and the app enforces both. Community reports
 suggest hammering it can wedge the pump's Modbus service until a reboot.

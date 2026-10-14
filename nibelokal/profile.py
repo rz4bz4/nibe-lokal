@@ -510,6 +510,14 @@ F_TABLE: dict[int, int] = {
     # changes nothing for a counter that starts at zero and is capped at
     # 9 999 999 in the F map.
     31535: 43416,
+    # The energy view's counters. Produced heat, compressor plus additional
+    # heat, accumulated since the pump was installed.
+    # S: "Hot water, including int. add. heat"
+    # F: "Heat Meter - HW Cpr and Add - Total system"     u32, f10, kWh
+    31576: 42437,
+    # S: "Heating, including int. add. heat"
+    # F: "Heat Meter - Heat Cpr and Add - Total system"   u32, f10, kWh
+    31578: 42439,
 }
 
 
@@ -578,6 +586,13 @@ NO_F_EQUIVALENT: dict[int, str] = {
            "tile. No F map publishes an exhaust-fan percentage read-back at "
            "all; the closest thing is 42093, the GQ3 fan inside the SAM supply-"
            "air accessory, which is a different fan on a different unit",
+    33824: "S: 'Tot. consumption', u32, factor 10, kWh -- the electricity the "
+           "pump has used, which the energy view shows next to the heat it "
+           "produced. No F map has an internal consumption counter; the "
+           "nearest are 'External Energy Meter ... Accumulated' (42504 and "
+           "friends), which count only when an external meter is wired in and "
+           "use a different factor. The energy view then shows produced heat "
+           "only, which is honest about what the pump knows",
     32196: "S: 'Class 1 alarm', u8, 0/1 -- the flag alarms.py uses to catch an "
            "alarm the pump raises without putting a number in 31976. No F map "
            "has it. The watcher degrades cleanly: with no reading for this "

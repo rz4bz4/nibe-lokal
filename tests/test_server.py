@@ -374,6 +374,38 @@ class TheVersion(ServerTestCase):
         self.assertEqual(data["device"]["revision"], "9999")
 
 
+class TheEnergyView(ServerTestCase):
+    def test_no_history_is_ok_false_and_200(self):
+        status, body = self.get("/api/energy?period=week")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["series"], [])
+        self.assertIn("energihistorik", data["error"])
+
+    def test_stored_counter_readings_come_back_as_kwh(self):
+        from nibelokal.store import ENERGY
+        address = ENERGY[0][1]
+        now = int(time.time())
+        self.store.record({address: {"value": 100.0}}, now - 120)
+        self.store.record({address: {"value": 101.5}}, now - 60)
+        try:
+            data = json.loads(self.get("/api/energy?period=day")[1])
+        finally:
+            with self.store._lock, self.store._db as c:      # noqa: SLF001
+                c.execute("DELETE FROM readings WHERE address = ?", (address,))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["bucket"], "hour")
+        series = {s["key"]: s for s in data["series"]}
+        self.assertAlmostEqual(series["heating"]["total"], 1.5)
+
+    def test_an_unknown_period_is_a_400(self):
+        self.assertEqual(self.get("/api/energy?period=year")[0], 400)
+
+    def test_it_needs_the_token(self):
+        self.assertEqual(self.get("/api/energy", token=None)[0], 401)
+
+
 class ReadDeviceId(unittest.TestCase):
     """Best effort: any failure is "not answered", never an exception."""
 

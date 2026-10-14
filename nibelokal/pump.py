@@ -63,6 +63,12 @@ DASHBOARD = [
     31088,   # Total run time, compressor
     31092,   # Total run time, compressor hot water
     31535,   # Compressor, number of starts
+    # Energy counters, accumulated kWh. The energy view (/api/energy) turns
+    # their stored readings into kWh per hour and per day; nothing else reads
+    # them. A pump without one simply drops it, like every register here.
+    31576,   # Produced heat, hot water, incl. additional heat
+    31578,   # Produced heat, heating, incl. additional heat
+    33824,   # Total electricity consumption
 ]
 
 FAN_SPEED_REGISTER = {0: 40110, 1: 40109, 2: 40108, 3: 40107, 4: 40106}

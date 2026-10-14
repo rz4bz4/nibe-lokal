@@ -28,7 +28,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nibelokal import advisor                                   # noqa: E402
-from nibelokal.store import Poller, Store                       # noqa: E402
+from nibelokal.store import ENERGY, Poller, Store               # noqa: E402
 
 
 def setUpModule():
@@ -271,6 +271,93 @@ class ADatabaseThatWillNotTakeTheReading(unittest.TestCase):
         self.assertIn("svarar inte", poller.last_error)
         self.assertIsNone(poller.last_store_error)
         self.assertEqual(store.attempts, 0)
+
+
+
+def local(y, mo, d, h=0, mi=0):
+    return int(time.mktime((y, mo, d, h, mi, 0, 0, 0, -1)))
+
+
+class EnergyPerBucket(unittest.TestCase):
+    """kWh per hour or day, out of an accumulated-kWh counter."""
+
+    ADDRESS = ENERGY[0][1]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "nibe.db"))
+        # Noon on a Wednesday in March: no clock change anywhere near.
+        self.now = local(2026, 3, 18, 12, 30)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def put(self, ts, value):
+        self.store.record({self.ADDRESS: {"value": value}}, ts)
+
+    def test_a_day_is_the_last_reading_minus_the_day_befores_last(self):
+        self.put(local(2026, 3, 16, 23, 50), 1000.0)
+        self.put(local(2026, 3, 17, 0, 10), 1000.5)
+        self.put(local(2026, 3, 17, 23, 50), 1020.0)
+        self.put(local(2026, 3, 18, 6, 0), 1026.0)
+        self.put(local(2026, 3, 18, 12, 0), 1031.0)
+        out = self.store.energy(self.ADDRESS, "week", now=self.now)
+        self.assertEqual(out["bucket"], "day")
+        self.assertEqual(len(out["points"]), 7)
+        by = {p["label"]: p["kwh"] for p in out["points"]}
+        # The minute either side of midnight belongs to the day it fell in,
+        # and nothing between two readings is lost at the boundary.
+        self.assertEqual(by["2026-03-17"], 20.0)
+        self.assertEqual(by["2026-03-18"], 11.0)
+        self.assertEqual(out["total"], 31.0 + by["2026-03-16"])
+        self.assertEqual(out["points"][-1]["label"], "2026-03-18")
+
+    def test_the_first_bucket_uses_the_reading_just_before_it(self):
+        start = local(2026, 3, 12)            # the first of the seven days
+        self.put(start - 600, 500.0)
+        self.put(start + 3600, 504.0)
+        out = self.store.energy(self.ADDRESS, "week", now=self.now)
+        self.assertEqual(out["points"][0]["kwh"], 4.0)
+
+    def test_a_gap_is_none_and_the_next_bucket_does_not_take_the_gap(self):
+        self.put(local(2026, 3, 15, 10), 100.0)
+        self.put(local(2026, 3, 15, 20), 110.0)
+        # Nothing on the 16th: the app was not running.
+        self.put(local(2026, 3, 17, 8), 150.0)
+        self.put(local(2026, 3, 17, 18), 158.0)
+        by = {p["label"]: p["kwh"]
+              for p in self.store.energy(self.ADDRESS, "week", now=self.now)["points"]}
+        self.assertIsNone(by["2026-03-16"])
+        self.assertEqual(by["2026-03-17"], 8.0)
+
+    def test_a_counter_that_goes_backwards_is_none_not_negative(self):
+        self.put(local(2026, 3, 17, 20), 900.0)
+        self.put(local(2026, 3, 18, 1), 3.0)
+        self.put(local(2026, 3, 18, 11), 5.0)
+        by = {p["label"]: p["kwh"]
+              for p in self.store.energy(self.ADDRESS, "week", now=self.now)["points"]}
+        self.assertIsNone(by["2026-03-18"])
+
+    def test_the_day_view_is_24_hours_by_the_hour(self):
+        self.put(local(2026, 3, 18, 10, 55), 10.0)
+        self.put(local(2026, 3, 18, 11, 30), 11.2)
+        self.put(local(2026, 3, 18, 12, 20), 12.0)
+        out = self.store.energy(self.ADDRESS, "day", now=self.now)
+        self.assertEqual(out["bucket"], "hour")
+        self.assertEqual(len(out["points"]), 24)
+        self.assertEqual(out["points"][-1]["label"], "2026-03-18 12")
+        self.assertEqual(out["points"][-1]["kwh"], 0.8)
+        self.assertEqual(out["points"][-2]["kwh"], 1.2)
+
+    def test_no_history_is_a_total_of_none(self):
+        out = self.store.energy(self.ADDRESS, "month", now=self.now)
+        self.assertEqual(len(out["points"]), 30)
+        self.assertIsNone(out["total"])
+
+    def test_an_unknown_period_is_a_value_error(self):
+        with self.assertRaises(ValueError):
+            self.store.energy(self.ADDRESS, "year")
 
 
 if __name__ == "__main__":

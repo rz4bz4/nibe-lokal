@@ -88,6 +88,19 @@ R_DEGREE_MINUTES = 40012
 # matches these case-insensitively as substrings in both languages.
 R_PRIORITY = 31029        # what the compressor is working on
 
+#: The energy view's counters: (key, canonical address, Swedish label). Each is
+#: an accumulated kWh total; /api/energy turns the stored readings into kWh per
+#: hour or per day. In pump.DASHBOARD, so they are already in `readings`.
+ENERGY = (
+    ("heating", 31578, "Värme"),
+    ("hotwater", 31576, "Varmvatten"),
+    ("used", 33824, "Förbrukad el"),
+)
+
+#: period -> (bucket, number of buckets). "day" is the last 24 hours by the
+#: hour; "week" and "month" are whole local days, today included.
+ENERGY_PERIODS = {"day": ("hour", 24), "week": ("day", 7), "month": ("day", 30)}
+
 
 class Store:
     def __init__(self, path: str, history_days: int = 400):
@@ -272,6 +285,77 @@ class Store:
                         row["indoor"] = float(value)
 
         return [rows[ts] for ts in sorted(rows)]
+
+    def energy(self, address: int, period: str = "week",
+               now: float | None = None) -> dict:
+        """kWh per hour or per local day, from an accumulated-kWh register.
+
+        The counter is stored as it was read, every poll, so the energy in a
+        bucket is how far the counter moved: its last reading in the bucket
+        minus its last reading in the bucket before. When the bucket before
+        has no readings (the app was down, or this is the first bucket of the
+        history) the movement inside the bucket alone is used rather than
+        handing the whole gap to one bar. A counter that went backwards -- a
+        reset, a replaced board -- gives None for that bucket, not a negative
+        number of kWh.
+
+        No new table: aggregated with the readings_addr_ts index, one GROUP BY
+        per call. Buckets are local time, so a day is midnight to midnight
+        where the pump stands, and an hour that repeats when the clocks go
+        back is one bucket of two hours.
+        """
+        if period not in ENERGY_PERIODS:
+            raise ValueError("period must be one of %s"
+                             % ", ".join(sorted(ENERGY_PERIODS)))
+        bucket, count = ENERGY_PERIODS[period]
+        now = time.time() if now is None else float(now)
+        lt = time.localtime(now)
+        if bucket == "hour":
+            fmt, py_fmt = "%Y-%m-%d %H", "%Y-%m-%d %H"
+            top = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, lt.tm_hour,
+                               0, 0, 0, 0, -1))
+            starts = [top - 3600 * k for k in range(count - 1, -1, -1)]
+            width = 3600
+        else:
+            fmt, py_fmt = "%Y-%m-%d", "%Y-%m-%d"
+            starts = [time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday - k,
+                                   0, 0, 0, 0, 0, -1))
+                      for k in range(count - 1, -1, -1)]
+            width = 86400
+        since = int(starts[0])
+        with self._lock, self._db as c:
+            rows = c.execute(
+                "SELECT strftime(?, ts, 'unixepoch', 'localtime') AS b, "
+                "MIN(value), MAX(value) FROM readings "
+                "WHERE address = ? AND ts >= ? AND value IS NOT NULL "
+                "GROUP BY b", (fmt, address, since)).fetchall()
+            # The last reading in the bucket just before the first one shown,
+            # so the first bar is measured the same way as the others.
+            before = c.execute(
+                "SELECT value FROM readings WHERE address = ? AND ts < ? "
+                "AND ts >= ? AND value IS NOT NULL ORDER BY ts DESC LIMIT 1",
+                (address, since, since - width)).fetchone()
+        seen = {b: (lo, hi) for b, lo, hi in rows}
+        prev = before[0] if before else None
+        points, labels = [], set()
+        for start in starts:
+            label = time.strftime(py_fmt, time.localtime(start))
+            if label in labels:
+                continue                 # the repeated hour in October
+            labels.add(label)
+            lo_hi = seen.get(label)
+            if lo_hi is None:
+                points.append({"start": int(start), "label": label, "kwh": None})
+                prev = None
+                continue
+            lo, hi = lo_hi
+            moved = hi - (prev if prev is not None else lo)
+            points.append({"start": int(start), "label": label,
+                           "kwh": round(moved, 2) if moved >= 0 else None})
+            prev = hi
+        known = [p["kwh"] for p in points if p["kwh"] is not None]
+        return {"period": period, "bucket": bucket, "points": points,
+                "total": round(sum(known), 2) if known else None}
 
     def span(self) -> tuple:
         """(first ts, last ts) of the history, or (None, None). Index only.

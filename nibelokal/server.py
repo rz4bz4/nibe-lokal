@@ -26,7 +26,7 @@ from .homey import Homey
 from .pump import DASHBOARD
 from .safety import Refused, tier
 from .spot import Plan, Tibber
-from .store import Poller, Store
+from .store import ENERGY, ENERGY_PERIODS, Poller, Store
 from .weather import Weather
 
 log = logging.getLogger("nibelokal.server")
@@ -469,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"address": address, "hours": hours,
                                "points": store.series(address, hours)})
 
+        if path == "/api/energy":
+            return self._json(self._energy(q.get("period", ["week"])[0]))
+
         if path == "/api/log":
             limit = _as_int(q.get("limit", ["50"])[0], "limit", 50, 1, 500)
             return self._json(store.last_writes(limit))
@@ -595,6 +598,37 @@ class Handler(BaseHTTPRequestHandler):
         result["history_days"] = days
         result["settings_error"] = settings_error
         return result
+
+    def _energy(self, period: str) -> dict:
+        """kWh per hour or day for each energy counter that has history.
+
+        A counter this pump does not have, or has not been polled for yet, is
+        left out rather than drawn as a row of zeros. None of them is
+        ok: false with a Swedish sentence, HTTP 200, like the integrations.
+        """
+        if period not in ENERGY_PERIODS:
+            raise ValueError("period must be one of %s"
+                             % ", ".join(sorted(ENERGY_PERIODS)))
+        pump = self.ctx["pump"]
+        store: Store = self.ctx["store"]
+        series = []
+        for key, address, title in ENERGY:
+            if pump.register(address) is None:
+                continue
+            result = store.energy(address, period)
+            if result["total"] is None:
+                continue
+            series.append({"key": key, "address": address, "title": title,
+                           "unit": "kWh", "total": result["total"],
+                           "points": result["points"]})
+        out = {"ok": bool(series), "period": period,
+               "bucket": ENERGY_PERIODS[period][0],
+               "series": series}
+        if not series:
+            out["error"] = ("Ingen energihistorik ännu. Appen sparar pumpens "
+                            "energiräknare vid varje avläsning; staplarna "
+                            "kommer när det finns minst två avläsningar.")
+        return out
 
     def _summaries(self) -> dict:
         """Header-line summaries for /api/status, plus what is configured.
