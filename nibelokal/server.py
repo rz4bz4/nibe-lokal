@@ -893,7 +893,31 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
     Handler.ctx = build_context(pump, cfg, base, store, poller, providers,
                                 allowed, backup_dir)
 
-    httpd = ThreadingHTTPServer((listen, port), Handler)
+    # Kall-IP-mur: svara bara hostar pa hemma-LAN:et. Allt annat -- Funnel,
+    # tailnet, WAN -- stangs innan en enda HTTP-rad har lasts. Natlistan kommer
+    # fran `lan_only` i config.yaml; tom lista = ingen mur (gamla beteendet).
+    _lan_nets = []
+    for _c in str(cfg.get("lan_only") or "").replace(",", " ").split():
+        try:
+            _lan_nets.append(ipaddress.ip_network(_c, strict=False))
+        except ValueError:
+            print("  lan_only     : ignorerar ogiltigt nat %r" % _c)
+
+    class _LanOnlyServer(ThreadingHTTPServer):
+        def verify_request(self, request, client_address):
+            if not _lan_nets:
+                return True
+            try:
+                ip = ipaddress.ip_address(client_address[0])
+            except ValueError:
+                return False
+            if ip.is_loopback:
+                return True
+            if ip.version == 6 and ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
+            return any(ip in n for n in _lan_nets)
+
+    httpd = _LanOnlyServer((listen, port), Handler)
     where = "http://%s:%d/" % ("localhost" if listen in ("0.0.0.0", "") else listen, port)
     print("nibe-lokal serving %s" % where)
     print("  pump         : %s:%d%s" % (pump.host, pump.port,

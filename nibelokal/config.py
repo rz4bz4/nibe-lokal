@@ -44,6 +44,10 @@ DEFAULTS = {
     "listen_port": 8377,
     "auth_token": "",           # empty = no token required
     "allowed_hosts": "",        # extra Host names to accept, space separated
+    # Kall-IP-mur. Mellanrumsseparerade CIDR-nat som far svar; allt annat far
+    # anslutningen stangd innan en HTTP-rad har lasts. Loopback slapps alltid
+    # igenom. Tom strang = ingen mur.
+    "lan_only": "",
     "allow_any_host": False,    # only if something else already checks Host
     "poll_seconds": 60,         # NIBE's own guidance is not to poll harder
     "history_days": 400,
