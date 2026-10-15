@@ -351,6 +351,190 @@ class TheToken(ServerTestCase):
         self.assertEqual(status, 401)
 
 
+class BearerToken(ServerTestCase):
+    """Authorization: Bearer, next to X-Auth-Token and ?token=."""
+
+    def bearer(self, value, path="/api/status"):
+        return self.get(path, token=None, extra=["Authorization: " + value])[0]
+
+    def test_the_right_bearer_token_gets_in(self):
+        self.assertEqual(self.bearer("Bearer " + TOKEN), 200)
+
+    def test_the_scheme_is_case_insensitive(self):
+        self.assertEqual(self.bearer("bearer " + TOKEN), 200)
+
+    def test_a_wrong_bearer_token_is_401(self):
+        self.assertEqual(self.bearer("Bearer fel"), 401)
+
+    def test_another_scheme_is_not_a_token(self):
+        self.assertEqual(self.bearer("Basic " + TOKEN), 401)
+
+    def test_no_header_at_all_is_401_for_reads_too(self):
+        self.assertEqual(self.get("/api/status", token=None)[0], 401)
+
+    def test_a_write_needs_it_as_well(self):
+        payload = b'{"minutes": 60}'
+        head = ["POST /api/hotwater HTTP/1.1", "Host: 127.0.0.1:%d" % self.port,
+                "Content-Type: application/json",
+                "Content-Length: %d" % len(payload), "Connection: close"]
+        raw = ("\r\n".join(head) + "\r\n\r\n").encode() + payload
+        self.assertEqual(self.raw(raw)[0], 401)
+        ok = ("\r\n".join(head + ["Authorization: Bearer " + TOKEN])
+              + "\r\n\r\n").encode() + payload
+        self.assertEqual(self.raw(ok)[0], 200)
+
+    def test_the_page_itself_needs_no_token(self):
+        # The shell is static and holds nothing; it is what asks for the token.
+        status = self.get("/", token=None)[0]
+        self.assertIn(status, (200, 500))       # 500 only if web/ is absent
+        self.assertNotEqual(status, 401)
+
+
+class WithoutAToken(ServerTestCase):
+    """No token configured: everything works as it always has."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.handler.ctx["token"] = ""
+
+    def test_reads_and_writes_need_nothing(self):
+        self.assertEqual(self.get("/api/status", token=None)[0], 200)
+        self.assertEqual(self.post("/api/hotwater", {"minutes": 60},
+                                   token="")[0], 200)
+
+
+class TokenSources(unittest.TestCase):
+    def test_nibe_lokal_token_wins(self):
+        env = {"NIBE_LOKAL_TOKEN": "a", "NIBE_TOKEN": "b"}
+        self.assertEqual(server.resolve_token({"auth_token": "c"}, env), "a")
+
+    def test_the_older_variable_still_works(self):
+        self.assertEqual(server.resolve_token({"auth_token": "c"},
+                                              {"NIBE_TOKEN": "b"}), "b")
+
+    def test_an_empty_variable_does_not_switch_the_config_token_off(self):
+        self.assertEqual(server.resolve_token({"auth_token": "c"},
+                                              {"NIBE_LOKAL_TOKEN": "  "}), "c")
+
+    def test_nothing_anywhere_is_no_token(self):
+        self.assertEqual(server.resolve_token({"auth_token": ""}, {}), "")
+
+    def test_build_context_uses_it(self):
+        old = os.environ.get("NIBE_LOKAL_TOKEN")
+        os.environ["NIBE_LOKAL_TOKEN"] = "frånmiljön"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                store = Store(os.path.join(tmp, "nibe.db"))
+                try:
+                    cfg = dict(config.DEFAULTS, host="192.0.2.10", model="S735")
+                    ctx = server.build_context(FakePump(), cfg, tmp, store, None, {})
+                finally:
+                    store.close()
+        finally:
+            if old is None:
+                del os.environ["NIBE_LOKAL_TOKEN"]
+            else:
+                os.environ["NIBE_LOKAL_TOKEN"] = old
+        self.assertEqual(ctx["token"], "frånmiljön")
+
+
+class TheStartupWarning(unittest.TestCase):
+    def test_open_on_every_interface_warns(self):
+        self.assertIn("0.0.0.0", server.auth_warning("0.0.0.0", ""))
+        self.assertIn("NIBE_LOKAL_TOKEN", server.auth_warning("", ""))
+
+    def test_open_on_a_lan_address_warns(self):
+        self.assertIsNotNone(server.auth_warning("192.0.2.5", ""))
+
+    def test_loopback_does_not(self):
+        for listen in ("127.0.0.1", "localhost", "::1", "127.0.0.2"):
+            self.assertIsNone(server.auth_warning(listen, ""), listen)
+
+    def test_a_token_does_not(self):
+        self.assertIsNone(server.auth_warning("0.0.0.0", "hemligt"))
+
+
+class TheVersion(ServerTestCase):
+    """The app's version and the pump's own answer, on /api/status."""
+
+    def test_status_carries_the_app_version(self):
+        from nibelokal import __version__
+        status, body = self.get("/api/status")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data["app_version"], __version__)
+        # Built without a device id, so it is null -- not absent, not invented.
+        self.assertIn("device", data)
+        self.assertIsNone(data["device"])
+
+    def test_a_device_id_given_at_startup_is_passed_through(self):
+        self.handler.ctx["device"] = {"vendor": "NIBE", "product": "S735",
+                                      "revision": "9999"}
+        try:
+            data = json.loads(self.get("/api/status")[1])
+        finally:
+            self.handler.ctx["device"] = None
+        self.assertEqual(data["device"]["revision"], "9999")
+
+
+class TheEnergyView(ServerTestCase):
+    def test_no_history_is_ok_false_and_200(self):
+        status, body = self.get("/api/energy?period=week")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["series"], [])
+        self.assertIn("energihistorik", data["error"])
+
+    def test_stored_counter_readings_come_back_as_kwh(self):
+        from nibelokal.store import ENERGY
+        address = ENERGY[0][1]
+        now = int(time.time())
+        self.store.record({address: {"value": 100.0}}, now - 120)
+        self.store.record({address: {"value": 101.5}}, now - 60)
+        try:
+            data = json.loads(self.get("/api/energy?period=day")[1])
+        finally:
+            with self.store._lock, self.store._db as c:      # noqa: SLF001
+                c.execute("DELETE FROM readings WHERE address = ?", (address,))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["bucket"], "hour")
+        series = {s["key"]: s for s in data["series"]}
+        self.assertAlmostEqual(series["heating"]["total"], 1.5)
+
+    def test_an_unknown_period_is_a_400(self):
+        self.assertEqual(self.get("/api/energy?period=year")[0], 400)
+
+    def test_it_needs_the_token(self):
+        self.assertEqual(self.get("/api/energy", token=None)[0], 401)
+
+
+class ReadDeviceId(unittest.TestCase):
+    """Best effort: any failure is "not answered", never an exception."""
+
+    def test_a_pump_that_does_not_answer_is_none(self):
+        class Silent:
+            def device_id(self):
+                raise OSError("timed out")
+        pump = FakePump()
+        pump.mb = Silent()
+        self.assertIsNone(server.read_device_id(pump))
+
+    def test_a_pump_with_no_modbus_object_at_all_is_none(self):
+        self.assertIsNone(server.read_device_id(FakePump()))
+
+    def test_only_the_three_named_fields_are_kept(self):
+        class Answers:
+            def device_id(self):
+                return {"vendor": "NIBE", "product": "S735", "revision": "1234",
+                        "objects": {0: "NIBE", 1: "S735", 2: "1234"}}
+        pump = FakePump()
+        pump.mb = Answers()
+        self.assertEqual(server.read_device_id(pump),
+                         {"vendor": "NIBE", "product": "S735", "revision": "1234"})
+
+
 class TheRequestLog(unittest.TestCase):
     """`?token=` goes in the DEBUG log under -v, and logs get pasted around.
 

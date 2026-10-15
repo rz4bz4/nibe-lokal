@@ -20,13 +20,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import advisor, autotune, settings
+from . import __version__, advisor, autotune, settings
 from .alarms import Watcher
 from .homey import Homey
 from .pump import DASHBOARD
 from .safety import Refused, tier
 from .spot import Plan, Tibber
-from .store import Poller, Store
+from .store import ENERGY, ENERGY_PERIODS, Poller, Store
 from .weather import Weather
 
 log = logging.getLogger("nibelokal.server")
@@ -154,6 +154,66 @@ def build_providers(pump, cfg: dict, store: Store) -> dict:
     return providers
 
 
+def read_device_id(pump) -> dict | None:
+    """What the pump says it is -- vendor, product, software version -- or None.
+
+    Asked once, at startup, before the poller owns the bus: function 0x2B with
+    its one-second timeout (see modbus.device_id). Optional in the Modbus
+    specification, so every failure here means "not answered" and nothing
+    else; the web app then simply shows no pump version.
+    """
+    try:
+        info = pump.mb.device_id()
+    except Exception as exc:                              # noqa: BLE001
+        log.info("device identification not answered: %s", exc)
+        return None
+    if not isinstance(info, dict):
+        return None
+    out = {k: info.get(k) for k in ("vendor", "product", "revision") if info.get(k)}
+    return out or None
+
+
+#: Environment variables that set the API token, strongest first. The config
+#: key `auth_token` (and so NIBE_AUTH_TOKEN, see config.py) is the fallback.
+TOKEN_ENV = ("NIBE_LOKAL_TOKEN", "NIBE_TOKEN")
+
+
+def resolve_token(cfg: dict, environ=None) -> str:
+    """The API token, or "" for none. The first non-empty source wins."""
+    environ = os.environ if environ is None else environ
+    for name in TOKEN_ENV:
+        value = (environ.get(name) or "").strip()
+        if value:
+            return value
+    return str(cfg.get("auth_token") or "").strip()
+
+
+def is_loopback(listen: str) -> bool:
+    """True when the bind address only answers this machine."""
+    if listen in ("localhost",):
+        return True
+    try:
+        return ipaddress.ip_address(listen.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def auth_warning(listen: str, token: str) -> str | None:
+    """The startup warning for an open API on a reachable address, or None.
+
+    No token is a supported setup -- on 127.0.0.1 behind a proxy it is the
+    sensible one -- so it is not an error. On 0.0.0.0 or a LAN address it means
+    every device on the network can read the pump and change its settings, and
+    that is said in the log, where a service that nobody watches leaves a trace.
+    """
+    if token or is_loopback(listen):
+        return None
+    return ("no API token is set and the app listens on %s: anyone who can "
+            "reach this port can read the pump and change its settings. Set "
+            "NIBE_LOKAL_TOKEN (or auth_token in config.yaml) to require one."
+            % (listen or "0.0.0.0"))
+
+
 def _is_ip_literal(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
@@ -219,6 +279,13 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return True
         given = self.headers.get("X-Auth-Token") or ""
+        if not given:
+            # The standard header, for scripts, Homey flows and curl: the
+            # scheme is case-insensitive (RFC 7235), anything but Bearer is
+            # simply not a token.
+            scheme, _, value = (self.headers.get("Authorization") or "").strip().partition(" ")
+            if scheme.lower() == "bearer":
+                given = value.strip()
         if not given:
             given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
         # Bytes, not str: compare_digest raises TypeError on a str with a
@@ -387,6 +454,11 @@ class Handler(BaseHTTPRequestHandler):
                 "generation": pump.profile.generation,
                 "model": pump.profile.model,
                 "verified": pump.profile.verified,
+                # Additive. The app's own version, and what the pump answered
+                # to Read Device Identification at startup (vendor, product,
+                # software version), or null when it did not answer.
+                "app_version": __version__,
+                "device": self.ctx.get("device"),
                 "polled_at": poller.last_ok,
                 "poll_error": poller.last_error,
                 # A database that will not take the readings is its own
@@ -444,6 +516,9 @@ class Handler(BaseHTTPRequestHandler):
             hours = _as_int(q.get("hours", ["24"])[0], "hours", 24, 1, 24 * 400)
             return self._json({"address": address, "hours": hours,
                                "points": store.series(address, hours)})
+
+        if path == "/api/energy":
+            return self._json(self._energy(q.get("period", ["week"])[0]))
 
         if path == "/api/log":
             limit = _as_int(q.get("limit", ["50"])[0], "limit", 50, 1, 500)
@@ -571,6 +646,37 @@ class Handler(BaseHTTPRequestHandler):
         result["history_days"] = days
         result["settings_error"] = settings_error
         return result
+
+    def _energy(self, period: str) -> dict:
+        """kWh per hour or day for each energy counter that has history.
+
+        A counter this pump does not have, or has not been polled for yet, is
+        left out rather than drawn as a row of zeros. None of them is
+        ok: false with a Swedish sentence, HTTP 200, like the integrations.
+        """
+        if period not in ENERGY_PERIODS:
+            raise ValueError("period must be one of %s"
+                             % ", ".join(sorted(ENERGY_PERIODS)))
+        pump = self.ctx["pump"]
+        store: Store = self.ctx["store"]
+        series = []
+        for key, address, title in ENERGY:
+            if pump.register(address) is None:
+                continue
+            result = store.energy(address, period)
+            if result["total"] is None:
+                continue
+            series.append({"key": key, "address": address, "title": title,
+                           "unit": "kWh", "total": result["total"],
+                           "points": result["points"]})
+        out = {"ok": bool(series), "period": period,
+               "bucket": ENERGY_PERIODS[period][0],
+               "series": series}
+        if not series:
+            out["error"] = ("Ingen energihistorik ännu. Appen sparar pumpens "
+                            "energiräknare vid varje avläsning; staplarna "
+                            "kommer när det finns minst två avläsningar.")
+        return out
 
     def _summaries(self) -> dict:
         """Header-line summaries for /api/status, plus what is configured.
@@ -817,7 +923,8 @@ def _optional_number(value):
 
 
 def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
-                  allowed_hosts=None, backup_dir: str | None = None) -> dict:
+                  allowed_hosts=None, backup_dir: str | None = None,
+                  device: dict | None = None) -> dict:
     """Everything a request needs, assembled once.
 
     Its own function so that a test can build the exact dict the server runs
@@ -828,10 +935,11 @@ def build_context(pump, cfg: dict, base: str, store, poller, providers: dict,
 
     return {
         "pump": pump,
+        "device": device,
         "allowed_hosts": set() if allowed_hosts is None else allowed_hosts,
         "store": store,
         "poller": poller,
-        "token": os.environ.get("NIBE_TOKEN", cfg.get("auth_token") or ""),
+        "token": resolve_token(cfg),
         "emitters": cfg.get("emitters") or "radiators",
         "backup_dir": backup_dir or resolve(cfg, "backup_dir", base)
                       or os.path.join(base, "backup"),
@@ -856,6 +964,9 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
                   cfg["history_days"])
     backup_dir = resolve(cfg, "backup_dir", base) or os.path.join(base, "backup")
     providers = build_providers(pump, cfg, store)
+    # Before the poller starts, so the one-second question does not queue
+    # behind -- or in front of -- a poll on the same socket.
+    device = read_device_id(pump)
     # The watcher and the indoor feed ride along on the poll the pump is
     # already answering: one Modbus read, and the alarm registers are in
     # DASHBOARD, so watching costs nothing extra on the wire.
@@ -891,7 +1002,7 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
             pass
 
     Handler.ctx = build_context(pump, cfg, base, store, poller, providers,
-                                allowed, backup_dir)
+                                allowed, backup_dir, device)
 
     # Kall-IP-mur: svara bara hostar pa hemma-LAN:et. Allt annat -- Funnel,
     # tailnet, WAN -- stangs innan en enda HTTP-rad har lasts. Natlistan kommer
@@ -919,11 +1030,13 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
 
     httpd = _LanOnlyServer((listen, port), Handler)
     where = "http://%s:%d/" % ("localhost" if listen in ("0.0.0.0", "") else listen, port)
-    print("nibe-lokal serving %s" % where)
+    print("nibe-lokal %s serving %s" % (__version__, where))
     print("  pump         : %s:%d%s" % (pump.host, pump.port,
                                         "" if pump.mb.framing == "tcp"
                                         else " (Modbus RTU over TCP)"))
     print("  register map : %s" % pump.registry.source)
+    if device:
+        print("  device id    : %s" % " ".join(device.values()))
     if not pump.profile.verified:
         # An F-series mapping has never met an F-series pump. Said on the
         # console as well as on the page, because the person setting this up
@@ -935,9 +1048,14 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
         print("                 values against the pump's own display before you "
               "change anything.")
     print("  polling      : every %d s" % cfg["poll_seconds"])
-    if not Handler.ctx["token"]:
-        print("  auth         : none - anyone on your LAN can change settings.")
-        print("                 Set auth_token in config.yaml to require a token.")
+    if Handler.ctx["token"]:
+        print("  auth         : token required on every /api/ request")
+    else:
+        print("  auth         : none - anyone who can reach the port can change settings.")
+        print("                 Set NIBE_LOKAL_TOKEN or auth_token in config.yaml.")
+    warning = auth_warning(listen, Handler.ctx["token"])
+    if warning:
+        log.warning(warning)
     if poller.backup_dir:
         print("  auto backup  : every %g h into %s" % (poller.backup_hours, backup_dir))
     elif pump.profile.generation == "F" and cfg.get("auto_backup_hours") in (None, ""):

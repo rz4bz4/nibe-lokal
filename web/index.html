@@ -440,6 +440,14 @@ tr.dim{opacity:.55}
 .axrow span{grid-row:1;text-align:center;white-space:nowrap}
 .axrow.dayrow span{text-align:left;font-weight:640;letter-spacing:.03em;text-transform:uppercase}
 .tile.billig .v{color:var(--cheap)} .tile.dyr .v{color:var(--exp)}
+.bars rect.en-heating{fill:var(--warm)}
+.bars rect.en-hotwater{fill:var(--cool)}
+.bars rect.en-used{fill:var(--accent)}
+.enleg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink-2);margin-top:12px}
+.enleg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.enleg i.en-heating{background:var(--warm)} .enleg i.en-hotwater{background:var(--cool)}
+.enleg i.en-used{background:var(--accent)}
+.enleg b{font-variant-numeric:tabular-nums}
 
 .pill{display:inline-block;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
   font-weight:700;border-radius:5px;padding:2px 6px;vertical-align:2px;margin-left:6px}
@@ -685,6 +693,15 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
     <p class="hint">Appen sparar ett värde per avläsning i en fil du äger, så länge du vill.
       Det är historiken myUplink tar betalt för.</p>
   </div>
+
+  <div class="card">
+    <h2>Energi</h2>
+    <div class="chips" id="enTabs">
+      <button data-ep="day">Dygn</button><button data-ep="week" aria-pressed="true">Vecka</button>
+      <button data-ep="month">30 dygn</button>
+    </div>
+    <div id="energy"><p class="hint">läser…</p></div>
+  </div>
 </section>
 
 <!-- ===================== INSTÄLLNINGAR ===================== -->
@@ -725,6 +742,7 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
   <footer>
     nibe-lokal · pratar direkt med pumpen över Modbus TCP på ditt eget nät<br>
     ingen molntjänst, ingen prenumeration<br>
+    <span id="verNote"></span><br>
     <span id="mapNote"></span>
   </footer>
 </section>
@@ -773,7 +791,7 @@ async function api(path, opts = {}) {
   if (res.status === 401) {
     // An installed home-screen app has its own storage, so a ?token= from the
     // browser is not there. Ask once rather than showing a dead dashboard.
-    const given = prompt('Appen kräver en kod (auth_token ur config.yaml):', '');
+    const given = prompt('Appen kräver en kod (NIBE_LOKAL_TOKEN eller auth_token i config.yaml):', '');
     if (given) {
       token = given.trim();
       try { localStorage.setItem('nibe_token', token); } catch (e) {}
@@ -1378,6 +1396,7 @@ async function refresh() {
     freshness(lastPolled, lastPollErr);
     if (!$('#histTabs').children.length) buildHistTabs();
     if (d.register_map) $('#mapNote').textContent = 'registerkarta: ' + d.register_map;
+    paintVersion(d);
     paintGeneration(d);
   } catch (e) {
     $('#statusWrap').classList.remove('alarm');
@@ -1385,6 +1404,22 @@ async function refresh() {
     $('#freshness').textContent = 'fel';
     if (!latest.length) $('#heroSide').innerHTML = esc(e.message);
   }
+}
+
+/* Appens version och vad pumpen själv svarade att den är (Read Device
+   Identification vid start). Båda nycklarna saknas i äldre svar; då står
+   raden tom hellre än att gissa. */
+function paintVersion(d) {
+  const parts = [];
+  if (d.app_version) parts.push('nibe-lokal ' + d.app_version);
+  const dev = d.device;
+  if (dev && typeof dev === 'object') {
+    const name = [dev.vendor, dev.product].filter(Boolean).join(' ');
+    let t = 'pumpen: ' + (name || 'okänd');
+    if (dev.revision) t += ', programvara ' + dev.revision;
+    parts.push(t);
+  }
+  $('#verNote').textContent = parts.join(' · ');
 }
 
 /* En rad högst upp när registeröversättningen inte är verifierad.
@@ -2967,6 +3002,93 @@ async function drawHistory() {
     },
   });
 }
+/* ================= energi ================= */
+/* Pumpens energiräknare (ackumulerade kWh) sparas vid varje avläsning;
+   servern gör om dem till kWh per timme eller dygn. Producerad värme staplas
+   (värme + varmvatten), förbrukad el står bredvid när pumpen har räknaren. */
+let enPeriod = 'week';
+const EN_ORDER = ['heating', 'hotwater', 'used'];
+async function loadEnergy() {
+  let d;
+  try { d = await api('/api/energy?period=' + enPeriod); }
+  catch (e) { $('#energy').innerHTML = warnBox(e.message); return; }
+  renderEnergy(d);
+}
+function renderEnergy(d) {
+  const el = $('#energy');
+  const series = Array.isArray(d.series) ? d.series : [];
+  if (!d.ok || !series.length) {
+    el.innerHTML = `<p class="hint">${esc(d.error || 'Ingen energihistorik ännu.')}</p>`;
+    return;
+  }
+  const by = {};
+  series.forEach(s => { by[s.key] = s; });
+  const base = series[0].points || [];
+  const N = base.length, CW = 10, H = 100;
+  const val = (k, i) => {
+    const s = by[k]; const p = s && s.points ? s.points[i] : null;
+    return p && typeof p.kwh === 'number' ? p.kwh : 0;
+  };
+  const prod = i => val('heating', i) + val('hotwater', i);
+  const max = Math.max(0.1, ...base.map((_, i) => Math.max(prod(i), val('used', i))));
+  const sc = v => (v / max) * (H - 12);
+  const twoBars = !!by.used && (by.heating || by.hotwater);
+  let grid = '', bars = '';
+  [0, 0.5, 1].forEach(f => {
+    const y = (H - 12) * (1 - f) + 12;
+    grid += `<line class="${f === 0 ? 'ax' : 'grid'}" x1="0" y1="${y.toFixed(1)}"
+              x2="${N * CW}" y2="${y.toFixed(1)}"/>`;
+  });
+  base.forEach((p, i) => {
+    const x = i * CW;
+    const w = twoBars ? 4 : CW - 2;
+    let y = H;
+    ['heating', 'hotwater'].forEach(k => {
+      const v = val(k, i); if (!by[k] || v <= 0) return;
+      const h = sc(v); y -= h;
+      bars += `<rect class="en-${k}" x="${x + 1}" y="${y.toFixed(1)}" width="${w}"
+                height="${h.toFixed(1)}"><title>${esc(p.label + ' · ' + by[k].title + ' ' +
+                num(v, 1) + ' kWh')}</title></rect>`;
+    });
+    if (by.used && val('used', i) > 0) {
+      const v = val('used', i), h = sc(v);
+      bars += `<rect class="en-used" x="${x + (twoBars ? 5 : 1)}" y="${(H - h).toFixed(1)}"
+                width="${w}" height="${h.toFixed(1)}"><title>${esc(p.label + ' · ' +
+                by.used.title + ' ' + num(v, 1) + ' kWh')}</title></rect>`;
+    }
+  });
+  const hourly = d.bucket === 'hour';
+  const step = hourly ? 6 : (N > 10 ? 5 : 1);
+  const cols = `grid-template-columns:repeat(${N},1fr)`;
+  const labels = base.map((p, i) => {
+    if (i % step) return '';
+    const dt = new Date(p.start * 1000);
+    const t = hourly ? hh(dt) : (N > 10 ? `${dt.getDate()}/${dt.getMonth() + 1}` : dayWord(dt));
+    return `<span style="grid-column:${i + 1}">${esc(t)}</span>`;
+  }).join('');
+  const legend = EN_ORDER.filter(k => by[k]).map(k =>
+    `<span><i class="en-${k}"></i>${esc(by[k].title)} <b>${num(by[k].total, 1)}</b> kWh</span>`).join('');
+  const cop = by.used && by.used.total > 0 && (by.heating || by.hotwater)
+    ? ((by.heating ? by.heating.total : 0) + (by.hotwater ? by.hotwater.total : 0)) / by.used.total
+    : null;
+  el.innerHTML = `<div class="barwrap">
+      <div class="yax"><span>${num(max, 1)}</span><span>${num(max / 2, 1)}</span><span>0</span></div>
+      <div class="col">
+        <svg class="bars" viewBox="0 0 ${N * CW} ${H}" preserveAspectRatio="none"
+          role="img" aria-label="Energi i kWh per ${hourly ? 'timme' : 'dygn'}">${grid}${bars}</svg>
+        <div class="axrow" style="${cols}">${labels}</div>
+      </div></div>
+    <div class="enleg">${legend}</div>
+    <p class="hint">kWh per ${hourly ? 'timme, senaste dygnet' : 'dygn'}, räknat ur pumpens egna
+      energiräknare.${cop ? ' Producerad värme delat med förbrukad el blir <b>' + num(cop, 1) +
+      '</b> för perioden.' : ''} Luckor betyder att appen inte var igång.</p>`;
+}
+$$('[data-ep]').forEach(b => b.onclick = () => {
+  enPeriod = b.dataset.ep;
+  $$('[data-ep]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  loadEnergy();
+});
+
 $$('[data-h]').forEach(b => b.onclick = () => {
   histHours = +b.dataset.h;
   $$('[data-h]').forEach(x => x.setAttribute('aria-pressed', x === b));
@@ -2997,7 +3119,7 @@ ONSHOW.heat = () => {
   loadAutotune();
 };
 ONSHOW.price = () => loadSpot();
-ONSHOW.hist = drawHistory;
+ONSHOW.hist = () => { drawHistory(); loadEnergy(); };
 ONSHOW.set = () => { loadSettings(); loadLog(); loadBackups(); };
 ONSHOW.water = () => {
   if (!$('#setWater').querySelector('.setrow')) loadSettings();
@@ -3030,7 +3152,7 @@ addEventListener('resize', () => {
 });
 
 setInterval(tick, 30000);
-setInterval(() => { if (current === 'hist') drawHistory(); }, 300000);
+setInterval(() => { if (current === 'hist') { drawHistory(); loadEnergy(); } }, 300000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { refresh(); loadAlarms(); loadHeating(true); }
 });

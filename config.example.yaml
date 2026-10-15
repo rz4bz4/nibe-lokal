@@ -130,8 +130,10 @@ listen: "127.0.0.1"   # "0.0.0.0" to reach it from a phone on the same network
 listen_port: 8377
 
 # Modbus has no authentication, and neither does this app unless you set a
-# token here. Anyone who can reach the port can change settings. Send it as an
+# token here. Anyone who can reach the port can change settings. With a token
+# set, every /api/ request needs it: Authorization: Bearer <token>, an
 # X-Auth-Token header, or once as ?token=... which the browser then remembers.
+# NIBE_LOKAL_TOKEN in the environment takes precedence over this key.
 auth_token: ""
 
 # The app only answers requests whose Host header is localhost, the bind

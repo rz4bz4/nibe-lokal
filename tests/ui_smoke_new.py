@@ -273,6 +273,27 @@ def history(address: int, hours: int) -> list:
     return pts
 
 
+def energy(mode: str, period: str) -> dict:
+    """/api/energy: tre serier i fullt lage, ingen historik i "off"."""
+    hourly = period == "day"
+    n = 24 if hourly else (7 if period == "week" else 30)
+    width = 3600 if hourly else 86400
+    if mode == "off":
+        return {"ok": False, "period": period, "bucket": "hour" if hourly else "day",
+                "series": [], "error": "Ingen energihistorik ännu."}
+    series = []
+    for key, title, base in (("heating", "Värme", 30.0), ("hotwater", "Varmvatten", 6.0),
+                             ("used", "Förbrukad el", 11.0)):
+        scale = base / (24 if hourly else 1)
+        pts = [{"start": int(NOW - (n - 1 - i) * width), "label": str(i),
+                "kwh": None if i == 2 else round(scale * (1 + 0.3 * math.sin(i)), 2)}
+               for i in range(n)]
+        series.append({"key": key, "address": 0, "title": title, "unit": "kWh",
+                       "total": round(sum(p["kwh"] or 0 for p in pts), 2), "points": pts})
+    return {"ok": True, "period": period, "bucket": "hour" if hourly else "day",
+            "series": series}
+
+
 def hour_iso(dt: datetime) -> str:
     return dt.replace(minute=0, second=0, microsecond=0).astimezone().isoformat()
 
@@ -597,6 +618,9 @@ class Stub(SimpleHTTPRequestHandler):
                 # Pollern gar; svaret ska darfor vara farskt varje gang och
                 # inte aldras genom testkorningen -- "4 min sedan" i rubriken
                 # ar en egenskap hos stubben, inte hos appen.
+                "app_version": "9.9.9",
+                "device": {"vendor": "NIBE", "product": pump.profile.model,
+                           "revision": "1234"},
                 "polled_at": int(time.time() - 20),
                 "poll_error": None,
                 "store_error": None,
@@ -674,6 +698,8 @@ class Stub(SimpleHTTPRequestHandler):
             return self._json(alarms(m))
         if path == "/api/autotune":
             return self._json(autotune(m))
+        if path == "/api/energy":
+            return self._json(energy(m, q.get("period", ["week"])[0]))
         return self._json({"error": "not found"}, 404)
 
 
@@ -974,6 +1000,14 @@ def drive(page, mode: str, label: str, out: pathlib.Path, url: str):
             check(vis("#alarmBanner"), "larmet syns aven pa fliken %s" % tab)
             check("larm" in page.locator("#freshness").inner_text().lower(),
                   "rubrikraden sager larm pa %s, inte 'live'" % tab)
+        # Historikfliken ar den sista i slingan ovan: energikortet har laddats.
+        check(page.locator("#energy svg.bars rect.en-heating").count() > 0,
+              "energikortet ritar staplar")
+        check(page.locator("#energy .enleg span").count() == 3,
+              "energikortet har en forklaring per serie")
+        ver = page.locator("#verNote").text_content() or ""
+        check("9.9.9" in ver and "1234" in ver,
+              "sidfoten visar appens och pumpens version (%r)" % ver)
         page.locator('nav button[data-view="now"]').click()
         page.wait_for_timeout(600)
     else:
