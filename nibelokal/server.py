@@ -28,6 +28,7 @@ from .safety import Refused, tier
 from .spot import Plan, Tibber
 from .store import Poller, Store
 from .weather import Weather
+from .thermostat import Thermostat
 
 log = logging.getLogger("nibelokal.server")
 
@@ -403,6 +404,12 @@ class Handler(BaseHTTPRequestHandler):
             body.update(self._summaries())
             return self._json(body)
 
+        if path == "/api/thermostat":
+            t = self.ctx.get("thermostat")
+            if t is None:
+                return self._json(_not_started("Termostaten", self._provider_error("thermostat")))
+            return self._json(t.as_dict())
+
         if path == "/api/heating":
             return self._json(advisor.diagnose(pump, store, self.ctx["emitters"]))
 
@@ -718,6 +725,16 @@ class Handler(BaseHTTPRequestHandler):
         store: Store = self.ctx["store"]
         path = route.path
 
+        if path == "/api/thermostat":
+            t = self.ctx.get("thermostat")
+            if t is None:
+                return self._json(_not_started("Termostaten", self._provider_error("thermostat")))
+            enabled = _flag(body["enabled"]) if "enabled" in body else None
+            target = body.get("target")
+            t.configure(enabled=enabled, target=float(target) if target is not None else None)
+            time.sleep(0.5)
+            return self._json(t.as_dict())
+
         if path == "/api/hotwater":
             result = pump.extra_hot_water(
                 _field_int(body, "minutes", 180),
@@ -892,6 +909,16 @@ def serve(pump, cfg: dict, base: str, listen: str, port: int) -> int:
 
     Handler.ctx = build_context(pump, cfg, base, store, poller, providers,
                                 allowed, backup_dir)
+    # Termostaten: egen tråd, eget fel. Startar den inte är det bara den
+    # funktionen som saknas -- appen som värmer huset går vidare.
+    try:
+        thermo = Thermostat(pump, store, cfg)
+        thermo.start()
+        Handler.ctx["thermostat"] = thermo
+    except Exception as exc:                              # noqa: BLE001
+        Handler.ctx["thermostat"] = None
+        Handler.ctx["provider_errors"]["thermostat"] = str(exc)
+        log.warning("thermostat not available: %s", exc)
 
     # Kall-IP-mur: svara bara hostar pa hemma-LAN:et. Allt annat -- Funnel,
     # tailnet, WAN -- stangs innan en enda HTTP-rad har lasts. Natlistan kommer

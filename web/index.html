@@ -193,6 +193,18 @@ select{background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
   background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
 input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 
+/* termostat */
+#thChart .area{fill:url(#thg)}
+#thChart .tgt{stroke:var(--warm);stroke-width:1.4;stroke-dasharray:5 4}
+#thChart .tgt-t{fill:var(--warm)}
+#thChart .oc{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3}
+#thChart .oc-t{fill:var(--ink-2);font-weight:640}
+.thlog{display:grid;gap:8px}
+.thlog .it{border-left:3px solid var(--line-2);padding:2px 0 2px 10px}
+.thlog .it.ch{border-left-color:var(--accent)}
+.thlog .it .w{font-size:11.5px;color:var(--muted)}
+.thlog .it .t{font-size:13.5px;line-height:1.45}
+
 /* stepper */
 .stepper{display:flex;align-items:stretch;gap:10px}
 .stepper button{flex:0 0 62px;font-size:25px;font-weight:400;padding:0;line-height:1}
@@ -604,6 +616,39 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
   </div>
 </section>
 
+<!-- ===================== TERMOSTAT =====================
+     Pumpen har ingen rumsgivare. Termostaten läser huset (Homey-givarna, annars
+     frånluften) och stegar värmeoffset mot målet -- ett steg i taget, med paus
+     emellan. Logiken bor i nibelokal/thermostat.py; här visas den och styrs. -->
+<section class="view" id="v-thermo">
+  <div class="card">
+    <h2>Håll temperaturen</h2>
+    <div id="thBody"><div class="skel" style="width:62%"></div><div class="skel" style="width:84%"></div></div>
+    <div class="stepper" style="margin-top:14px">
+      <button id="thDown" aria-label="Sänk målet">−</button>
+      <div class="stepval"><div class="k">Mål inne</div><div class="v" id="thTarget">–</div></div>
+      <button id="thUp" aria-label="Höj målet">+</button>
+    </div>
+    <div class="row" style="margin-top:11px"><button id="thToggle">–</button></div>
+    <p class="hint" id="thHow"></p>
+  </div>
+  <div class="card">
+    <h2>Senaste två dygnen</h2>
+    <svg class="chart" id="thChart">
+      <defs><linearGradient id="thg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent)" stop-opacity=".22"/>
+        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+      </linearGradient></defs>
+    </svg>
+    <p class="hint">Linjen är temperaturen inne. Den streckade orange linjen är målet, de grå
+      strecken är byten av värmeoffset med det nya värdet ovanför.</p>
+  </div>
+  <div class="card">
+    <h2>Vad termostaten gjort</h2>
+    <div id="thLog" class="thlog"></div>
+  </div>
+</section>
+
 <!-- ===================== ELPRIS ===================== -->
 <section class="view" id="v-price">
   <div class="card" id="spotCard">
@@ -747,6 +792,7 @@ ul.miss{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px;line-
 <nav><div class="in" id="navIn">
   <button data-view="now" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Just nu</button>
   <button data-view="heat"><svg viewBox="0 0 24 24"><path d="M14 14.76V4a2 2 0 1 0-4 0v10.76a4 4 0 1 0 4 0z"/></svg>Värme</button>
+  <button data-view="thermo"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 13l3.5-3.5"/><path d="M12 2v3"/></svg>Termostat</button>
   <button data-view="price" hidden><svg viewBox="0 0 24 24"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/></svg>Elpris</button>
   <button data-view="water"><svg viewBox="0 0 24 24"><path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/></svg>Vatten &amp; luft</button>
   <button data-view="hist"><svg viewBox="0 0 24 24"><path d="M3 18l5-6 4 3 5-8 4 5"/></svg>Historik</button>
@@ -1020,7 +1066,7 @@ const badBox = m => `<div class="warn bad">${esc(m)}</div>`;
    3000 px lång Värme-flik. Ventilationen delar flik med varmvattnet: den var
    ett kort och en halv skärm tomrum. */
 const TITLES = {now:'Just nu', heat:'Värme', price:'Elpris', water:'Vatten & luft',
-                hist:'Historik', set:'Inställningar'};
+                thermo:'Termostat', hist:'Historik', set:'Inställningar'};
 const ONSHOW = {};
 let current = 'now';
 
@@ -2988,7 +3034,101 @@ function tick() {
   if (now >= DUE.weather) loadWeather();
   if (now >= DUE.spot || h !== spotHour) { spotHour = h; loadSpot(); }
   if (current === 'heat' && now >= DUE.autotune) loadAutotune();
+  if (current === 'thermo') loadThermo();
 }
+
+/* ---------------- termostat ---------------- */
+let thermo = null;
+const TH_ACT = {hojde: 'Höjde offset', sankte: 'Sänkte offset', manuell: 'Ändrad utanför termostaten',
+                pa: 'Påslagen', av: 'Avstängd', mal: 'Nytt mål'};
+const sgn = v => (v > 0 ? '+' : '') + v;
+
+async function loadThermo() {
+  let d;
+  try { d = await api('/api/thermostat'); }
+  catch (e) { $('#thBody').innerHTML = warnBox('Når inte termostaten: ' + e.message); return; }
+  if (!d || d.ok === false) {
+    $('#thBody').innerHTML = warnBox((d && d.error) || 'Termostaten är inte igång.');
+    return;
+  }
+  thermo = d;
+  renderThermo(d);
+}
+
+function renderThermo(d) {
+  const src = d.source === 'givare' ? 'givarna i huset' :
+              d.source === 'frånluft' ? 'frånluften (BT20), givarna har inte svarat' : 'ingenting än';
+  const st = d.status || {};
+  const bad = st.state === 'fel' || st.state === 'ingen_matning';
+  $('#thBody').innerHTML = `
+    <div class="zones">
+      <div class="zone"><div class="k">Inne nu</div>
+        <div class="v">${d.indoor == null ? '–' : one(d.indoor) + unit('°C')}</div></div>
+      <div class="zone"><div class="k">Värmeoffset</div>
+        <div class="v">${d.offset == null ? '–' : sgn(d.offset)}</div></div>
+      <div class="zone"><div class="k">Trend</div>
+        <div class="v">${d.slope == null ? '–' : (d.slope > 0 ? '+' : '') + num(d.slope, 2) + unit('°C/h')}</div></div>
+    </div>
+    <div class="sub">Mäter på ${esc(src)}.</div>` +
+    (bad ? badBox(st.text || '') : `<p class="lead" style="margin:10px 0 0">${esc(st.text || '')}</p>`);
+  $('#thTarget').innerHTML = one(d.target) + unit('°C');
+  const tg = $('#thToggle');
+  tg.textContent = d.enabled ? 'Stäng av termostaten' : 'Slå på termostaten';
+  tg.classList.toggle('primary', !d.enabled);
+  $('#thHow').textContent =
+    `Termostaten flyttar värmeoffset ett steg i taget, högst ett steg var ${num(d.hold_hours, 0)}:e timme, ` +
+    `och håller den mellan ${sgn(d.offset_min)} och ${sgn(d.offset_max)}. Inom ±${num(d.deadband, 1)} °C ` +
+    `från målet gör den ingenting, och över 17 °C ute vilar den. Ändrar du offset själv ` +
+    `respekterar den det och väntar innan nästa steg.`;
+  drawThermo(d);
+  const log = d.log || [];
+  $('#thLog').innerHTML = log.length ? log.slice(0, 20).map(r => {
+    const when = new Date(r.ts * 1000).toLocaleString('sv-SE',
+      {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    const ch = r.before != null && r.after != null && r.before !== r.after;
+    return `<div class="it ${ch ? 'ch' : ''}"><div class="w">${esc(when)} · ${esc(TH_ACT[r.action] || r.action)}` +
+      (ch ? ` ${sgn(r.before)} → ${sgn(r.after)}` : '') + `</div><div class="t">${esc(r.reason || '')}</div></div>`;
+  }).join('') : '<p class="hint">Inget än. Här syns varje ändring termostaten gör, och varför.</p>';
+}
+
+function drawThermo(d) {
+  const s = d.series || {};
+  const pts = (s.indoor && s.indoor.length >= 4) ? s.indoor : (s.exhaust || []);
+  linePlot($('#thChart'), pts, {
+    empty: 'Ingen inomhusdata de senaste två dygnen.',
+    extra: box => {
+      const clampY = v => Math.max(box.T, Math.min(box.H - box.B, box.Y(v)));
+      const ty = clampY(d.target);
+      let out = `<line class="tgt" x1="${box.P}" y1="${ty}" x2="${box.W - 10}" y2="${ty}"/>
+        <text class="tgt-t" x="${box.W - 12}" y="${ty - 4}" text-anchor="end">mål ${esc(one(d.target))}</text>`;
+      for (const [t, a] of (s.offset_writes || [])) {
+        if (t < box.x0 || t > box.x1 || a == null || a === 'None') continue;
+        const x = box.X(t);
+        out += `<line class="oc" x1="${x}" y1="${box.T}" x2="${x}" y2="${box.H - box.B}"/>
+          <text class="oc-t" x="${x + 3}" y="${box.T + 9}">${esc(sgn(Number(a)))}</text>`;
+      }
+      return out;
+    },
+  });
+}
+
+async function thSet(body, button) {
+  if (!thermo) return;
+  button.disabled = true;
+  try {
+    const d = await post('/api/thermostat', body);
+    thermo = d;
+    renderThermo(d);
+    if ('enabled' in body) toast(d.enabled ? 'Termostaten är på.' : 'Termostaten är avstängd.');
+  } catch (e) {
+    toast(e.message, false);
+  } finally {
+    button.disabled = false;
+  }
+}
+$('#thUp').onclick = e => thermo && thSet({target: thermo.target + 0.5}, e.currentTarget);
+$('#thDown').onclick = e => thermo && thSet({target: thermo.target - 0.5}, e.currentTarget);
+$('#thToggle').onclick = e => thermo && thSet({enabled: !thermo.enabled}, e.currentTarget);
 
 /* ================= start ================= */
 ONSHOW.heat = () => {
@@ -2997,6 +3137,7 @@ ONSHOW.heat = () => {
   loadAutotune();
 };
 ONSHOW.price = () => loadSpot();
+ONSHOW.thermo = loadThermo;
 ONSHOW.hist = drawHistory;
 ONSHOW.set = () => { loadSettings(); loadLog(); loadBackups(); };
 ONSHOW.water = () => {

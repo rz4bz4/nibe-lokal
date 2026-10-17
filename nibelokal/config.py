@@ -120,6 +120,17 @@ DEFAULTS = {
     # outdoor temperature, so it needs an indoor source: in practice Homey.
     "autotune_target_indoor": "",  # the temperature the house should hold
     "autotune_days": 30,           # how much history the analysis looks at
+
+    # Termostat -- nibelokal/thermostat.py. Stegar värmeoffset (40031) mot ett
+    # inomhusmål, ett steg i taget. Målet och på/av sparas i databasen när de
+    # ändras i appen; värdena här gäller bara första start.
+    "thermostat_enabled": False,
+    "thermostat_target": 21.0,
+    "thermostat_deadband": 0.3,
+    "thermostat_hold_hours": 4.0,
+    "thermostat_offset_min": -2,
+    "thermostat_offset_max": 4,
+    "thermostat_window_minutes": 60.0,
 }
 
 # Keys the app can run without. A typo in one of them must not stop the pump
@@ -138,12 +149,16 @@ OPTIONAL_KEYS = {
     "spot_min_spread", "spot_cheap_rank", "spot_expensive_rank",
     "spot_max_offset", "spot_max_pairs",
     "autotune_target_indoor", "autotune_days",
+    "thermostat_enabled", "thermostat_target", "thermostat_deadband",
+    "thermostat_hold_hours", "thermostat_offset_min", "thermostat_offset_max",
+    "thermostat_window_minutes",
 }
 
 INT_KEYS = {"port", "unit", "listen_port", "poll_seconds", "history_days",
             "alarm_retry_seconds", "alarm_expire_seconds",
             "alarm_debounce_seconds",
-            "spot_max_offset", "spot_max_pairs", "autotune_days"}
+            "spot_max_offset", "spot_max_pairs", "autotune_days",
+            "thermostat_offset_min", "thermostat_offset_max"}
 # weather_lat, weather_lon and autotune_target_indoor default to "" rather than
 # to a number: "" is how "not set" is spelled, and every module that reads them
 # treats an unparseable value as absent.
@@ -153,9 +168,12 @@ FLOAT_KEYS = {"timeout", "auto_backup_hours",
               "weather_timeout",
               "spot_timeout", "spot_cache_seconds", "spot_min_spread",
               "spot_cheap_rank", "spot_expensive_rank",
-              "autotune_target_indoor"}
+              "autotune_target_indoor",
+              "thermostat_target", "thermostat_deadband", "thermostat_hold_hours",
+              "thermostat_window_minutes"}
 BOOL_KEYS = {"allow_guarded_writes", "allow_any_host",
-             "alarm_notify", "alarm_emergency_priority"}
+             "alarm_notify", "alarm_emergency_priority",
+             "thermostat_enabled"}
 
 
 def _coerce(key: str, value):
